@@ -101,11 +101,22 @@ export abstract class BaseAuthOIDCRoute<U extends User, A extends Alias, P exten
                 throw new Error("userUtils is not set.");
             }
 
-            // `profile.id` (the provider's external identifier) is never itself persisted anywhere
-            // lookup-able — only the verified email alias created below survives across logins — so a
-            // returning user can only be recognized by that email. Without a verified email there is no
-            // way to recognize a returning user and a new account is created on every login.
-            let user: U | undefined = await this.userUtils.lookup(profile.email ?? profile.id);
+            // The provider-scoped external id (`<provider>:<id>`) is the most reliable way to recognize
+            // a returning user across logins — unlike email, it doesn't depend on the provider actually
+            // returning a (verified) email address, it can't collide with another provider's namespace,
+            // and it can't change if the user updates their email with the provider.
+            const oauthAlias: string = `${profile.provider}:${profile.id}`;
+
+            let user: U | undefined = await this.userUtils.lookup(oauthAlias);
+            const foundByOAuthAlias: boolean = user !== undefined;
+
+            // Fall back to the (verified) email alias — this recognizes an account that either
+            // registered before this provider-id lookup existed, or was created via another method
+            // (e.g. password) and is now authenticating with this provider for the first time.
+            if (!user) {
+                user = await this.userUtils.lookup(profile.email ?? profile.id);
+            }
+
             if (!user) {
                 // Create a new user for the given profile
                 const newUser: User = {
@@ -175,6 +186,24 @@ export abstract class BaseAuthOIDCRoute<U extends User, A extends Alias, P exten
                 }
                 await this.profileRepo.create(newProfile as P, { ignoreACL: true });
             }
+
+            // Persist the provider-scoped alias so this user is recognized by it on future logins,
+            // regardless of how they were resolved above. Skipped when that's exactly how `user` was
+            // just found, since the alias is already there.
+            if (!foundByOAuthAlias) {
+                const newOAuthAlias: Alias = {
+                    alias: oauthAlias,
+                    type: AliasType.OAUTH,
+                    userUid: user.uid,
+                    verified: true,
+                    uid: uuid.v4(),
+                    dateCreated: new Date(),
+                    dateModified: new Date(),
+                    version: 0,
+                };
+                await this.aliasRepo.create(newOAuthAlias as A, { ignoreACL: true });
+            }
+
             return user;
         };
         const strategy: OIDCStrategy = await this.objectFactory.newInstance(OIDCStrategy, {

@@ -33,6 +33,8 @@ import { UserMongo } from "../../../src/models/mongo/UserMongo.js";
 import { MongoMemoryServer } from "mongodb-memory-server";
 import { AliasMongo } from "../../../src/models/mongo/AliasMongo.js";
 import { ProfileMongo } from "../../../src/models/mongo/ProfileMongo.js";
+import { AliasType } from "../../../src/models/types.js";
+import * as uuid from "uuid";
 
 const mockPost = axios.post as unknown as ReturnType<typeof vi.fn>;
 const mockGet = axios.get as unknown as ReturnType<typeof vi.fn>;
@@ -161,7 +163,8 @@ describe("Route:AuthOIDCMongo Tests", () => {
             }),
         );
 
-        // A new user, profile and verified email alias should have been provisioned.
+        // A new user, profile, verified email alias, and provider-scoped oauth alias should have been
+        // provisioned.
         const users = await userRepo.find({}).toArray();
         expect(users.length).toBe(1);
         const profiles = await profileRepo.find({}).toArray();
@@ -169,9 +172,14 @@ describe("Route:AuthOIDCMongo Tests", () => {
         expect(profiles[0].givenName).toBe("Test");
         expect(profiles[0].familyName).toBe("User");
         const aliases = await aliasRepo.find({}).toArray();
-        expect(aliases.length).toBe(1);
-        expect(aliases[0].alias).toBe("test@example.com");
-        expect(aliases[0].verified).toBe(true);
+        expect(aliases.length).toBe(2);
+        const emailAlias = aliases.find((a) => a.type === AliasType.EMAIL);
+        expect(emailAlias?.alias).toBe("test@example.com");
+        expect(emailAlias?.verified).toBe(true);
+        const oauthAlias = aliases.find((a) => a.type === AliasType.OAUTH);
+        expect(oauthAlias?.alias).toBe("test:ext-user-1");
+        expect(oauthAlias?.verified).toBe(true);
+        expect(oauthAlias?.userUid).toBe(users[0].uid);
     });
 
     it("Can complete the OIDC callback for a returning user without creating a duplicate.", async () => {
@@ -200,6 +208,95 @@ describe("Route:AuthOIDCMongo Tests", () => {
 
         const users = await userRepo.find({}).toArray();
         expect(users.length).toBe(1);
+
+        // The provider-scoped alias should have been created once on the first login and not
+        // duplicated on the second.
+        const oauthAliases = (await aliasRepo.find({}).toArray()).filter((a) => a.type === AliasType.OAUTH);
+        expect(oauthAliases.length).toBe(1);
+        expect(oauthAliases[0].alias).toBe("test:ext-user-2");
+        expect(oauthAliases[0].userUid).toBe(users[0].uid);
+    });
+
+    it("Can recognize a returning user by provider id alone when no verified email is returned.", async () => {
+        // First login: the provider returns no email at all, so the only durable link back to this
+        // user is the provider-scoped oauth alias.
+        const first = agent(server.getApplication());
+        const beginResult1 = await first.get(baseUrl);
+        const state1: string = extractState(beginResult1.headers["location"]);
+        mockPost.mockResolvedValue({
+            status: 200,
+            data: { access_token: "test-access-token", token_type: "Bearer", expires_in: 3600 },
+        });
+        mockGet.mockResolvedValue({
+            status: 200,
+            data: { id: "ext-user-no-email", username: "noemail" },
+        });
+        await first.get(`${baseUrl}?code=auth-code-1&state=${encodeURIComponent(state1)}`);
+
+        const usersAfterFirst = await userRepo.find({}).toArray();
+        expect(usersAfterFirst.length).toBe(1);
+        const aliasesAfterFirst = await aliasRepo.find({}).toArray();
+        expect(aliasesAfterFirst.length).toBe(1);
+        expect(aliasesAfterFirst[0].type).toBe(AliasType.OAUTH);
+        expect(aliasesAfterFirst[0].alias).toBe("test:ext-user-no-email");
+
+        // Second login, still no email — should resolve to the same user via the oauth alias rather
+        // than provisioning a new one.
+        const second = agent(server.getApplication());
+        const beginResult2 = await second.get(baseUrl);
+        const state2: string = extractState(beginResult2.headers["location"]);
+        const result = await second.get(`${baseUrl}?code=auth-code-2&state=${encodeURIComponent(state2)}`);
+
+        expect(result.status).toBeGreaterThanOrEqual(200);
+        expect(result.status).toBeLessThan(300);
+        expect(result.body.user.uid).toBe(usersAfterFirst[0].uid);
+
+        const usersAfterSecond = await userRepo.find({}).toArray();
+        expect(usersAfterSecond.length).toBe(1);
+    });
+
+    it("Links the provider id alias to an existing account found via the email fallback.", async () => {
+        // Simulate an account that predates the oauth alias, or was created via another method,
+        // recognizable only by its verified email.
+        const existingUser = await userRepo.save(
+            new UserMongo({ uid: uuid.v4(), roles: [], scopes: [], verified: true }),
+        );
+        await aliasRepo.save(
+            new AliasMongo({
+                uid: uuid.v4(),
+                alias: "legacy@example.com",
+                type: AliasType.EMAIL,
+                userUid: existingUser.uid,
+                verified: true,
+            }),
+        );
+
+        const client = agent(server.getApplication());
+        const beginResult = await client.get(baseUrl);
+        const state: string = extractState(beginResult.headers["location"]);
+        mockPost.mockResolvedValue({
+            status: 200,
+            data: { access_token: "test-access-token", token_type: "Bearer", expires_in: 3600 },
+        });
+        mockGet.mockResolvedValue({
+            status: 200,
+            data: { id: "ext-user-legacy", username: "legacy", email: "legacy@example.com", verified: true },
+        });
+
+        const result = await client.get(`${baseUrl}?code=auth-code-1&state=${encodeURIComponent(state)}`);
+
+        expect(result.status).toBeGreaterThanOrEqual(200);
+        expect(result.status).toBeLessThan(300);
+        expect(result.body.user.uid).toBe(existingUser.uid);
+
+        // No duplicate user should have been created, and the provider-scoped alias should now be
+        // linked to the existing account for future logins.
+        const users = await userRepo.find({}).toArray();
+        expect(users.length).toBe(1);
+        const oauthAlias = (await aliasRepo.find({}).toArray()).find((a) => a.type === AliasType.OAUTH);
+        expect(oauthAlias).toBeDefined();
+        expect(oauthAlias?.alias).toBe("test:ext-user-legacy");
+        expect(oauthAlias?.userUid).toBe(existingUser.uid);
     });
 
     it("Rejects the callback when the state parameter does not match the session (CSRF).", async () => {

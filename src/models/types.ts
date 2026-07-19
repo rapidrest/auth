@@ -27,6 +27,7 @@ export interface User extends BaseEntity, JWTUser {}
 export enum AliasType {
     EMAIL = "email",
     NAME = "name",
+    OAUTH = "oauth",
     PHONE = "phone",
 }
 
