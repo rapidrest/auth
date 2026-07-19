@@ -73,8 +73,41 @@ export interface StoredPasskeyCredential {
 }
 
 /**
- * Describes a secret used for TOTP authentication.
+ * The HMAC hash algorithms supported for TOTP token generation, per RFC 6238 §1.2.
+ */
+export type TOTPAlgorithm = "sha1" | "sha256" | "sha512";
+
+/**
+ * Configuration for a TOTP (RFC 6238) issuer. Used both to generate the `otpauth://` provisioning
+ * URI (the "Key URI Format" companion convention supported by virtually every TOTP authenticator
+ * app, e.g. Google Authenticator/Authy/1Password) for enrolling a new secret, and as the default
+ * token parameters for newly registered secrets.
+ */
+export interface TOTPConfig {
+    /** The human-readable name of the issuing service, shown to the user by the authenticator app. */
+    issuer: string;
+    /** The number of digits each generated token contains. Default is `6`. */
+    digits?: number;
+    /** The time step, in seconds, that each generated token remains valid for. Default is `30`. */
+    period?: number;
+    /**
+     * The HMAC hash algorithm used to generate tokens. Default is `"sha1"` — the only algorithm
+     * universally supported by authenticator apps despite RFC 6238 permitting SHA-256/SHA-512.
+     */
+    algorithm?: TOTPAlgorithm;
+}
+
+/**
+ * Describes a secret used for TOTP authentication. The `digits`/`period`/`algorithm` parameters are
+ * captured at registration time (rather than always deferring to the current `TOTPConfig`) so a
+ * secret keeps verifying correctly even if the relying party's configured defaults change later.
  */
 export interface TOTPSecret {
     secret: string;
+    /** The number of digits the associated token contains, if it differs from the library default. */
+    digits?: number;
+    /** The time step, in seconds, that the associated token remains valid for, if it differs from the library default. */
+    period?: number;
+    /** The HMAC hash algorithm used to generate the associated token, if it differs from the library default. */
+    algorithm?: TOTPAlgorithm;
 }

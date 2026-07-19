@@ -2,7 +2,14 @@
 // Copyright (C) 2026 Jean-Philippe Steinmetz
 ////////////////////////////////////////////////////////////////////////////////
 import { HttpRequest } from "@rapidrest/service-core";
-import { OTPContactType, PasskeyConfig, PasskeyTransport, StoredPasskeyCredential, TOTPSecret } from "./types.js";
+import {
+    OTPContactType,
+    PasskeyConfig,
+    PasskeyTransport,
+    StoredPasskeyCredential,
+    TOTPConfig,
+    TOTPSecret,
+} from "./types.js";
 
 const headerSchemeRegExps: Map<string, RegExp> = new Map();
 
@@ -445,6 +452,51 @@ export const verifyTOTP = async function (token: string, secret: TOTPSecret | TO
     }
 
     return undefined;
+};
+
+/**
+ * Determines if the given value is usable as a TOTP secret: a Base32-encoded string decoding to at
+ * least 128 bits, the minimum shared secret length mandated by RFC 4226 §4 (R6) (which RFC 6238
+ * TOTP secrets must also satisfy, per RFC 6238 §5.1).
+ *
+ * @param secret The value to check.
+ */
+export const isValidTOTPSecret = async function (secret: any): Promise<boolean> {
+    if (typeof secret !== "string" || secret.length === 0) {
+        return false;
+    }
+
+    try {
+        const { ScureBase32Plugin } = await importOTPLib();
+        const decoded: Uint8Array = new ScureBase32Plugin().decode(secret);
+        // RFC 4226 §4 (R6): the shared secret MUST be at least 128 bits (16 bytes).
+        return decoded.length >= 16;
+    } catch (err: any) {
+        return false;
+    }
+};
+
+/**
+ * Generates an `otpauth://` provisioning URI for the given TOTP secret — the "Key URI Format"
+ * convention (https://github.com/google/google-authenticator/wiki/Key-Uri-Format) that, while not
+ * itself an RFC, is the de facto standard virtually every TOTP authenticator app (Google
+ * Authenticator, Authy, 1Password, etc.) relies on to enroll a secret via QR code or manual entry.
+ *
+ * @param config The relying party configuration to generate the URI for.
+ * @param label The account label to embed in the URI (typically a username or email).
+ * @param secret The TOTP secret to encode into the URI.
+ */
+export const generateTOTPURI = async function (config: TOTPConfig, label: string, secret: TOTPSecret): Promise<string> {
+    const { generateURI } = await importOTPLib();
+
+    return generateURI({
+        issuer: config.issuer,
+        label,
+        secret: secret.secret,
+        algorithm: secret.algorithm ?? config.algorithm,
+        digits: secret.digits ?? config.digits,
+        period: secret.period ?? config.period,
+    });
 };
 
 ///////////////////////////////////////////////////////////////////////////////

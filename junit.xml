@@ -1,563 +1,595 @@
 <?xml version="1.0" encoding="UTF-8" ?>
-<testsuites name="vitest tests" tests="141" failures="0" errors="0" time="20.8844847">
-    <testsuite name="test/auth/PasskeyStrategy.test.ts" timestamp="2026-07-19T21:43:23.986Z" hostname="Jane" tests="19" failures="0" errors="0" skipped="0" time="0.010848">
-        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Begin (phase 1) &gt; Generates options with no allowCredentials when no uid hint is given." time="0.0029783">
+<testsuites name="vitest tests" tests="149" failures="0" errors="0" time="21.3853048">
+    <testsuite name="test/auth/PasskeyStrategy.test.ts" timestamp="2026-07-19T21:54:39.414Z" hostname="Jane" tests="19" failures="0" errors="0" skipped="0" time="0.0108331">
+        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Begin (phase 1) &gt; Generates options with no allowCredentials when no uid hint is given." time="0.002885">
         </testcase>
-        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Begin (phase 1) &gt; Builds allowCredentials from getCredentials when a uid hint has registered credentials." time="0.0012767">
+        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Begin (phase 1) &gt; Builds allowCredentials from getCredentials when a uid hint has registered credentials." time="0.0012053">
         </testcase>
-        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Begin (phase 1) &gt; Leaves allowCredentials undefined (not an empty array) when a uid hint has zero credentials." time="0.0002684">
+        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Begin (phase 1) &gt; Leaves allowCredentials undefined (not an empty array) when a uid hint has zero credentials." time="0.0002607">
         </testcase>
-        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Begin (phase 1) &gt; Throws if req.session is missing." time="0.0009747">
+        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Begin (phase 1) &gt; Throws if req.session is missing." time="0.0010157">
         </testcase>
-        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Begin (phase 1) &gt; Throws if res is missing." time="0.0002023">
+        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Begin (phase 1) &gt; Throws if res is missing." time="0.0002294">
         </testcase>
-        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Finish (phase 2) &gt; Verifies successfully, updates the counter, clears the session challenge, and returns the AuthResult." time="0.0006765">
+        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Finish (phase 2) &gt; Verifies successfully, updates the counter, clears the session challenge, and returns the AuthResult." time="0.0006363">
         </testcase>
-        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Finish (phase 2) &gt; Throws if req.session is missing." time="0.0002495">
+        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Finish (phase 2) &gt; Throws if req.session is missing." time="0.000252">
         </testcase>
-        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Finish (phase 2) &gt; Throws if there is no challenge stored in the session." time="0.0002113">
+        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Finish (phase 2) &gt; Throws if there is no challenge stored in the session." time="0.0008658">
         </testcase>
-        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Finish (phase 2) &gt; Throws on a malformed response body without calling storage or SimpleWebAuthn." time="0.0007403">
+        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Finish (phase 2) &gt; Throws on a malformed response body without calling storage or SimpleWebAuthn." time="0.0002727">
         </testcase>
-        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Finish (phase 2) &gt; Throws a generic failure on an unknown credential ID without calling verifyAuthenticationResponse." time="0.0002352">
+        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Finish (phase 2) &gt; Throws a generic failure on an unknown credential ID without calling verifyAuthenticationResponse." time="0.0002341">
         </testcase>
-        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Finish (phase 2) &gt; Throws a generic failure when verification resolves verified: false, without updating the counter." time="0.000294">
+        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Finish (phase 2) &gt; Throws a generic failure when verification resolves verified: false, without updating the counter." time="0.000278">
         </testcase>
-        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Finish (phase 2) &gt; Clears the session challenge before verification is attempted, even on failure." time="0.0001691">
+        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Finish (phase 2) &gt; Clears the session challenge before verification is attempted, even on failure." time="0.0001839">
         </testcase>
-        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Finish (phase 2) &gt; Rejects a non-finite stored counter as an invalid credential." time="0.0002134">
+        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Finish (phase 2) &gt; Rejects a non-finite stored counter as an invalid credential." time="0.0002199">
         </testcase>
-        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Finish (phase 2) &gt; Propagates a thrown/rejected verifyAuthenticationResponse error without updating the counter." time="0.0002728">
+        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Finish (phase 2) &gt; Propagates a thrown/rejected verifyAuthenticationResponse error without updating the counter." time="0.0002923">
         </testcase>
-        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Finish (phase 2) &gt; Rejects a non-zero counter that does not exceed the stored counter (cloned authenticator), without updating." time="0.0002457">
+        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Finish (phase 2) &gt; Rejects a non-zero counter that does not exceed the stored counter (cloned authenticator), without updating." time="0.0002126">
         </testcase>
-        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Finish (phase 2) &gt; Accepts a newCounter of 0 despite not exceeding the stored counter (multi-device/backed-up authenticator)." time="0.0002039">
+        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Finish (phase 2) &gt; Accepts a newCounter of 0 despite not exceeding the stored counter (multi-device/backed-up authenticator)." time="0.0001955">
         </testcase>
-        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Finish (phase 2) &gt; Returns undefined (does not throw) when verify() resolves undefined and auth is not required." time="0.0001642">
+        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Finish (phase 2) &gt; Returns undefined (does not throw) when verify() resolves undefined and auth is not required." time="0.0001621">
         </testcase>
-        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Finish (phase 2) &gt; Throws when verify() resolves undefined and auth is required." time="0.0001884">
+        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Finish (phase 2) &gt; Throws when verify() resolves undefined and auth is required." time="0.0001828">
         </testcase>
-        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; authenticateSync throws &apos;Not supported&apos;." time="0.0001812">
-        </testcase>
-    </testsuite>
-    <testsuite name="test/routes/mongo/AliasRoute.test.ts" timestamp="2026-07-19T21:43:23.991Z" hostname="Jane" tests="8" failures="0" errors="0" skipped="0" time="0.9231906">
-        <testcase classname="test/routes/mongo/AliasRoute.test.ts" name="Route:AliasMongo Tests &gt; Can make count request (with admin token)." time="0.018048">
-        </testcase>
-        <testcase classname="test/routes/mongo/AliasRoute.test.ts" name="Route:AliasMongo Tests &gt; Can make create request (with admin token)." time="0.0067335">
-        </testcase>
-        <testcase classname="test/routes/mongo/AliasRoute.test.ts" name="Route:AliasMongo Tests &gt; Can make delete request (with admin token)." time="0.0067397">
-        </testcase>
-        <testcase classname="test/routes/mongo/AliasRoute.test.ts" name="Route:AliasMongo Tests &gt; Can make findAll request (with admin token)." time="0.0068031">
-        </testcase>
-        <testcase classname="test/routes/mongo/AliasRoute.test.ts" name="Route:AliasMongo Tests &gt; Can make findById request (with admin token)." time="0.0040952">
-        </testcase>
-        <testcase classname="test/routes/mongo/AliasRoute.test.ts" name="Route:AliasMongo Tests &gt; Can make truncate request (with admin token)." time="0.0069671">
-        </testcase>
-        <testcase classname="test/routes/mongo/AliasRoute.test.ts" name="Route:AliasMongo Tests &gt; Can make update request (with admin token)." time="0.006955">
-        </testcase>
-        <testcase classname="test/routes/mongo/AliasRoute.test.ts" name="Route:AliasMongo Tests &gt; Can make update property request (with admin token)." time="0.0068907">
+        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; authenticateSync throws &apos;Not supported&apos;." time="0.0001729">
         </testcase>
     </testsuite>
-    <testsuite name="test/routes/mongo/AuthBasicRoute.test.ts" timestamp="2026-07-19T21:43:23.992Z" hostname="Jane" tests="3" failures="0" errors="0" skipped="0" time="1.1035097">
-        <testcase classname="test/routes/mongo/AuthBasicRoute.test.ts" name="Route:AuthBasicMongo Tests &gt; Can authenticate with valid user id and password." time="0.0768521">
+    <testsuite name="test/routes/mongo/AliasRoute.test.ts" timestamp="2026-07-19T21:54:39.418Z" hostname="Jane" tests="8" failures="0" errors="0" skipped="0" time="0.9031776">
+        <testcase classname="test/routes/mongo/AliasRoute.test.ts" name="Route:AliasMongo Tests &gt; Can make count request (with admin token)." time="0.0206703">
         </testcase>
-        <testcase classname="test/routes/mongo/AuthBasicRoute.test.ts" name="Route:AuthBasicMongo Tests &gt; Can authenticate with valid user id and password when multiple passwords exist." time="0.1459979">
+        <testcase classname="test/routes/mongo/AliasRoute.test.ts" name="Route:AliasMongo Tests &gt; Can make create request (with admin token)." time="0.0070573">
         </testcase>
-        <testcase classname="test/routes/mongo/AuthBasicRoute.test.ts" name="Route:AuthBasicMongo Tests &gt; Cannot authenticate with invalid user id and password." time="0.0634162">
-            <system-out>
-2026-07-19T21:42:54.251Z [34mdebug[39m: Invalid name or password
-
-            </system-out>
+        <testcase classname="test/routes/mongo/AliasRoute.test.ts" name="Route:AliasMongo Tests &gt; Can make delete request (with admin token)." time="0.0073575">
+        </testcase>
+        <testcase classname="test/routes/mongo/AliasRoute.test.ts" name="Route:AliasMongo Tests &gt; Can make findAll request (with admin token)." time="0.0078717">
+        </testcase>
+        <testcase classname="test/routes/mongo/AliasRoute.test.ts" name="Route:AliasMongo Tests &gt; Can make findById request (with admin token)." time="0.0048854">
+        </testcase>
+        <testcase classname="test/routes/mongo/AliasRoute.test.ts" name="Route:AliasMongo Tests &gt; Can make truncate request (with admin token)." time="0.0085076">
+        </testcase>
+        <testcase classname="test/routes/mongo/AliasRoute.test.ts" name="Route:AliasMongo Tests &gt; Can make update request (with admin token)." time="0.0079721">
+        </testcase>
+        <testcase classname="test/routes/mongo/AliasRoute.test.ts" name="Route:AliasMongo Tests &gt; Can make update property request (with admin token)." time="0.0084941">
         </testcase>
     </testsuite>
-    <testsuite name="test/routes/mongo/AuthMFARoute.test.ts" timestamp="2026-07-19T21:43:23.992Z" hostname="Jane" tests="5" failures="0" errors="0" skipped="0" time="1.2279568">
-        <testcase classname="test/routes/mongo/AuthMFARoute.test.ts" name="Route:AuthMFAMongo Tests &gt; Returns the list of available 2FA methods after a valid password check." time="0.0840538">
-            <system-out>
-2026-07-19T21:42:46.851Z [34mdebug[39m: Invalid authentication request.
-
-            </system-out>
+    <testsuite name="test/routes/mongo/AuthBasicRoute.test.ts" timestamp="2026-07-19T21:54:39.419Z" hostname="Jane" tests="3" failures="0" errors="0" skipped="0" time="1.1874297">
+        <testcase classname="test/routes/mongo/AuthBasicRoute.test.ts" name="Route:AuthBasicMongo Tests &gt; Can authenticate with valid user id and password." time="0.0768161">
         </testcase>
-        <testcase classname="test/routes/mongo/AuthMFARoute.test.ts" name="Route:AuthMFAMongo Tests &gt; Cannot authenticate phase 1 with an invalid password." time="0.0678411">
-            <system-out>
-2026-07-19T21:42:46.924Z [34mdebug[39m: Invalid authorization request.
-
-            </system-out>
+        <testcase classname="test/routes/mongo/AuthBasicRoute.test.ts" name="Route:AuthBasicMongo Tests &gt; Can authenticate with valid user id and password when multiple passwords exist." time="0.1537949">
         </testcase>
-        <testcase classname="test/routes/mongo/AuthMFARoute.test.ts" name="Route:AuthMFAMongo Tests &gt; Can complete the full 3-phase MFA flow using an OTP contact method." time="0.0886929">
+        <testcase classname="test/routes/mongo/AuthBasicRoute.test.ts" name="Route:AuthBasicMongo Tests &gt; Cannot authenticate with invalid user id and password." time="0.0647383">
             <system-out>
-2026-07-19T21:42:46.989Z [34mdebug[39m: Invalid authentication request.
-
-2026-07-19T21:42:47.008Z [34mdebug[39m: Authentication failed but is required to proceed.
-
-            </system-out>
-        </testcase>
-        <testcase classname="test/routes/mongo/AuthMFARoute.test.ts" name="Route:AuthMFAMongo Tests &gt; Cannot complete phase 3 with an invalid OTP token." time="0.0685544">
-            <system-out>
-2026-07-19T21:42:47.078Z [34mdebug[39m: Invalid authentication request.
-
-2026-07-19T21:42:47.081Z [34mdebug[39m: Authentication failed but is required to proceed.
-
-2026-07-19T21:42:47.082Z [34mdebug[39m: Invalid authentication request.
-
-            </system-out>
-        </testcase>
-        <testcase classname="test/routes/mongo/AuthMFARoute.test.ts" name="Route:AuthMFAMongo Tests &gt; Cannot request a challenge for an unknown method id." time="0.066918">
-            <system-out>
-2026-07-19T21:42:47.146Z [34mdebug[39m: Invalid authentication request.
-
-2026-07-19T21:42:47.149Z [34mdebug[39m: Invalid secondary authentication method.
+2026-07-19T21:54:06.768Z [34mdebug[39m: Invalid name or password
 
             </system-out>
         </testcase>
     </testsuite>
-    <testsuite name="test/routes/mongo/AuthOIDCRoute.test.ts" timestamp="2026-07-19T21:43:23.993Z" hostname="Jane" tests="5" failures="0" errors="0" skipped="0" time="0.9008306">
-        <testcase classname="test/routes/mongo/AuthOIDCRoute.test.ts" name="Route:AuthOIDCMongo Tests &gt; Redirects to the provider&apos;s authorization URL with the expected parameters." time="0.0149474">
+    <testsuite name="test/routes/mongo/AuthMFARoute.test.ts" timestamp="2026-07-19T21:54:39.420Z" hostname="Jane" tests="5" failures="0" errors="0" skipped="0" time="1.2179019">
+        <testcase classname="test/routes/mongo/AuthMFARoute.test.ts" name="Route:AuthMFAMongo Tests &gt; Returns the list of available 2FA methods after a valid password check." time="0.0796073">
             <system-out>
-2026-07-19T21:43:23.560Z [34mdebug[39m: Authentication failed but is required to proceed.
+2026-07-19T21:54:04.099Z [34mdebug[39m: Invalid authentication request.
 
             </system-out>
         </testcase>
-        <testcase classname="test/routes/mongo/AuthOIDCRoute.test.ts" name="Route:AuthOIDCMongo Tests &gt; Can complete the OIDC callback and provision a new user from the provider profile." time="0.0163753">
+        <testcase classname="test/routes/mongo/AuthMFARoute.test.ts" name="Route:AuthMFAMongo Tests &gt; Cannot authenticate phase 1 with an invalid password." time="0.0633677">
             <system-out>
-2026-07-19T21:43:23.567Z [34mdebug[39m: Authentication failed but is required to proceed.
+2026-07-19T21:54:04.167Z [34mdebug[39m: Invalid authorization request.
 
             </system-out>
         </testcase>
-        <testcase classname="test/routes/mongo/AuthOIDCRoute.test.ts" name="Route:AuthOIDCMongo Tests &gt; Can complete the OIDC callback for a returning user without creating a duplicate." time="0.016447">
+        <testcase classname="test/routes/mongo/AuthMFARoute.test.ts" name="Route:AuthMFAMongo Tests &gt; Can complete the full 3-phase MFA flow using an OTP contact method." time="0.0887895">
             <system-out>
-2026-07-19T21:43:23.583Z [34mdebug[39m: Authentication failed but is required to proceed.
+2026-07-19T21:54:04.232Z [34mdebug[39m: Invalid authentication request.
 
-2026-07-19T21:43:23.590Z [34mdebug[39m: Authentication failed but is required to proceed.
+2026-07-19T21:54:04.251Z [34mdebug[39m: Authentication failed but is required to proceed.
 
             </system-out>
         </testcase>
-        <testcase classname="test/routes/mongo/AuthOIDCRoute.test.ts" name="Route:AuthOIDCMongo Tests &gt; Rejects the callback when the state parameter does not match the session (CSRF)." time="0.0037377">
+        <testcase classname="test/routes/mongo/AuthMFARoute.test.ts" name="Route:AuthMFAMongo Tests &gt; Cannot complete phase 3 with an invalid OTP token." time="0.0765424">
             <system-out>
-2026-07-19T21:43:23.599Z [34mdebug[39m: Authentication failed but is required to proceed.
+2026-07-19T21:54:04.329Z [34mdebug[39m: Invalid authentication request.
 
-2026-07-19T21:43:23.600Z [34mdebug[39m: Invalid or missing state parameter. Possible CSRF attempt.
+2026-07-19T21:54:04.332Z [34mdebug[39m: Authentication failed but is required to proceed.
+
+2026-07-19T21:54:04.333Z [34mdebug[39m: Invalid authentication request.
 
             </system-out>
         </testcase>
-        <testcase classname="test/routes/mongo/AuthOIDCRoute.test.ts" name="Route:AuthOIDCMongo Tests &gt; Rejects the callback when the provider reports an error." time="0.0023084">
+        <testcase classname="test/routes/mongo/AuthMFARoute.test.ts" name="Route:AuthMFAMongo Tests &gt; Cannot request a challenge for an unknown method id." time="0.0632006">
             <system-out>
-2026-07-19T21:43:23.603Z [34mdebug[39m: OIDC provider returned an error: access_denied - User+declined
+2026-07-19T21:54:04.394Z [34mdebug[39m: Invalid authentication request.
 
-            </system-out>
-        </testcase>
-    </testsuite>
-    <testsuite name="test/routes/mongo/AuthOTPRoute.test.ts" timestamp="2026-07-19T21:43:23.994Z" hostname="Jane" tests="5" failures="0" errors="0" skipped="0" time="0.9321388">
-        <testcase classname="test/routes/mongo/AuthOTPRoute.test.ts" name="Route:AuthOTPMongo Tests &gt; Can request and verify an OTP challenge sent to a verified contact." time="0.0407534">
-            <system-out>
-2026-07-19T21:43:11.220Z [34mdebug[39m: Authentication failed but is required to proceed.
-
-            </system-out>
-        </testcase>
-        <testcase classname="test/routes/mongo/AuthOTPRoute.test.ts" name="Route:AuthOTPMongo Tests &gt; Cannot verify an OTP challenge with an invalid token." time="0.0065917">
-            <system-out>
-2026-07-19T21:43:11.236Z [34mdebug[39m: Authentication failed but is required to proceed.
-
-2026-07-19T21:43:11.238Z [34mdebug[39m: Invalid authentication request.
-
-            </system-out>
-        </testcase>
-        <testcase classname="test/routes/mongo/AuthOTPRoute.test.ts" name="Route:AuthOTPMongo Tests &gt; Cannot verify an OTP challenge without first requesting one (no session state)." time="0.0037933">
-            <system-out>
-2026-07-19T21:43:11.242Z [34mdebug[39m: Invalid authentication request.
-
-            </system-out>
-        </testcase>
-        <testcase classname="test/routes/mongo/AuthOTPRoute.test.ts" name="Route:AuthOTPMongo Tests &gt; Cannot request a challenge for an unknown contact id." time="0.0029174">
-            <system-out>
-2026-07-19T21:43:11.245Z [34mdebug[39m: Authentication failed but is required to proceed.
-
-            </system-out>
-        </testcase>
-        <testcase classname="test/routes/mongo/AuthOTPRoute.test.ts" name="Route:AuthOTPMongo Tests &gt; Cannot authenticate without any request data." time="0.0021677">
-            <system-out>
-2026-07-19T21:43:11.247Z [34mdebug[39m: Cannot read properties of undefined (reading &apos;id&apos;)
+2026-07-19T21:54:04.396Z [34mdebug[39m: Invalid secondary authentication method.
 
             </system-out>
         </testcase>
     </testsuite>
-    <testsuite name="test/routes/mongo/AuthPasskeyRoute.test.ts" timestamp="2026-07-19T21:43:23.995Z" hostname="Jane" tests="5" failures="0" errors="0" skipped="0" time="0.8772604">
-        <testcase classname="test/routes/mongo/AuthPasskeyRoute.test.ts" name="Route:AuthPasskeyMongo Tests &gt; Can begin a passkey ceremony and receive challenge options." time="0.0162665">
+    <testsuite name="test/routes/mongo/AuthOIDCRoute.test.ts" timestamp="2026-07-19T21:54:39.421Z" hostname="Jane" tests="5" failures="0" errors="0" skipped="0" time="0.8693297">
+        <testcase classname="test/routes/mongo/AuthOIDCRoute.test.ts" name="Route:AuthOIDCMongo Tests &gt; Redirects to the provider&apos;s authorization URL with the expected parameters." time="0.0153878">
             <system-out>
-2026-07-19T21:43:21.507Z [34mdebug[39m: Authentication failed but is required to proceed.
+2026-07-19T21:54:34.835Z [34mdebug[39m: Authentication failed but is required to proceed.
 
             </system-out>
         </testcase>
-        <testcase classname="test/routes/mongo/AuthPasskeyRoute.test.ts" name="Route:AuthPasskeyMongo Tests &gt; Can complete a passkey ceremony with a valid assertion and authenticate." time="0.0157178">
+        <testcase classname="test/routes/mongo/AuthOIDCRoute.test.ts" name="Route:AuthOIDCMongo Tests &gt; Can complete the OIDC callback and provision a new user from the provider profile." time="0.0177868">
             <system-out>
-2026-07-19T21:43:21.517Z [34mdebug[39m: Authentication failed but is required to proceed.
+2026-07-19T21:54:34.842Z [34mdebug[39m: Authentication failed but is required to proceed.
 
             </system-out>
         </testcase>
-        <testcase classname="test/routes/mongo/AuthPasskeyRoute.test.ts" name="Route:AuthPasskeyMongo Tests &gt; Cannot authenticate with an unknown credential id." time="0.0044256">
+        <testcase classname="test/routes/mongo/AuthOIDCRoute.test.ts" name="Route:AuthOIDCMongo Tests &gt; Can complete the OIDC callback for a returning user without creating a duplicate." time="0.0136309">
             <system-out>
-2026-07-19T21:43:21.530Z [34mdebug[39m: Authentication failed but is required to proceed.
+2026-07-19T21:54:34.860Z [34mdebug[39m: Authentication failed but is required to proceed.
 
-2026-07-19T21:43:21.532Z [34mdebug[39m: Passkey authentication failed.
+2026-07-19T21:54:34.867Z [34mdebug[39m: Authentication failed but is required to proceed.
 
             </system-out>
         </testcase>
-        <testcase classname="test/routes/mongo/AuthPasskeyRoute.test.ts" name="Route:AuthPasskeyMongo Tests &gt; Cannot authenticate when SimpleWebAuthn fails to verify the assertion." time="0.0059336">
+        <testcase classname="test/routes/mongo/AuthOIDCRoute.test.ts" name="Route:AuthOIDCMongo Tests &gt; Rejects the callback when the state parameter does not match the session (CSRF)." time="0.0038464">
             <system-out>
-2026-07-19T21:43:21.536Z [34mdebug[39m: Authentication failed but is required to proceed.
+2026-07-19T21:54:34.873Z [34mdebug[39m: Authentication failed but is required to proceed.
 
-2026-07-19T21:43:21.538Z [34mdebug[39m: Passkey authentication failed.
-
-            </system-out>
-        </testcase>
-        <testcase classname="test/routes/mongo/AuthPasskeyRoute.test.ts" name="Route:AuthPasskeyMongo Tests &gt; Cannot authenticate with a malformed assertion response." time="0.0026572">
-            <system-out>
-2026-07-19T21:43:21.540Z [34mdebug[39m: No passkey ceremony in progress for this session.
+2026-07-19T21:54:34.874Z [34mdebug[39m: Invalid or missing state parameter. Possible CSRF attempt.
 
             </system-out>
         </testcase>
-    </testsuite>
-    <testsuite name="test/routes/mongo/AuthTOTPRoute.test.ts" timestamp="2026-07-19T21:43:23.996Z" hostname="Jane" tests="3" failures="0" errors="0" skipped="0" time="0.8382394">
-        <testcase classname="test/routes/mongo/AuthTOTPRoute.test.ts" name="Route:AuthBasicMongo Tests &gt; Can authenticate with valid user id and totp." time="0.0201252">
-        </testcase>
-        <testcase classname="test/routes/mongo/AuthTOTPRoute.test.ts" name="Route:AuthBasicMongo Tests &gt; Can authenticate with valid user id and totp when multiple totp secrets exist." time="0.0062933">
-        </testcase>
-        <testcase classname="test/routes/mongo/AuthTOTPRoute.test.ts" name="Route:AuthBasicMongo Tests &gt; Cannot authenticate with invalid user id and totp." time="0.0066868">
+        <testcase classname="test/routes/mongo/AuthOIDCRoute.test.ts" name="Route:AuthOIDCMongo Tests &gt; Rejects the callback when the provider reports an error." time="0.0024707">
             <system-out>
-2026-07-19T21:43:19.480Z [34mdebug[39m: Cannot read properties of undefined (reading &apos;length&apos;)
+2026-07-19T21:54:34.877Z [34mdebug[39m: OIDC provider returned an error: access_denied - User+declined
 
             </system-out>
         </testcase>
     </testsuite>
-    <testsuite name="test/routes/mongo/ProfileRoute.test.ts" timestamp="2026-07-19T21:43:23.997Z" hostname="Jane" tests="8" failures="0" errors="0" skipped="0" time="0.9132849">
-        <testcase classname="test/routes/mongo/ProfileRoute.test.ts" name="Route:ProfileMongo Tests &gt; Can make count request (with admin token)." time="0.0199882">
-        </testcase>
-        <testcase classname="test/routes/mongo/ProfileRoute.test.ts" name="Route:ProfileMongo Tests &gt; Can make create request (with admin token)." time="0.006997">
-        </testcase>
-        <testcase classname="test/routes/mongo/ProfileRoute.test.ts" name="Route:ProfileMongo Tests &gt; Can make delete request (with admin token)." time="0.0068666">
-        </testcase>
-        <testcase classname="test/routes/mongo/ProfileRoute.test.ts" name="Route:ProfileMongo Tests &gt; Can make findAll request (with admin token)." time="0.0075888">
-        </testcase>
-        <testcase classname="test/routes/mongo/ProfileRoute.test.ts" name="Route:ProfileMongo Tests &gt; Can make findById request (with admin token)." time="0.0047114">
-        </testcase>
-        <testcase classname="test/routes/mongo/ProfileRoute.test.ts" name="Route:ProfileMongo Tests &gt; Can make truncate request (with admin token)." time="0.0075109">
-        </testcase>
-        <testcase classname="test/routes/mongo/ProfileRoute.test.ts" name="Route:ProfileMongo Tests &gt; Can make update request (with admin token)." time="0.0074927">
-        </testcase>
-        <testcase classname="test/routes/mongo/ProfileRoute.test.ts" name="Route:ProfileMongo Tests &gt; Can make update property request (with admin token)." time="0.0098009">
-        </testcase>
-    </testsuite>
-    <testsuite name="test/routes/mongo/SecretRoute.test.ts" timestamp="2026-07-19T21:43:23.998Z" hostname="Jane" tests="11" failures="0" errors="0" skipped="0" time="1.5538123">
-        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Can make count request (with admin token)." time="0.1679001">
-        </testcase>
-        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Can make create request (with admin token)." time="0.0658606">
-        </testcase>
-        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Can make delete request (with admin token)." time="0.0359832">
-        </testcase>
-        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Can make findAll request (with admin token)." time="0.1497">
-        </testcase>
-        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Can make findById request (with admin token)." time="0.032107">
-        </testcase>
-        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Can make truncate request (with admin token)." time="0.1507309">
-        </testcase>
-        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Cannot begin passkey registration without authentication." time="0.0055915">
+    <testsuite name="test/routes/mongo/AuthOTPRoute.test.ts" timestamp="2026-07-19T21:54:39.422Z" hostname="Jane" tests="5" failures="0" errors="0" skipped="0" time="0.919296">
+        <testcase classname="test/routes/mongo/AuthOTPRoute.test.ts" name="Route:AuthOTPMongo Tests &gt; Can request and verify an OTP challenge sent to a verified contact." time="0.0408675">
             <system-out>
-2026-07-19T21:42:44.703Z [34mdebug[39m: Authentication is required to register a passkey.
+2026-07-19T21:54:32.793Z [34mdebug[39m: Authentication failed but is required to proceed.
 
             </system-out>
         </testcase>
-        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Can begin passkey registration and receive creation options (with admin token)." time="0.0027856">
-        </testcase>
-        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Cannot create a passkey secret without a prior registration ceremony." time="0.0029646">
+        <testcase classname="test/routes/mongo/AuthOTPRoute.test.ts" name="Route:AuthOTPMongo Tests &gt; Cannot verify an OTP challenge with an invalid token." time="0.0064956">
             <system-out>
-2026-07-19T21:42:44.712Z [34mdebug[39m: No passkey registration ceremony in progress for this session.
+2026-07-19T21:54:32.810Z [34mdebug[39m: Authentication failed but is required to proceed.
+
+2026-07-19T21:54:32.811Z [34mdebug[39m: Invalid authentication request.
 
             </system-out>
         </testcase>
-        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Can create a passkey secret with a valid registration response (with admin token)." time="0.0068992">
-        </testcase>
-        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Cannot register the same passkey credential twice." time="0.0101038">
+        <testcase classname="test/routes/mongo/AuthOTPRoute.test.ts" name="Route:AuthOTPMongo Tests &gt; Cannot verify an OTP challenge without first requesting one (no session state)." time="0.0037135">
             <system-out>
-2026-07-19T21:42:44.727Z [34mdebug[39m: A resource with that identifier already exists.
+2026-07-19T21:54:32.815Z [34mdebug[39m: Invalid authentication request.
+
+            </system-out>
+        </testcase>
+        <testcase classname="test/routes/mongo/AuthOTPRoute.test.ts" name="Route:AuthOTPMongo Tests &gt; Cannot request a challenge for an unknown contact id." time="0.0027853">
+            <system-out>
+2026-07-19T21:54:32.818Z [34mdebug[39m: Authentication failed but is required to proceed.
+
+            </system-out>
+        </testcase>
+        <testcase classname="test/routes/mongo/AuthOTPRoute.test.ts" name="Route:AuthOTPMongo Tests &gt; Cannot authenticate without any request data." time="0.0022893">
+            <system-out>
+2026-07-19T21:54:32.820Z [34mdebug[39m: Cannot read properties of undefined (reading &apos;id&apos;)
 
             </system-out>
         </testcase>
     </testsuite>
-    <testsuite name="test/routes/mongo/UserRoute.test.ts" timestamp="2026-07-19T21:43:23.999Z" hostname="Jane" tests="8" failures="0" errors="0" skipped="0" time="0.8793337">
-        <testcase classname="test/routes/mongo/UserRoute.test.ts" name="Route:UserMongo Tests &gt; Can make count request (with admin token)." time="0.018441">
-        </testcase>
-        <testcase classname="test/routes/mongo/UserRoute.test.ts" name="Route:UserMongo Tests &gt; Can make create request (with admin token)." time="0.0058643">
-        </testcase>
-        <testcase classname="test/routes/mongo/UserRoute.test.ts" name="Route:UserMongo Tests &gt; Can make delete request (with admin token)." time="0.0071769">
-        </testcase>
-        <testcase classname="test/routes/mongo/UserRoute.test.ts" name="Route:UserMongo Tests &gt; Can make findAll request (with admin token)." time="0.0064529">
-        </testcase>
-        <testcase classname="test/routes/mongo/UserRoute.test.ts" name="Route:UserMongo Tests &gt; Can make findById request (with admin token)." time="0.0042893">
-        </testcase>
-        <testcase classname="test/routes/mongo/UserRoute.test.ts" name="Route:UserMongo Tests &gt; Can make truncate request (with admin token)." time="0.006762">
-        </testcase>
-        <testcase classname="test/routes/mongo/UserRoute.test.ts" name="Route:UserMongo Tests &gt; Can make update request (with admin token)." time="0.0076254">
-        </testcase>
-        <testcase classname="test/routes/mongo/UserRoute.test.ts" name="Route:UserMongo Tests &gt; Can make update property request (with admin token)." time="0.0074955">
-        </testcase>
-    </testsuite>
-    <testsuite name="test/routes/sql/AliasRoute.test.ts" timestamp="2026-07-19T21:43:24.000Z" hostname="Jane" tests="8" failures="0" errors="0" skipped="0" time="0.9412133">
-        <testcase classname="test/routes/sql/AliasRoute.test.ts" name="Route:AliasSQL Tests &gt; Can make count request (with admin token)." time="0.0455738">
-        </testcase>
-        <testcase classname="test/routes/sql/AliasRoute.test.ts" name="Route:AliasSQL Tests &gt; Can make create request (with admin token)." time="0.0131123">
-        </testcase>
-        <testcase classname="test/routes/sql/AliasRoute.test.ts" name="Route:AliasSQL Tests &gt; Can make delete request (with admin token)." time="0.0173408">
-        </testcase>
-        <testcase classname="test/routes/sql/AliasRoute.test.ts" name="Route:AliasSQL Tests &gt; Can make findAll request (with admin token)." time="0.0246252">
-        </testcase>
-        <testcase classname="test/routes/sql/AliasRoute.test.ts" name="Route:AliasSQL Tests &gt; Can make findById request (with admin token)." time="0.0082333">
-        </testcase>
-        <testcase classname="test/routes/sql/AliasRoute.test.ts" name="Route:AliasSQL Tests &gt; Can make truncate request (with admin token)." time="0.0216179">
-        </testcase>
-        <testcase classname="test/routes/sql/AliasRoute.test.ts" name="Route:AliasSQL Tests &gt; Can make update request (with admin token)." time="0.0154149">
-        </testcase>
-        <testcase classname="test/routes/sql/AliasRoute.test.ts" name="Route:AliasSQL Tests &gt; Can make update property request (with admin token)." time="0.0135328">
-        </testcase>
-    </testsuite>
-    <testsuite name="test/routes/sql/AuthBasicRoute.test.ts" timestamp="2026-07-19T21:43:24.001Z" hostname="Jane" tests="3" failures="0" errors="0" skipped="0" time="1.1685167">
-        <testcase classname="test/routes/sql/AuthBasicRoute.test.ts" name="Route:AuthBasicSQL Tests &gt; Can authenticate with valid user id and password." time="0.0985357">
-        </testcase>
-        <testcase classname="test/routes/sql/AuthBasicRoute.test.ts" name="Route:AuthBasicSQL Tests &gt; Can authenticate with valid user id and password when multiple passwords exist." time="0.1562338">
-        </testcase>
-        <testcase classname="test/routes/sql/AuthBasicRoute.test.ts" name="Route:AuthBasicSQL Tests &gt; Cannot authenticate with invalid user id and password." time="0.0751637">
+    <testsuite name="test/routes/mongo/AuthPasskeyRoute.test.ts" timestamp="2026-07-19T21:54:39.423Z" hostname="Jane" tests="5" failures="0" errors="0" skipped="0" time="0.9219451">
+        <testcase classname="test/routes/mongo/AuthPasskeyRoute.test.ts" name="Route:AuthPasskeyMongo Tests &gt; Can begin a passkey ceremony and receive challenge options." time="0.016095">
             <system-out>
-2026-07-19T21:42:51.954Z [34mdebug[39m: Invalid name or password
+2026-07-19T21:54:38.945Z [34mdebug[39m: Authentication failed but is required to proceed.
+
+            </system-out>
+        </testcase>
+        <testcase classname="test/routes/mongo/AuthPasskeyRoute.test.ts" name="Route:AuthPasskeyMongo Tests &gt; Can complete a passkey ceremony with a valid assertion and authenticate." time="0.0149297">
+            <system-out>
+2026-07-19T21:54:38.955Z [34mdebug[39m: Authentication failed but is required to proceed.
+
+            </system-out>
+        </testcase>
+        <testcase classname="test/routes/mongo/AuthPasskeyRoute.test.ts" name="Route:AuthPasskeyMongo Tests &gt; Cannot authenticate with an unknown credential id." time="0.0044801">
+            <system-out>
+2026-07-19T21:54:38.967Z [34mdebug[39m: Authentication failed but is required to proceed.
+
+2026-07-19T21:54:38.969Z [34mdebug[39m: Passkey authentication failed.
+
+            </system-out>
+        </testcase>
+        <testcase classname="test/routes/mongo/AuthPasskeyRoute.test.ts" name="Route:AuthPasskeyMongo Tests &gt; Cannot authenticate when SimpleWebAuthn fails to verify the assertion." time="0.0056314">
+            <system-out>
+2026-07-19T21:54:38.973Z [34mdebug[39m: Authentication failed but is required to proceed.
+
+2026-07-19T21:54:38.975Z [34mdebug[39m: Passkey authentication failed.
+
+            </system-out>
+        </testcase>
+        <testcase classname="test/routes/mongo/AuthPasskeyRoute.test.ts" name="Route:AuthPasskeyMongo Tests &gt; Cannot authenticate with a malformed assertion response." time="0.0028714">
+            <system-out>
+2026-07-19T21:54:38.977Z [34mdebug[39m: No passkey ceremony in progress for this session.
 
             </system-out>
         </testcase>
     </testsuite>
-    <testsuite name="test/routes/sql/AuthMFARoute.test.ts" timestamp="2026-07-19T21:43:24.001Z" hostname="Jane" tests="5" failures="0" errors="0" skipped="0" time="1.2653553">
-        <testcase classname="test/routes/sql/AuthMFARoute.test.ts" name="Route:AuthMFASQL Tests &gt; Returns the list of available 2FA methods after a valid password check." time="0.1292998">
-            <system-out>
-2026-07-19T21:42:49.233Z [34mdebug[39m: Invalid authentication request.
-
-            </system-out>
+    <testsuite name="test/routes/mongo/AuthTOTPRoute.test.ts" timestamp="2026-07-19T21:54:39.424Z" hostname="Jane" tests="3" failures="0" errors="0" skipped="0" time="0.8541358">
+        <testcase classname="test/routes/mongo/AuthTOTPRoute.test.ts" name="Route:AuthBasicMongo Tests &gt; Can authenticate with valid user id and totp." time="0.0210419">
         </testcase>
-        <testcase classname="test/routes/sql/AuthMFARoute.test.ts" name="Route:AuthMFASQL Tests &gt; Cannot authenticate phase 1 with an invalid password." time="0.0775001">
-            <system-out>
-2026-07-19T21:42:49.315Z [34mdebug[39m: Invalid authorization request.
-
-            </system-out>
+        <testcase classname="test/routes/mongo/AuthTOTPRoute.test.ts" name="Route:AuthBasicMongo Tests &gt; Can authenticate with valid user id and totp when multiple totp secrets exist." time="0.0065376">
         </testcase>
-        <testcase classname="test/routes/sql/AuthMFARoute.test.ts" name="Route:AuthMFASQL Tests &gt; Can complete the full 3-phase MFA flow using an OTP contact method." time="0.1122346">
+        <testcase classname="test/routes/mongo/AuthTOTPRoute.test.ts" name="Route:AuthBasicMongo Tests &gt; Cannot authenticate with invalid user id and totp." time="0.0068642">
             <system-out>
-2026-07-19T21:42:49.405Z [34mdebug[39m: Invalid authentication request.
-
-2026-07-19T21:42:49.423Z [34mdebug[39m: Authentication failed but is required to proceed.
-
-            </system-out>
-        </testcase>
-        <testcase classname="test/routes/sql/AuthMFARoute.test.ts" name="Route:AuthMFASQL Tests &gt; Cannot complete phase 3 with an invalid OTP token." time="0.0871474">
-            <system-out>
-2026-07-19T21:42:49.509Z [34mdebug[39m: Invalid authentication request.
-
-2026-07-19T21:42:49.512Z [34mdebug[39m: Authentication failed but is required to proceed.
-
-2026-07-19T21:42:49.515Z [34mdebug[39m: Invalid authentication request.
-
-            </system-out>
-        </testcase>
-        <testcase classname="test/routes/sql/AuthMFARoute.test.ts" name="Route:AuthMFASQL Tests &gt; Cannot request a challenge for an unknown method id." time="0.081817">
-            <system-out>
-2026-07-19T21:42:49.595Z [34mdebug[39m: Invalid authentication request.
-
-2026-07-19T21:42:49.597Z [34mdebug[39m: Invalid secondary authentication method.
+2026-07-19T21:54:36.912Z [34mdebug[39m: Cannot read properties of undefined (reading &apos;length&apos;)
 
             </system-out>
         </testcase>
     </testsuite>
-    <testsuite name="test/routes/sql/AuthOIDCRoute.test.ts" timestamp="2026-07-19T21:43:24.002Z" hostname="Jane" tests="5" failures="0" errors="0" skipped="0" time="0.9084978">
-        <testcase classname="test/routes/sql/AuthOIDCRoute.test.ts" name="Route:AuthOIDCSQL Tests &gt; Redirects to the provider&apos;s authorization URL with the expected parameters." time="0.0439309">
+    <testsuite name="test/routes/mongo/ProfileRoute.test.ts" timestamp="2026-07-19T21:54:39.424Z" hostname="Jane" tests="8" failures="0" errors="0" skipped="0" time="0.9018431">
+        <testcase classname="test/routes/mongo/ProfileRoute.test.ts" name="Route:ProfileMongo Tests &gt; Can make count request (with admin token)." time="0.0186818">
+        </testcase>
+        <testcase classname="test/routes/mongo/ProfileRoute.test.ts" name="Route:ProfileMongo Tests &gt; Can make create request (with admin token)." time="0.0069163">
+        </testcase>
+        <testcase classname="test/routes/mongo/ProfileRoute.test.ts" name="Route:ProfileMongo Tests &gt; Can make delete request (with admin token)." time="0.0072917">
+        </testcase>
+        <testcase classname="test/routes/mongo/ProfileRoute.test.ts" name="Route:ProfileMongo Tests &gt; Can make findAll request (with admin token)." time="0.0076344">
+        </testcase>
+        <testcase classname="test/routes/mongo/ProfileRoute.test.ts" name="Route:ProfileMongo Tests &gt; Can make findById request (with admin token)." time="0.0048254">
+        </testcase>
+        <testcase classname="test/routes/mongo/ProfileRoute.test.ts" name="Route:ProfileMongo Tests &gt; Can make truncate request (with admin token)." time="0.0072684">
+        </testcase>
+        <testcase classname="test/routes/mongo/ProfileRoute.test.ts" name="Route:ProfileMongo Tests &gt; Can make update request (with admin token)." time="0.0068511">
+        </testcase>
+        <testcase classname="test/routes/mongo/ProfileRoute.test.ts" name="Route:ProfileMongo Tests &gt; Can make update property request (with admin token)." time="0.0083896">
+        </testcase>
+    </testsuite>
+    <testsuite name="test/routes/mongo/SecretRoute.test.ts" timestamp="2026-07-19T21:54:39.425Z" hostname="Jane" tests="15" failures="0" errors="0" skipped="0" time="1.5498695">
+        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Can make count request (with admin token)." time="0.1802561">
+        </testcase>
+        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Can make create request (with admin token)." time="0.0634563">
+        </testcase>
+        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Can make delete request (with admin token)." time="0.0341986">
+        </testcase>
+        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Can make findAll request (with admin token)." time="0.1452646">
+        </testcase>
+        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Can make findById request (with admin token)." time="0.0325433">
+        </testcase>
+        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Can make truncate request (with admin token)." time="0.144321">
+        </testcase>
+        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Cannot begin passkey registration without authentication." time="0.0056662">
             <system-out>
-2026-07-19T21:43:15.294Z [34mdebug[39m: Authentication failed but is required to proceed.
+2026-07-19T21:53:59.505Z [34mdebug[39m: Authentication is required to register a passkey.
 
             </system-out>
         </testcase>
-        <testcase classname="test/routes/sql/AuthOIDCRoute.test.ts" name="Route:AuthOIDCSQL Tests &gt; Can complete the OIDC callback and provision a new user from the provider profile." time="0.0410468">
+        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Can begin passkey registration and receive creation options (with admin token)." time="0.0027734">
+        </testcase>
+        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Cannot create a passkey secret without a prior registration ceremony." time="0.0027482">
             <system-out>
-2026-07-19T21:43:15.313Z [34mdebug[39m: Authentication failed but is required to proceed.
+2026-07-19T21:53:59.513Z [34mdebug[39m: No passkey registration ceremony in progress for this session.
 
             </system-out>
         </testcase>
-        <testcase classname="test/routes/sql/AuthOIDCRoute.test.ts" name="Route:AuthOIDCSQL Tests &gt; Can complete the OIDC callback for a returning user without creating a duplicate." time="0.0354382">
+        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Can create a passkey secret with a valid registration response (with admin token)." time="0.0067603">
+        </testcase>
+        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Cannot register the same passkey credential twice." time="0.0100082">
             <system-out>
-2026-07-19T21:43:15.358Z [34mdebug[39m: Authentication failed but is required to proceed.
-
-2026-07-19T21:43:15.373Z [34mdebug[39m: Authentication failed but is required to proceed.
+2026-07-19T21:53:59.529Z [34mdebug[39m: A resource with that identifier already exists.
 
             </system-out>
         </testcase>
-        <testcase classname="test/routes/sql/AuthOIDCRoute.test.ts" name="Route:AuthOIDCSQL Tests &gt; Rejects the callback when the state parameter does not match the session (CSRF)." time="0.0112734">
+        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Can create a TOTP secret with a server-generated secret (with admin token)." time="0.0042855">
+        </testcase>
+        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Can create a TOTP secret with a caller-supplied secret (with admin token)." time="0.0030748">
+        </testcase>
+        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Cannot create a TOTP secret with a secret that is too short." time="0.0020084">
             <system-out>
-2026-07-19T21:43:15.385Z [34mdebug[39m: Authentication failed but is required to proceed.
-
-2026-07-19T21:43:15.387Z [34mdebug[39m: Invalid or missing state parameter. Possible CSRF attempt.
+2026-07-19T21:53:59.540Z [34mdebug[39m: A secret of type &apos;totp&apos; must be a Base32-encoded string of at least 128 bits.
 
             </system-out>
         </testcase>
-        <testcase classname="test/routes/sql/AuthOIDCRoute.test.ts" name="Route:AuthOIDCSQL Tests &gt; Rejects the callback when the provider reports an error." time="0.0083741">
+        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Cannot create a TOTP secret with a secret that isn&apos;t valid Base32." time="0.0020291">
             <system-out>
-2026-07-19T21:43:15.395Z [34mdebug[39m: OIDC provider returned an error: access_denied - User+declined
+2026-07-19T21:53:59.542Z [34mdebug[39m: A secret of type &apos;totp&apos; must be a Base32-encoded string of at least 128 bits.
 
             </system-out>
         </testcase>
     </testsuite>
-    <testsuite name="test/routes/sql/AuthOTPRoute.test.ts" timestamp="2026-07-19T21:43:24.003Z" hostname="Jane" tests="5" failures="0" errors="0" skipped="0" time="0.9242656">
-        <testcase classname="test/routes/sql/AuthOTPRoute.test.ts" name="Route:AuthOTPSQL Tests &gt; Can request and verify an OTP challenge sent to a verified contact." time="0.0829175">
-            <system-out>
-2026-07-19T21:43:02.799Z [34mdebug[39m: Authentication failed but is required to proceed.
-
-            </system-out>
+    <testsuite name="test/routes/mongo/UserRoute.test.ts" timestamp="2026-07-19T21:54:39.427Z" hostname="Jane" tests="8" failures="0" errors="0" skipped="0" time="0.9796565">
+        <testcase classname="test/routes/mongo/UserRoute.test.ts" name="Route:UserMongo Tests &gt; Can make count request (with admin token)." time="0.0190877">
         </testcase>
-        <testcase classname="test/routes/sql/AuthOTPRoute.test.ts" name="Route:AuthOTPSQL Tests &gt; Cannot verify an OTP challenge with an invalid token." time="0.0148032">
-            <system-out>
-2026-07-19T21:43:02.823Z [34mdebug[39m: Authentication failed but is required to proceed.
-
-2026-07-19T21:43:02.824Z [34mdebug[39m: Invalid authentication request.
-
-            </system-out>
+        <testcase classname="test/routes/mongo/UserRoute.test.ts" name="Route:UserMongo Tests &gt; Can make create request (with admin token)." time="0.0069488">
         </testcase>
-        <testcase classname="test/routes/sql/AuthOTPRoute.test.ts" name="Route:AuthOTPSQL Tests &gt; Cannot verify an OTP challenge without first requesting one (no session state)." time="0.012239">
-            <system-out>
-2026-07-19T21:43:02.837Z [34mdebug[39m: Invalid authentication request.
-
-            </system-out>
+        <testcase classname="test/routes/mongo/UserRoute.test.ts" name="Route:UserMongo Tests &gt; Can make delete request (with admin token)." time="0.0084001">
         </testcase>
-        <testcase classname="test/routes/sql/AuthOTPRoute.test.ts" name="Route:AuthOTPSQL Tests &gt; Cannot request a challenge for an unknown contact id." time="0.0063887">
-            <system-out>
-2026-07-19T21:43:02.843Z [34mdebug[39m: Authentication failed but is required to proceed.
-
-            </system-out>
+        <testcase classname="test/routes/mongo/UserRoute.test.ts" name="Route:UserMongo Tests &gt; Can make findAll request (with admin token)." time="0.0071092">
         </testcase>
-        <testcase classname="test/routes/sql/AuthOTPRoute.test.ts" name="Route:AuthOTPSQL Tests &gt; Cannot authenticate without any request data." time="0.0056303">
+        <testcase classname="test/routes/mongo/UserRoute.test.ts" name="Route:UserMongo Tests &gt; Can make findById request (with admin token)." time="0.0049118">
+        </testcase>
+        <testcase classname="test/routes/mongo/UserRoute.test.ts" name="Route:UserMongo Tests &gt; Can make truncate request (with admin token)." time="0.0075516">
+        </testcase>
+        <testcase classname="test/routes/mongo/UserRoute.test.ts" name="Route:UserMongo Tests &gt; Can make update request (with admin token)." time="0.0086005">
+        </testcase>
+        <testcase classname="test/routes/mongo/UserRoute.test.ts" name="Route:UserMongo Tests &gt; Can make update property request (with admin token)." time="0.0101057">
+        </testcase>
+    </testsuite>
+    <testsuite name="test/routes/sql/AliasRoute.test.ts" timestamp="2026-07-19T21:54:39.428Z" hostname="Jane" tests="8" failures="0" errors="0" skipped="0" time="0.9649356">
+        <testcase classname="test/routes/sql/AliasRoute.test.ts" name="Route:AliasSQL Tests &gt; Can make count request (with admin token)." time="0.039926">
+        </testcase>
+        <testcase classname="test/routes/sql/AliasRoute.test.ts" name="Route:AliasSQL Tests &gt; Can make create request (with admin token)." time="0.011785">
+        </testcase>
+        <testcase classname="test/routes/sql/AliasRoute.test.ts" name="Route:AliasSQL Tests &gt; Can make delete request (with admin token)." time="0.0142764">
+        </testcase>
+        <testcase classname="test/routes/sql/AliasRoute.test.ts" name="Route:AliasSQL Tests &gt; Can make findAll request (with admin token)." time="0.0220595">
+        </testcase>
+        <testcase classname="test/routes/sql/AliasRoute.test.ts" name="Route:AliasSQL Tests &gt; Can make findById request (with admin token)." time="0.0087112">
+        </testcase>
+        <testcase classname="test/routes/sql/AliasRoute.test.ts" name="Route:AliasSQL Tests &gt; Can make truncate request (with admin token)." time="0.0215386">
+        </testcase>
+        <testcase classname="test/routes/sql/AliasRoute.test.ts" name="Route:AliasSQL Tests &gt; Can make update request (with admin token)." time="0.0136026">
+        </testcase>
+        <testcase classname="test/routes/sql/AliasRoute.test.ts" name="Route:AliasSQL Tests &gt; Can make update property request (with admin token)." time="0.0132394">
+        </testcase>
+    </testsuite>
+    <testsuite name="test/routes/sql/AuthBasicRoute.test.ts" timestamp="2026-07-19T21:54:39.429Z" hostname="Jane" tests="3" failures="0" errors="0" skipped="0" time="1.1590082">
+        <testcase classname="test/routes/sql/AuthBasicRoute.test.ts" name="Route:AuthBasicSQL Tests &gt; Can authenticate with valid user id and password." time="0.1103885">
+        </testcase>
+        <testcase classname="test/routes/sql/AuthBasicRoute.test.ts" name="Route:AuthBasicSQL Tests &gt; Can authenticate with valid user id and password when multiple passwords exist." time="0.1645766">
+        </testcase>
+        <testcase classname="test/routes/sql/AuthBasicRoute.test.ts" name="Route:AuthBasicSQL Tests &gt; Cannot authenticate with invalid user id and password." time="0.0701261">
             <system-out>
-2026-07-19T21:43:02.849Z [34mdebug[39m: Cannot read properties of undefined (reading &apos;id&apos;)
+2026-07-19T21:54:09.145Z [34mdebug[39m: Invalid name or password
 
             </system-out>
         </testcase>
     </testsuite>
-    <testsuite name="test/routes/sql/AuthPasskeyRoute.test.ts" timestamp="2026-07-19T21:43:24.004Z" hostname="Jane" tests="5" failures="0" errors="0" skipped="0" time="0.8870294">
-        <testcase classname="test/routes/sql/AuthPasskeyRoute.test.ts" name="Route:AuthPasskeySQL Tests &gt; Can begin a passkey ceremony and receive challenge options." time="0.0377265">
+    <testsuite name="test/routes/sql/AuthMFARoute.test.ts" timestamp="2026-07-19T21:54:39.430Z" hostname="Jane" tests="5" failures="0" errors="0" skipped="0" time="1.253358">
+        <testcase classname="test/routes/sql/AuthMFARoute.test.ts" name="Route:AuthMFASQL Tests &gt; Returns the list of available 2FA methods after a valid password check." time="0.1217632">
             <system-out>
-2026-07-19T21:43:09.075Z [34mdebug[39m: Authentication failed but is required to proceed.
+2026-07-19T21:54:01.660Z [34mdebug[39m: Invalid authentication request.
 
             </system-out>
         </testcase>
-        <testcase classname="test/routes/sql/AuthPasskeyRoute.test.ts" name="Route:AuthPasskeySQL Tests &gt; Can complete a passkey ceremony with a valid assertion and authenticate." time="0.0431403">
+        <testcase classname="test/routes/sql/AuthMFARoute.test.ts" name="Route:AuthMFASQL Tests &gt; Cannot authenticate phase 1 with an invalid password." time="0.0726607">
             <system-out>
-2026-07-19T21:43:09.110Z [34mdebug[39m: Authentication failed but is required to proceed.
+2026-07-19T21:54:01.737Z [34mdebug[39m: Invalid authorization request.
 
             </system-out>
         </testcase>
-        <testcase classname="test/routes/sql/AuthPasskeyRoute.test.ts" name="Route:AuthPasskeySQL Tests &gt; Cannot authenticate with an unknown credential id." time="0.0094072">
+        <testcase classname="test/routes/sql/AuthMFARoute.test.ts" name="Route:AuthMFASQL Tests &gt; Can complete the full 3-phase MFA flow using an OTP contact method." time="0.100662">
             <system-out>
-2026-07-19T21:43:09.131Z [34mdebug[39m: Authentication failed but is required to proceed.
+2026-07-19T21:54:01.816Z [34mdebug[39m: Invalid authentication request.
 
-2026-07-19T21:43:09.133Z [34mdebug[39m: Passkey authentication failed.
+2026-07-19T21:54:01.834Z [34mdebug[39m: Authentication failed but is required to proceed.
 
             </system-out>
         </testcase>
-        <testcase classname="test/routes/sql/AuthPasskeyRoute.test.ts" name="Route:AuthPasskeySQL Tests &gt; Cannot authenticate when SimpleWebAuthn fails to verify the assertion." time="0.0144302">
+        <testcase classname="test/routes/sql/AuthMFARoute.test.ts" name="Route:AuthMFASQL Tests &gt; Cannot complete phase 3 with an invalid OTP token." time="0.079485">
             <system-out>
-2026-07-19T21:43:09.145Z [34mdebug[39m: Authentication failed but is required to proceed.
+2026-07-19T21:54:01.914Z [34mdebug[39m: Invalid authentication request.
 
-2026-07-19T21:43:09.147Z [34mdebug[39m: Passkey authentication failed.
+2026-07-19T21:54:01.916Z [34mdebug[39m: Authentication failed but is required to proceed.
 
-            </system-out>
-        </testcase>
-        <testcase classname="test/routes/sql/AuthPasskeyRoute.test.ts" name="Route:AuthPasskeySQL Tests &gt; Cannot authenticate with a malformed assertion response." time="0.0060604">
-            <system-out>
-2026-07-19T21:43:09.153Z [34mdebug[39m: No passkey ceremony in progress for this session.
+2026-07-19T21:54:01.918Z [34mdebug[39m: Invalid authentication request.
 
             </system-out>
         </testcase>
-    </testsuite>
-    <testsuite name="test/routes/sql/AuthTOTPRoute.test.ts" timestamp="2026-07-19T21:43:24.005Z" hostname="Jane" tests="3" failures="0" errors="0" skipped="0" time="0.861485">
-        <testcase classname="test/routes/sql/AuthTOTPRoute.test.ts" name="Route:AuthTOTPSQL Tests &gt; Can authenticate with valid user id and totp." time="0.0369804">
-        </testcase>
-        <testcase classname="test/routes/sql/AuthTOTPRoute.test.ts" name="Route:AuthTOTPSQL Tests &gt; Can authenticate with valid user id and totp when multiple totp secrets exist." time="0.0273427">
-        </testcase>
-        <testcase classname="test/routes/sql/AuthTOTPRoute.test.ts" name="Route:AuthTOTPSQL Tests &gt; Cannot authenticate with invalid user id and totp." time="0.0152028">
+        <testcase classname="test/routes/sql/AuthMFARoute.test.ts" name="Route:AuthMFASQL Tests &gt; Cannot request a challenge for an unknown method id." time="0.0780747">
             <system-out>
-2026-07-19T21:43:13.307Z [34mdebug[39m: Cannot read properties of undefined (reading &apos;length&apos;)
+2026-07-19T21:54:01.994Z [34mdebug[39m: Invalid authentication request.
+
+2026-07-19T21:54:01.996Z [34mdebug[39m: Invalid secondary authentication method.
 
             </system-out>
         </testcase>
     </testsuite>
-    <testsuite name="test/routes/sql/ProfileRoute.test.ts" timestamp="2026-07-19T21:43:24.006Z" hostname="Jane" tests="8" failures="0" errors="0" skipped="0" time="0.9995421">
-        <testcase classname="test/routes/sql/ProfileRoute.test.ts" name="Route:ProfileSQL Tests &gt; Can make count request (with admin token)." time="0.068332">
-        </testcase>
-        <testcase classname="test/routes/sql/ProfileRoute.test.ts" name="Route:ProfileSQL Tests &gt; Can make create request (with admin token)." time="0.0120229">
-        </testcase>
-        <testcase classname="test/routes/sql/ProfileRoute.test.ts" name="Route:ProfileSQL Tests &gt; Can make delete request (with admin token)." time="0.0185539">
-        </testcase>
-        <testcase classname="test/routes/sql/ProfileRoute.test.ts" name="Route:ProfileSQL Tests &gt; Can make findAll request (with admin token)." time="0.0398735">
-        </testcase>
-        <testcase classname="test/routes/sql/ProfileRoute.test.ts" name="Route:ProfileSQL Tests &gt; Can make findById request (with admin token)." time="0.0095821">
-        </testcase>
-        <testcase classname="test/routes/sql/ProfileRoute.test.ts" name="Route:ProfileSQL Tests &gt; Can make truncate request (with admin token)." time="0.0223295">
-        </testcase>
-        <testcase classname="test/routes/sql/ProfileRoute.test.ts" name="Route:ProfileSQL Tests &gt; Can make update request (with admin token)." time="0.0145989">
-        </testcase>
-        <testcase classname="test/routes/sql/ProfileRoute.test.ts" name="Route:ProfileSQL Tests &gt; Can make update property request (with admin token)." time="0.0137407">
-        </testcase>
-    </testsuite>
-    <testsuite name="test/routes/sql/SecretRoute.test.ts" timestamp="2026-07-19T21:43:24.007Z" hostname="Jane" tests="11" failures="0" errors="0" skipped="0" time="1.7536731">
-        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Can make count request (with admin token)." time="0.2346416">
-        </testcase>
-        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Can make create request (with admin token)." time="0.0749241">
-        </testcase>
-        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Can make delete request (with admin token)." time="0.041848">
-        </testcase>
-        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Can make findAll request (with admin token)." time="0.1658916">
-        </testcase>
-        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Can make findById request (with admin token)." time="0.0363437">
-        </testcase>
-        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Can make truncate request (with admin token)." time="0.1686105">
-        </testcase>
-        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Cannot begin passkey registration without authentication." time="0.0072957">
+    <testsuite name="test/routes/sql/AuthOIDCRoute.test.ts" timestamp="2026-07-19T21:54:39.431Z" hostname="Jane" tests="5" failures="0" errors="0" skipped="0" time="1.1348626">
+        <testcase classname="test/routes/sql/AuthOIDCRoute.test.ts" name="Route:AuthOIDCSQL Tests &gt; Redirects to the provider&apos;s authorization URL with the expected parameters." time="0.0399321">
             <system-out>
-2026-07-19T21:42:41.943Z [34mdebug[39m: Authentication is required to register a passkey.
+2026-07-19T21:54:26.063Z [34mdebug[39m: Authentication failed but is required to proceed.
 
             </system-out>
         </testcase>
-        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Can begin passkey registration and receive creation options (with admin token)." time="0.0047435">
-        </testcase>
-        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Cannot create a passkey secret without a prior registration ceremony." time="0.0047495">
+        <testcase classname="test/routes/sql/AuthOIDCRoute.test.ts" name="Route:AuthOIDCSQL Tests &gt; Can complete the OIDC callback and provision a new user from the provider profile." time="0.0527316">
             <system-out>
-2026-07-19T21:42:41.956Z [34mdebug[39m: No passkey registration ceremony in progress for this session.
+2026-07-19T21:54:26.086Z [34mdebug[39m: Authentication failed but is required to proceed.
 
             </system-out>
         </testcase>
-        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Can create a passkey secret with a valid registration response (with admin token)." time="0.0101422">
-        </testcase>
-        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Cannot register the same passkey credential twice." time="0.0130352">
+        <testcase classname="test/routes/sql/AuthOIDCRoute.test.ts" name="Route:AuthOIDCSQL Tests &gt; Can complete the OIDC callback for a returning user without creating a duplicate." time="0.0283267">
             <system-out>
-2026-07-19T21:42:41.978Z [34mdebug[39m: A resource with that identifier already exists.
+2026-07-19T21:54:26.130Z [34mdebug[39m: Authentication failed but is required to proceed.
+
+2026-07-19T21:54:26.144Z [34mdebug[39m: Authentication failed but is required to proceed.
+
+            </system-out>
+        </testcase>
+        <testcase classname="test/routes/sql/AuthOIDCRoute.test.ts" name="Route:AuthOIDCSQL Tests &gt; Rejects the callback when the state parameter does not match the session (CSRF)." time="0.0103829">
+            <system-out>
+2026-07-19T21:54:26.158Z [34mdebug[39m: Authentication failed but is required to proceed.
+
+2026-07-19T21:54:26.160Z [34mdebug[39m: Invalid or missing state parameter. Possible CSRF attempt.
+
+            </system-out>
+        </testcase>
+        <testcase classname="test/routes/sql/AuthOIDCRoute.test.ts" name="Route:AuthOIDCSQL Tests &gt; Rejects the callback when the provider reports an error." time="0.008465">
+            <system-out>
+2026-07-19T21:54:26.168Z [34mdebug[39m: OIDC provider returned an error: access_denied - User+declined
 
             </system-out>
         </testcase>
     </testsuite>
-    <testsuite name="test/routes/sql/UserRoute.test.ts" timestamp="2026-07-19T21:43:24.008Z" hostname="Jane" tests="8" failures="0" errors="0" skipped="0" time="1.0145012">
-        <testcase classname="test/routes/sql/UserRoute.test.ts" name="Route:UserSQL Tests &gt; Can make count request (with admin token)." time="0.0481723">
+    <testsuite name="test/routes/sql/AuthOTPRoute.test.ts" timestamp="2026-07-19T21:54:39.432Z" hostname="Jane" tests="5" failures="0" errors="0" skipped="0" time="0.9295493">
+        <testcase classname="test/routes/sql/AuthOTPRoute.test.ts" name="Route:AuthOTPSQL Tests &gt; Can request and verify an OTP challenge sent to a verified contact." time="0.0775975">
+            <system-out>
+2026-07-19T21:54:17.721Z [34mdebug[39m: Authentication failed but is required to proceed.
+
+            </system-out>
         </testcase>
-        <testcase classname="test/routes/sql/UserRoute.test.ts" name="Route:UserSQL Tests &gt; Can make create request (with admin token)." time="0.0128572">
+        <testcase classname="test/routes/sql/AuthOTPRoute.test.ts" name="Route:AuthOTPSQL Tests &gt; Cannot verify an OTP challenge with an invalid token." time="0.0164338">
+            <system-out>
+2026-07-19T21:54:17.746Z [34mdebug[39m: Authentication failed but is required to proceed.
+
+2026-07-19T21:54:17.748Z [34mdebug[39m: Invalid authentication request.
+
+            </system-out>
         </testcase>
-        <testcase classname="test/routes/sql/UserRoute.test.ts" name="Route:UserSQL Tests &gt; Can make delete request (with admin token)." time="0.0137399">
+        <testcase classname="test/routes/sql/AuthOTPRoute.test.ts" name="Route:AuthOTPSQL Tests &gt; Cannot verify an OTP challenge without first requesting one (no session state)." time="0.0135378">
+            <system-out>
+2026-07-19T21:54:17.761Z [34mdebug[39m: Invalid authentication request.
+
+            </system-out>
         </testcase>
-        <testcase classname="test/routes/sql/UserRoute.test.ts" name="Route:UserSQL Tests &gt; Can make findAll request (with admin token)." time="0.0260072">
+        <testcase classname="test/routes/sql/AuthOTPRoute.test.ts" name="Route:AuthOTPSQL Tests &gt; Cannot request a challenge for an unknown contact id." time="0.0064239">
+            <system-out>
+2026-07-19T21:54:17.768Z [34mdebug[39m: Authentication failed but is required to proceed.
+
+            </system-out>
         </testcase>
-        <testcase classname="test/routes/sql/UserRoute.test.ts" name="Route:UserSQL Tests &gt; Can make findById request (with admin token)." time="0.0148538">
+        <testcase classname="test/routes/sql/AuthOTPRoute.test.ts" name="Route:AuthOTPSQL Tests &gt; Cannot authenticate without any request data." time="0.0055661">
+            <system-out>
+2026-07-19T21:54:17.773Z [34mdebug[39m: Cannot read properties of undefined (reading &apos;id&apos;)
+
+            </system-out>
         </testcase>
-        <testcase classname="test/routes/sql/UserRoute.test.ts" name="Route:UserSQL Tests &gt; Can make truncate request (with admin token)." time="0.022756">
+    </testsuite>
+    <testsuite name="test/routes/sql/AuthPasskeyRoute.test.ts" timestamp="2026-07-19T21:54:39.433Z" hostname="Jane" tests="5" failures="0" errors="0" skipped="0" time="0.9468264">
+        <testcase classname="test/routes/sql/AuthPasskeyRoute.test.ts" name="Route:AuthPasskeySQL Tests &gt; Can begin a passkey ceremony and receive challenge options." time="0.036412">
+            <system-out>
+2026-07-19T21:54:30.621Z [34mdebug[39m: Authentication failed but is required to proceed.
+
+            </system-out>
         </testcase>
-        <testcase classname="test/routes/sql/UserRoute.test.ts" name="Route:UserSQL Tests &gt; Can make update request (with admin token)." time="0.0139698">
+        <testcase classname="test/routes/sql/AuthPasskeyRoute.test.ts" name="Route:AuthPasskeySQL Tests &gt; Can complete a passkey ceremony with a valid assertion and authenticate." time="0.0421915">
+            <system-out>
+2026-07-19T21:54:30.654Z [34mdebug[39m: Authentication failed but is required to proceed.
+
+            </system-out>
         </testcase>
-        <testcase classname="test/routes/sql/UserRoute.test.ts" name="Route:UserSQL Tests &gt; Can make update property request (with admin token)." time="0.0129129">
+        <testcase classname="test/routes/sql/AuthPasskeyRoute.test.ts" name="Route:AuthPasskeySQL Tests &gt; Cannot authenticate with an unknown credential id." time="0.0084634">
+            <system-out>
+2026-07-19T21:54:30.674Z [34mdebug[39m: Authentication failed but is required to proceed.
+
+2026-07-19T21:54:30.676Z [34mdebug[39m: Passkey authentication failed.
+
+            </system-out>
+        </testcase>
+        <testcase classname="test/routes/sql/AuthPasskeyRoute.test.ts" name="Route:AuthPasskeySQL Tests &gt; Cannot authenticate when SimpleWebAuthn fails to verify the assertion." time="0.0155477">
+            <system-out>
+2026-07-19T21:54:30.690Z [34mdebug[39m: Authentication failed but is required to proceed.
+
+2026-07-19T21:54:30.692Z [34mdebug[39m: Passkey authentication failed.
+
+            </system-out>
+        </testcase>
+        <testcase classname="test/routes/sql/AuthPasskeyRoute.test.ts" name="Route:AuthPasskeySQL Tests &gt; Cannot authenticate with a malformed assertion response." time="0.0084015">
+            <system-out>
+2026-07-19T21:54:30.700Z [34mdebug[39m: No passkey ceremony in progress for this session.
+
+            </system-out>
+        </testcase>
+    </testsuite>
+    <testsuite name="test/routes/sql/AuthTOTPRoute.test.ts" timestamp="2026-07-19T21:54:39.434Z" hostname="Jane" tests="3" failures="0" errors="0" skipped="0" time="0.9011318">
+        <testcase classname="test/routes/sql/AuthTOTPRoute.test.ts" name="Route:AuthTOTPSQL Tests &gt; Can authenticate with valid user id and totp." time="0.0590931">
+        </testcase>
+        <testcase classname="test/routes/sql/AuthTOTPRoute.test.ts" name="Route:AuthTOTPSQL Tests &gt; Can authenticate with valid user id and totp when multiple totp secrets exist." time="0.0173212">
+        </testcase>
+        <testcase classname="test/routes/sql/AuthTOTPRoute.test.ts" name="Route:AuthTOTPSQL Tests &gt; Cannot authenticate with invalid user id and totp." time="0.0172851">
+            <system-out>
+2026-07-19T21:54:19.841Z [34mdebug[39m: Cannot read properties of undefined (reading &apos;length&apos;)
+
+            </system-out>
+        </testcase>
+    </testsuite>
+    <testsuite name="test/routes/sql/ProfileRoute.test.ts" timestamp="2026-07-19T21:54:39.434Z" hostname="Jane" tests="8" failures="0" errors="0" skipped="0" time="1.0048519">
+        <testcase classname="test/routes/sql/ProfileRoute.test.ts" name="Route:ProfileSQL Tests &gt; Can make count request (with admin token)." time="0.0660087">
+        </testcase>
+        <testcase classname="test/routes/sql/ProfileRoute.test.ts" name="Route:ProfileSQL Tests &gt; Can make create request (with admin token)." time="0.0121336">
+        </testcase>
+        <testcase classname="test/routes/sql/ProfileRoute.test.ts" name="Route:ProfileSQL Tests &gt; Can make delete request (with admin token)." time="0.013003">
+        </testcase>
+        <testcase classname="test/routes/sql/ProfileRoute.test.ts" name="Route:ProfileSQL Tests &gt; Can make findAll request (with admin token)." time="0.0245591">
+        </testcase>
+        <testcase classname="test/routes/sql/ProfileRoute.test.ts" name="Route:ProfileSQL Tests &gt; Can make findById request (with admin token)." time="0.0096669">
+        </testcase>
+        <testcase classname="test/routes/sql/ProfileRoute.test.ts" name="Route:ProfileSQL Tests &gt; Can make truncate request (with admin token)." time="0.0226633">
+        </testcase>
+        <testcase classname="test/routes/sql/ProfileRoute.test.ts" name="Route:ProfileSQL Tests &gt; Can make update request (with admin token)." time="0.014778">
+        </testcase>
+        <testcase classname="test/routes/sql/ProfileRoute.test.ts" name="Route:ProfileSQL Tests &gt; Can make update property request (with admin token)." time="0.0130054">
+        </testcase>
+    </testsuite>
+    <testsuite name="test/routes/sql/SecretRoute.test.ts" timestamp="2026-07-19T21:54:39.435Z" hostname="Jane" tests="15" failures="0" errors="0" skipped="0" time="1.7540246">
+        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Can make count request (with admin token)." time="0.2051905">
+        </testcase>
+        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Can make create request (with admin token)." time="0.0680483">
+        </testcase>
+        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Can make delete request (with admin token)." time="0.0427438">
+        </testcase>
+        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Can make findAll request (with admin token)." time="0.1638281">
+        </testcase>
+        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Can make findById request (with admin token)." time="0.0380282">
+        </testcase>
+        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Can make truncate request (with admin token)." time="0.1652713">
+        </testcase>
+        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Cannot begin passkey registration without authentication." time="0.0079722">
+            <system-out>
+2026-07-19T21:53:56.713Z [34mdebug[39m: Authentication is required to register a passkey.
+
+            </system-out>
+        </testcase>
+        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Can begin passkey registration and receive creation options (with admin token)." time="0.0045246">
+        </testcase>
+        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Cannot create a passkey secret without a prior registration ceremony." time="0.005442">
+            <system-out>
+2026-07-19T21:53:56.726Z [34mdebug[39m: No passkey registration ceremony in progress for this session.
+
+            </system-out>
+        </testcase>
+        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Can create a passkey secret with a valid registration response (with admin token)." time="0.0112498">
+        </testcase>
+        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Cannot register the same passkey credential twice." time="0.0133064">
+            <system-out>
+2026-07-19T21:53:56.750Z [34mdebug[39m: A resource with that identifier already exists.
+
+            </system-out>
+        </testcase>
+        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Can create a TOTP secret with a server-generated secret (with admin token)." time="0.0084973">
+        </testcase>
+        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Can create a TOTP secret with a caller-supplied secret (with admin token)." time="0.0066581">
+        </testcase>
+        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Cannot create a TOTP secret with a secret that is too short." time="0.0037752">
+            <system-out>
+2026-07-19T21:53:56.771Z [34mdebug[39m: A secret of type &apos;totp&apos; must be a Base32-encoded string of at least 128 bits.
+
+            </system-out>
+        </testcase>
+        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Cannot create a TOTP secret with a secret that isn&apos;t valid Base32." time="0.0036027">
+            <system-out>
+2026-07-19T21:53:56.774Z [34mdebug[39m: A secret of type &apos;totp&apos; must be a Base32-encoded string of at least 128 bits.
+
+            </system-out>
+        </testcase>
+    </testsuite>
+    <testsuite name="test/routes/sql/UserRoute.test.ts" timestamp="2026-07-19T21:54:39.437Z" hostname="Jane" tests="8" failures="0" errors="0" skipped="0" time="1.0213384">
+        <testcase classname="test/routes/sql/UserRoute.test.ts" name="Route:UserSQL Tests &gt; Can make count request (with admin token)." time="0.066119">
+        </testcase>
+        <testcase classname="test/routes/sql/UserRoute.test.ts" name="Route:UserSQL Tests &gt; Can make create request (with admin token)." time="0.0123469">
+        </testcase>
+        <testcase classname="test/routes/sql/UserRoute.test.ts" name="Route:UserSQL Tests &gt; Can make delete request (with admin token)." time="0.0138786">
+        </testcase>
+        <testcase classname="test/routes/sql/UserRoute.test.ts" name="Route:UserSQL Tests &gt; Can make findAll request (with admin token)." time="0.0211987">
+        </testcase>
+        <testcase classname="test/routes/sql/UserRoute.test.ts" name="Route:UserSQL Tests &gt; Can make findById request (with admin token)." time="0.0088728">
+        </testcase>
+        <testcase classname="test/routes/sql/UserRoute.test.ts" name="Route:UserSQL Tests &gt; Can make truncate request (with admin token)." time="0.0274068">
+        </testcase>
+        <testcase classname="test/routes/sql/UserRoute.test.ts" name="Route:UserSQL Tests &gt; Can make update request (with admin token)." time="0.0159087">
+        </testcase>
+        <testcase classname="test/routes/sql/UserRoute.test.ts" name="Route:UserSQL Tests &gt; Can make update property request (with admin token)." time="0.0126026">
         </testcase>
     </testsuite>
 </testsuites>

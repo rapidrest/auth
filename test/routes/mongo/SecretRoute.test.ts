@@ -23,11 +23,12 @@ import {
 } from "@rapidrest/service-core";
 import { JWTUtils, Logger } from "@rapidrest/core";
 import { generateRegistrationOptions, verifyRegistrationResponse } from "@simplewebauthn/server";
+import { generateSecret as generateTOTPSecret } from "otplib";
 import * as uuid from "uuid";
 import { SecretMongo } from "../../../src/models/mongo/SecretMongo.js";
 import { MongoMemoryServer } from "mongodb-memory-server";
 import { SecretType } from "../../../src/models/types.js";
-import { StoredPasskeyCredential } from "../../../src/auth/types.js";
+import { StoredPasskeyCredential, TOTPSecret } from "../../../src/auth/types.js";
 
 const mockGenerateRegistrationOptions = generateRegistrationOptions as unknown as ReturnType<typeof vi.fn>;
 const mockVerifyRegistrationResponse = verifyRegistrationResponse as unknown as ReturnType<typeof vi.fn>;
@@ -402,5 +403,60 @@ describe("Route:SecretMongo Tests", () => {
             .send({ data: makeRegistrationBody(credentialId), type: SecretType.PASSKEY, userUid: uuid.v4() });
 
         expect(secondResult.status).toBe(400);
+    });
+
+    it("Can create a TOTP secret with a server-generated secret (with admin token).", async () => {
+        const userUid = uuid.v4();
+
+        const result = await request(server.getApplication())
+            .post(baseUrl)
+            .set("Authorization", "jwt " + adminToken)
+            .send({ type: SecretType.TOTP, userUid });
+
+        expect(result.status).toBeGreaterThanOrEqual(200);
+        expect(result.status).toBeLessThan(300);
+        expect(result.body.data).toBeDefined();
+        expect(result.body.data.secret).toEqual(expect.any(String));
+        expect(result.body.data.digits).toBe(6);
+        expect(result.body.data.period).toBe(30);
+        expect(result.body.data.algorithm).toBe("sha1");
+        // The `otpauth://` provisioning URI is only computed for the response, never persisted.
+        expect(result.body.data.uri).toMatch(/^otpauth:\/\/totp\//);
+
+        const stored: SecretMongo | null = await repo.findOne({ uid: result.body.uid } as any);
+        expect(stored).toBeDefined();
+        expect((stored?.data as TOTPSecret).secret).toBe(result.body.data.secret);
+        expect(stored?.data.uri).toBeUndefined();
+    });
+
+    it("Can create a TOTP secret with a caller-supplied secret (with admin token).", async () => {
+        const secret = generateTOTPSecret();
+
+        const result = await request(server.getApplication())
+            .post(baseUrl)
+            .set("Authorization", "jwt " + adminToken)
+            .send({ data: secret, type: SecretType.TOTP, userUid: uuid.v4() });
+
+        expect(result.status).toBeGreaterThanOrEqual(200);
+        expect(result.status).toBeLessThan(300);
+        expect(result.body.data.secret).toBe(secret);
+    });
+
+    it("Cannot create a TOTP secret with a secret that is too short.", async () => {
+        const result = await request(server.getApplication())
+            .post(baseUrl)
+            .set("Authorization", "jwt " + adminToken)
+            .send({ data: "JBSWY3DP", type: SecretType.TOTP, userUid: uuid.v4() });
+
+        expect(result.status).toBe(400);
+    });
+
+    it("Cannot create a TOTP secret with a secret that isn't valid Base32.", async () => {
+        const result = await request(server.getApplication())
+            .post(baseUrl)
+            .set("Authorization", "jwt " + adminToken)
+            .send({ data: "not-valid-base32-!!!", type: SecretType.TOTP, userUid: uuid.v4() });
+
+        expect(result.status).toBe(400);
     });
 });

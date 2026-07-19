@@ -14,12 +14,14 @@ import { Secret, SecretType } from "../models/types.js";
 import { ApiError, JWTUser, ObjectDecorators } from "@rapidrest/core";
 import {
     generatePasskeyRegistrationOptions,
+    generateTOTPURI,
     importArgon2,
     importOTPLib,
     isPasskeyRegistrationResponse,
+    isValidTOTPSecret,
     verifyPasskeyRegistrationResponse,
 } from "../auth/shared.js";
-import { PasskeyConfig, StoredPasskeyCredential } from "../auth/types.js";
+import { PasskeyConfig, StoredPasskeyCredential, TOTPConfig, TOTPSecret } from "../auth/types.js";
 
 const { Config } = ObjectDecorators;
 const { Description, Returns, Summary } = DocDecorators;
@@ -39,6 +41,17 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
         rpName: "rapidrest",
         rpID: "rapidrest",
         origin: "http://localhost:3000",
+    };
+
+    /**
+     * The issuer configuration used for validating and generating TOTP (RFC 6238) registration data.
+     */
+    @Config("auth:totp")
+    protected totpConfig: TOTPConfig = {
+        issuer: "rapidrest",
+        digits: 6,
+        period: 30,
+        algorithm: "sha1",
     };
 
     /**
@@ -95,14 +108,7 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
                     await this.validatePasskeyCreate(obj, req);
                     break;
                 case SecretType.TOTP:
-                    {
-                        // Allow the client to specify their own secret or we can generate one for them.
-                        const { generateSecret } = await importOTPLib();
-                        const secret: string = (typeof obj.data === "string" && obj.data) || generateSecret();
-                        obj.data = {
-                            secret,
-                        };
-                    }
+                    await this.validateTOTPCreate(obj);
                     break;
             }
         }
@@ -175,6 +181,45 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
     }
 
     /**
+     * Validates (or generates) the secret for a new `totp` secret per RFC 6238/RFC 4226.
+     *
+     * The client may either bring their own Base32-encoded secret (e.g. one generated on a
+     * different server for migration purposes) or, more commonly, omit `data` entirely and have one
+     * generated here. Either way, the secret's token parameters (`digits`/`period`/`algorithm`) are
+     * captured onto the stored `TOTPSecret` alongside it, rather than left to always defer to
+     * `totpConfig`, so verification keeps working for this secret even if the configured defaults
+     * change later.
+     *
+     * @param obj The secret being created. If `data` is a string, it's used as the caller-supplied
+     * secret; otherwise a new one is generated.
+     */
+    protected async validateTOTPCreate(obj: Partial<T>): Promise<void> {
+        const { generateSecret } = await importOTPLib();
+
+        let secret: string;
+        if (obj.data !== undefined) {
+            if (typeof obj.data !== "string" || !(await isValidTOTPSecret(obj.data))) {
+                throw new ApiError(
+                    ApiErrors.INVALID_REQUEST,
+                    400,
+                    "A secret of type 'totp' must be a Base32-encoded string of at least 128 bits.",
+                );
+            }
+            secret = obj.data;
+        } else {
+            secret = generateSecret();
+        }
+
+        const totpSecret: TOTPSecret = {
+            secret,
+            digits: this.totpConfig.digits,
+            period: this.totpConfig.period,
+            algorithm: this.totpConfig.algorithm,
+        };
+        obj.data = totpSecret;
+    }
+
+    /**
      * Begins a WebAuthn passkey registration ceremony for the authenticated user: generates a set of
      * `PublicKeyCredentialCreationOptions` (RFC/spec compliant per https://www.w3.org/TR/webauthn-2/), scoped
      * to exclude any credentials the user already has registered, and stores the challenge in the session for
@@ -232,6 +277,14 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
         for (const obj of objs) {
             if ([SecretType.PASSKEY, SecretType.PASSWORD].includes(obj.type)) {
                 delete obj.data;
+            } else if (obj.type === SecretType.TOTP && obj.data) {
+                // The `otpauth://` provisioning URI is derived from the persisted secret rather than
+                // stored itself, so it's computed fresh here for the response only.
+                (obj.data as TOTPSecret & { uri: string }).uri = await generateTOTPURI(
+                    this.totpConfig,
+                    obj.userUid,
+                    obj.data as TOTPSecret,
+                );
             }
         }
 

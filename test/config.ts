@@ -67,6 +67,12 @@ conf.defaults({
             rpID: "rapidrest",
             origin: "http://localhost:3000",
         },
+        totp: {
+            issuer: "rapidrest",
+            digits: 6,
+            period: 30,
+            algorithm: "sha1",
+        },
     },
     oauth_provider: {
         name: "oauth_test",
