@@ -62,7 +62,7 @@ export class TOTPStrategy implements AuthStrategy {
         res: HttpResponse,
         required?: boolean,
     ): Promise<AuthResult | undefined> {
-        const { data, payload } = getRequestData(req);
+        const { data, payload } = getRequestData(req, this.options.headerKey, this.options.headerScheme);
 
         const user: JWTUser | undefined = await this.verify(payload);
         if (user) {
@@ -92,8 +92,8 @@ export class TOTPStrategy implements AuthStrategy {
             const secret: TOTPSecret[] = await this.options.getSecrets(user.uid);
 
             if (secret) {
-                let result: any = verifyTOTP(payload.token, secret);
-                if (result && result.verified) {
+                let result: any = await verifyTOTP(payload.token, secret);
+                if (result && result.valid) {
                     return user;
                 }
             }

@@ -138,6 +138,7 @@ export const getRequestData = function (
             const parts: string[] = data.split(":");
             obj.id = parts[0];
             obj.password = parts[1];
+            obj.token = parts[1];
         }
 
         payload = obj;

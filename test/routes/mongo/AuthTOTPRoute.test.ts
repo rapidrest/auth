@@ -82,7 +82,7 @@ describe("Route:AuthBasicMongo Tests", () => {
                 secret: otplib.generateSecret(),
                 epochTolerance: [5, 0],
             },
-            type: SecretType.PASSWORD,
+            type: SecretType.TOTP,
             userUid: uuid.v4(),
             ...data,
         });
