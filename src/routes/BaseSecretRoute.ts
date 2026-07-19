@@ -44,6 +44,22 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
     };
 
     /**
+     * The relying party configuration used for validating and generating FIDO2 hardware security key
+     * (WebAuthn) registration data. Kept separate from `passkeyConfig` since a hardware key deployment
+     * commonly wants a different `authenticatorAttachment`/`residentKey` policy — a hardware key is
+     * typically registered as a `"cross-platform"`, non-discoverable credential tied to a known
+     * account, rather than a discoverable, possibly-synced passkey.
+     */
+    @Config("auth:fido2")
+    protected fido2Config: PasskeyConfig = {
+        rpName: "rapidrest",
+        rpID: "rapidrest",
+        origin: "http://localhost:3000",
+        authenticatorAttachment: "cross-platform",
+        residentKey: "discouraged",
+    };
+
+    /**
      * The issuer configuration used for validating and generating TOTP (RFC 6238) registration data.
      */
     @Config("auth:totp")
@@ -89,7 +105,11 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
         for (const obj of objs) {
             switch (obj.type) {
                 case SecretType.FIDO2:
-                case SecretType.OPENID:
+                    await this.validateWebAuthnCreate(obj, req, this.fido2Config);
+                    break;
+                case SecretType.PASSKEY:
+                    await this.validateWebAuthnCreate(obj, req, this.passkeyConfig);
+                    break;
                 case SecretType.PASSWORD:
                     {
                         if (typeof obj.data === "string") {
@@ -104,9 +124,6 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
                         }
                     }
                     break;
-                case SecretType.PASSKEY:
-                    await this.validatePasskeyCreate(obj, req);
-                    break;
                 case SecretType.TOTP:
                     await this.validateTOTPCreate(obj);
                     break;
@@ -119,21 +136,26 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
      * `navigator.credentials.create()` using the options from `generatePasskeyRegistrationOptions()`) against
      * the challenge stored in the session, and replaces `obj.data` with the resulting `StoredPasskeyCredential`.
      *
+     * Shared by both `passkey` and `fido2` secrets — the two differ only in relying party configuration
+     * (see `passkeyConfig`/`fido2Config`) and which `SecretType` they're persisted under, not in the
+     * underlying WebAuthn ceremony.
+     *
      * Per the WebAuthn registration ceremony (https://www.w3.org/TR/webauthn-2/#sctn-registering-a-new-credential),
      * the credential ID must be unique across all accounts known to this relying party. Rather than duplicate that
      * check here, the credential ID is used directly as this secret's own `uid` so that `ModelRoute`'s existing
      * create-time identifier check rejects the request should the ID already be registered to any account. This
      * also lets a login ceremony, which only has the credential ID to go on, look the secret up directly by its
-     * primary key (see `BaseAuthPasskeyRoute.getCredentialById`/`updateCredentialCounter`).
+     * primary key (see `BaseAuthPasskeyRoute`/`BaseAuthFIDO2Route`'s `getCredentialById`/`updateCredentialCounter`).
      *
      * @param obj The secret being created. Its `data` property must be a `RegistrationResponseJSON`.
      * @param req The source HTTP request, used to retrieve the challenge stored in the session by a prior call to
      * `generatePasskeyRegistrationOptions()`.
+     * @param config The relying party configuration to verify the response against.
      */
-    protected async validatePasskeyCreate(obj: Partial<T>, req: HttpRequest): Promise<void> {
+    protected async validateWebAuthnCreate(obj: Partial<T>, req: HttpRequest, config: PasskeyConfig): Promise<void> {
         if (!req.session) {
             throw new Error(
-                "Passkey secrets require session support. Configure the `session` config " +
+                "This secret type requires session support. Configure the `session` config " +
                     "block so the session middleware is registered.",
             );
         }
@@ -141,11 +163,11 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
             throw new ApiError(
                 ApiErrors.INVALID_REQUEST,
                 400,
-                "No passkey registration ceremony in progress for this session.",
+                "No WebAuthn registration ceremony in progress for this session.",
             );
         }
         if (typeof obj.userUid !== "string" || obj.userUid.length === 0) {
-            throw new ApiError(ApiErrors.INVALID_REQUEST, 400, "A secret of type 'passkey' must specify a 'userUid'.");
+            throw new ApiError(ApiErrors.INVALID_REQUEST, 400, "This secret type must specify a 'userUid'.");
         }
 
         // The challenge is single-use regardless of outcome — cleared as soon as it's read, before
@@ -157,13 +179,13 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
             throw new ApiError(
                 ApiErrors.INVALID_REQUEST,
                 400,
-                "A secret of type 'passkey' must specify a valid WebAuthn registration response.",
+                "This secret type must specify a valid WebAuthn registration response.",
             );
         }
 
-        const result = await verifyPasskeyRegistrationResponse(this.passkeyConfig, expectedChallenge, obj.data);
+        const result = await verifyPasskeyRegistrationResponse(config, expectedChallenge, obj.data);
         if (!result.verified || !result.registrationInfo) {
-            throw new ApiError(ApiErrors.INVALID_REQUEST, 400, "Passkey registration could not be verified.");
+            throw new ApiError(ApiErrors.INVALID_REQUEST, 400, "WebAuthn registration could not be verified.");
         }
 
         const { credential } = result.registrationInfo;
@@ -220,12 +242,41 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
     }
 
     /**
-     * Begins a WebAuthn passkey registration ceremony for the authenticated user: generates a set of
+     * Begins a WebAuthn registration ceremony for the authenticated user: generates a set of
      * `PublicKeyCredentialCreationOptions` (RFC/spec compliant per https://www.w3.org/TR/webauthn-2/), scoped
-     * to exclude any credentials the user already has registered, and stores the challenge in the session for
-     * verification by `validatePasskeyCreate()` once the client completes the ceremony and submits a new
-     * `passkey` secret.
+     * to exclude any credentials of the given type the user already has registered, and stores the challenge
+     * in the session for verification by `validateWebAuthnCreate()` once the client completes the ceremony
+     * and submits a new secret of that type. Shared by both the `passkey` and `fido2` registration endpoints.
+     *
+     * @param req The source HTTP request. Used to persist the generated challenge in the session.
+     * @param user The authenticated user the new credential will be associated with.
+     * @param type The secret type being registered — `passkey` or `fido2`.
+     * @param config The relying party configuration to generate options with.
      */
+    private async beginWebAuthnRegistration(
+        req: HttpRequest,
+        user: JWTUser,
+        type: SecretType,
+        config: PasskeyConfig,
+    ): Promise<any> {
+        if (!this.repoUtils) {
+            throw new Error("repoUtils is not set.");
+        }
+
+        const existing: T[] = await this.repoUtils.find({ type, userUid: user.uid }, { ignoreACL: true, user });
+        const excludeCredentials = existing.map((secret) => {
+            const credential: StoredPasskeyCredential = secret.data;
+            return { id: credential.id, transports: credential.transports };
+        });
+
+        return await generatePasskeyRegistrationOptions(
+            config,
+            req,
+            { id: user.uid, name: user.uid },
+            excludeCredentials,
+        );
+    }
+
     @Summary("Generate Passkey Registration Options")
     @Description(
         "Begins a WebAuthn passkey registration ceremony for the authenticated user and returns the " +
@@ -236,31 +287,30 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
     @Get("/passkey/register")
     public async passkeyRegistrationOptions(@Request req: HttpRequest, @User user?: JWTUser): Promise<any> {
         if (!user) {
+            throw new ApiError(ApiErrors.AUTH_REQUIRED, 401, "Authentication is required to register a passkey.");
+        }
+
+        return this.beginWebAuthnRegistration(req, user, SecretType.PASSKEY, this.passkeyConfig);
+    }
+
+    @Summary("Generate FIDO2 Registration Options")
+    @Description(
+        "Begins a WebAuthn registration ceremony for the authenticated user's FIDO2 hardware security key and " +
+            "returns the `PublicKeyCredentialCreationOptions` to pass to `navigator.credentials.create()`. Submit " +
+            "the resulting attestation response as the `data` of a new `fido2` secret to finish the ceremony.",
+    )
+    @Returns([Object])
+    @Get("/fido2/register")
+    public async fido2RegistrationOptions(@Request req: HttpRequest, @User user?: JWTUser): Promise<any> {
+        if (!user) {
             throw new ApiError(
                 ApiErrors.AUTH_REQUIRED,
                 401,
-                "Authentication is required to register a passkey.",
+                "Authentication is required to register a FIDO2 security key.",
             );
         }
-        if (!this.repoUtils) {
-            throw new Error("repoUtils is not set.");
-        }
 
-        const existing: T[] = await this.repoUtils.find(
-            { type: SecretType.PASSKEY, userUid: user.uid },
-            { ignoreACL: true, user },
-        );
-        const excludeCredentials = existing.map((secret) => {
-            const credential: StoredPasskeyCredential = secret.data;
-            return { id: credential.id, transports: credential.transports };
-        });
-
-        return await generatePasskeyRegistrationOptions(
-            this.passkeyConfig,
-            req,
-            { id: user.uid, name: user.uid },
-            excludeCredentials,
-        );
+        return this.beginWebAuthnRegistration(req, user, SecretType.FIDO2, this.fido2Config);
     }
 
     @Summary("Create Secret(s)")
@@ -275,7 +325,7 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
         // returned back to the client.
         const objs: Array<T> = Array.isArray(result) ? result : [result];
         for (const obj of objs) {
-            if ([SecretType.PASSKEY, SecretType.PASSWORD].includes(obj.type)) {
+            if ([SecretType.FIDO2, SecretType.PASSKEY, SecretType.PASSWORD].includes(obj.type)) {
                 delete obj.data;
             } else if (obj.type === SecretType.TOTP && obj.data) {
                 // The `otpauth://` provisioning URI is derived from the persisted secret rather than

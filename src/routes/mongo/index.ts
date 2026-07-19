@@ -1,5 +1,6 @@
 export * from "./BaseAliasRouteMongo.js";
 export * from "./BaseAuthBasicRouteMongo.js";
+export * from "./BaseAuthFIDO2RouteMongo.js";
 export * from "./BaseAuthMFARouteMongo.js";
 export * from "./BaseAuthOIDCRouteMongo.js";
 export * from "./BaseAuthOTPRouteMongo.js";

@@ -48,6 +48,19 @@ export interface PasskeyConfig {
     requireUserVerification?: boolean;
     /** How long (in ms) the user has to complete the ceremony. Default is `60000`. */
     timeout?: number;
+    /**
+     * Restricts which category of authenticator may be used to create a new credential during
+     * registration. Set to `"cross-platform"` to steer users toward roaming/hardware security keys
+     * (e.g. a YubiKey), or `"platform"` for built-in authenticators (Face ID, Windows Hello, etc).
+     * Leave unset to allow either — the appropriate default for passkey registration.
+     */
+    authenticatorAttachment?: "platform" | "cross-platform";
+    /**
+     * Whether a newly registered credential must be discoverable (usable in a "usernameless" flow).
+     * Default is `"preferred"`. A hardware security key used purely as a known-account credential
+     * typically doesn't need this and can use `"discouraged"`.
+     */
+    residentKey?: "discouraged" | "preferred" | "required";
 }
 
 /**

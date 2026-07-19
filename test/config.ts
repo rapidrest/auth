@@ -67,6 +67,13 @@ conf.defaults({
             rpID: "rapidrest",
             origin: "http://localhost:3000",
         },
+        fido2: {
+            rpName: "rapidrest",
+            rpID: "rapidrest",
+            origin: "http://localhost:3000",
+            authenticatorAttachment: "cross-platform",
+            residentKey: "discouraged",
+        },
         totp: {
             issuer: "rapidrest",
             digits: 6,

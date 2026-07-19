@@ -405,6 +405,128 @@ describe("Route:SecretMongo Tests", () => {
         expect(secondResult.status).toBe(400);
     });
 
+    it("Cannot begin FIDO2 registration without authentication.", async () => {
+        const result = await request(server.getApplication()).get(baseUrl + "/fido2/register");
+
+        expect(result.status).toBe(401);
+        expect(mockGenerateRegistrationOptions).not.toHaveBeenCalled();
+    });
+
+    it("Can begin FIDO2 registration and receive creation options (with admin token).", async () => {
+        mockGenerateRegistrationOptions.mockResolvedValue({ challenge: "test-challenge", rp: { id: "rapidrest" } });
+
+        const result = await request(server.getApplication())
+            .get(baseUrl + "/fido2/register")
+            .set("Authorization", "jwt " + adminToken);
+
+        expect(result.status).toBeGreaterThanOrEqual(200);
+        expect(result.status).toBeLessThan(300);
+        expect(result.body).toEqual({ challenge: "test-challenge", rp: { id: "rapidrest" } });
+    });
+
+    it("Cannot create a FIDO2 secret without a prior registration ceremony.", async () => {
+        const credentialId = uuid.v4();
+
+        const result = await request(server.getApplication())
+            .post(baseUrl)
+            .set("Authorization", "jwt " + adminToken)
+            .send({
+                data: makeRegistrationBody(credentialId),
+                type: SecretType.FIDO2,
+                userUid: uuid.v4(),
+            });
+
+        expect(result.status).toBe(400);
+        expect(mockVerifyRegistrationResponse).not.toHaveBeenCalled();
+    });
+
+    it("Can create a FIDO2 secret with a valid registration response (with admin token).", async () => {
+        const credentialId = uuid.v4();
+        const userUid = uuid.v4();
+        mockGenerateRegistrationOptions.mockResolvedValue({ challenge: "test-challenge", rp: { id: "rapidrest" } });
+
+        const client = agent(server.getApplication());
+        const beginResult = await client
+            .get(baseUrl + "/fido2/register")
+            .set("Authorization", "jwt " + adminToken);
+        expect(beginResult.status).toBeGreaterThanOrEqual(200);
+        expect(beginResult.status).toBeLessThan(300);
+
+        mockVerifyRegistrationResponse.mockResolvedValue({
+            verified: true,
+            registrationInfo: {
+                credential: {
+                    id: credentialId,
+                    publicKey: new Uint8Array([1, 2, 3, 4]),
+                    counter: 0,
+                    transports: ["usb"],
+                },
+            },
+        });
+
+        const finishResult = await client
+            .post(baseUrl)
+            .set("Authorization", "jwt " + adminToken)
+            .send({
+                data: makeRegistrationBody(credentialId),
+                type: SecretType.FIDO2,
+                userUid,
+            });
+
+        expect(finishResult.status).toBeGreaterThanOrEqual(200);
+        expect(finishResult.status).toBeLessThan(300);
+        expect(finishResult.body).toBeDefined();
+        expect(finishResult.body).not.toHaveProperty("data");
+        expect(mockVerifyRegistrationResponse).toHaveBeenCalledWith(
+            expect.objectContaining({
+                expectedChallenge: "test-challenge",
+                expectedOrigin: "http://localhost:3000",
+                expectedRPID: "rapidrest",
+            }),
+        );
+
+        // The credential's own `uid` should double as its WebAuthn credential ID, so that a login
+        // ceremony (which only has the credential ID to go on) can look the secret up directly.
+        const stored: SecretMongo | null = await repo.findOne({ uid: credentialId } as any);
+        expect(stored).toBeDefined();
+        expect((stored?.data as StoredPasskeyCredential)?.uid).toBe(userUid);
+        expect((stored?.data as StoredPasskeyCredential)?.counter).toBe(0);
+    });
+
+    it("Cannot register the same FIDO2 credential twice.", async () => {
+        const credentialId = uuid.v4();
+        mockGenerateRegistrationOptions.mockResolvedValue({ challenge: "test-challenge", rp: { id: "rapidrest" } });
+        mockVerifyRegistrationResponse.mockResolvedValue({
+            verified: true,
+            registrationInfo: {
+                credential: {
+                    id: credentialId,
+                    publicKey: new Uint8Array([1, 2, 3, 4]),
+                    counter: 0,
+                    transports: ["usb"],
+                },
+            },
+        });
+
+        const firstClient = agent(server.getApplication());
+        await firstClient.get(baseUrl + "/fido2/register").set("Authorization", "jwt " + adminToken);
+        const firstResult = await firstClient
+            .post(baseUrl)
+            .set("Authorization", "jwt " + adminToken)
+            .send({ data: makeRegistrationBody(credentialId), type: SecretType.FIDO2, userUid: uuid.v4() });
+        expect(firstResult.status).toBeGreaterThanOrEqual(200);
+        expect(firstResult.status).toBeLessThan(300);
+
+        const secondClient = agent(server.getApplication());
+        await secondClient.get(baseUrl + "/fido2/register").set("Authorization", "jwt " + adminToken);
+        const secondResult = await secondClient
+            .post(baseUrl)
+            .set("Authorization", "jwt " + adminToken)
+            .send({ data: makeRegistrationBody(credentialId), type: SecretType.FIDO2, userUid: uuid.v4() });
+
+        expect(secondResult.status).toBe(400);
+    });
+
     it("Can create a TOTP secret with a server-generated secret (with admin token).", async () => {
         const userUid = uuid.v4();
 

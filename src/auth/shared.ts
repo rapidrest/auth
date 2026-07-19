@@ -361,6 +361,8 @@ export const generatePasskeyRegistrationOptions = async function (
         timeout: config.timeout,
         authenticatorSelection: {
             userVerification: config.userVerification ?? "preferred",
+            authenticatorAttachment: config.authenticatorAttachment,
+            residentKey: config.residentKey,
         },
         excludeCredentials,
     });

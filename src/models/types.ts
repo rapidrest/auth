@@ -15,13 +15,6 @@ export class AuthResult {
 }
 
 /**
- * Defines a single user's account within the system.
- *
- * @author Jean-Philippe Steinmetz
- */
-export interface User extends BaseEntity, JWTUser {}
-
-/**
  *
  */
 export enum AliasType {
@@ -46,46 +39,6 @@ export interface Alias extends BaseEntity {
 
     /** Indicates if this alias has been verified. */
     verified: boolean;
-}
-
-/**
- *
- */
-export enum SecretType {
-    FIDO2 = "fido2",
-    OPENID = "openid",
-    PASSKEY = "passkey",
-    PASSWORD = "password",
-    TOTP = "totp",
-}
-
-/**
- * Describes a single authentication secret associated with a specific user account. A secret is used
- * to authenticate the user with the system.
- *
- * Supported types of secrets:
- * * `openid`
- * * `password`
- * * `passkey`
- * * `totp`
- *
- * @author Jean-Philippe Steinmetz
- */
-export interface Secret extends BaseEntity {
-    /**
-     * The data associated with the secret.
-     */
-    data: any;
-
-    /**
-     * The type of secret (e.g. `openid`, `password`, `passkey`, `totp`)
-     */
-    type: SecretType;
-
-    /**
-     * The unique identifier of the user account this secret is associated with.
-     */
-    userUid: string;
 }
 
 export enum ContactType {
@@ -157,3 +110,50 @@ export interface Profile extends BaseEntity {
      */
     preferences: Preferences;
 }
+
+/**
+ *
+ */
+export enum SecretType {
+    FIDO2 = "fido2",
+    PASSKEY = "passkey",
+    PASSWORD = "password",
+    TOTP = "totp",
+}
+
+/**
+ * Describes a single authentication secret associated with a specific user account. A secret is used
+ * to authenticate the user with the system.
+ *
+ * Supported types of secrets:
+ * * `fido2`
+ * * `openid`
+ * * `password`
+ * * `passkey`
+ * * `totp`
+ *
+ * @author Jean-Philippe Steinmetz
+ */
+export interface Secret extends BaseEntity {
+    /**
+     * The data associated with the secret.
+     */
+    data: any;
+
+    /**
+     * The type of secret (e.g. `fido2`, `openid`, `password`, `passkey`, `totp`)
+     */
+    type: SecretType;
+
+    /**
+     * The unique identifier of the user account this secret is associated with.
+     */
+    userUid: string;
+}
+
+/**
+ * Defines a single user's account within the system.
+ *
+ * @author Jean-Philippe Steinmetz
+ */
+export interface User extends BaseEntity, JWTUser {}
