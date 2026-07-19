@@ -124,7 +124,7 @@ export class MFAStrategyOptions {
  * @author Jean-Philippe Steinmetz <rapidrests@gmail.com>
  */
 export class MFAStrategy implements AuthStrategy {
-    public readonly name: string = "otp";
+    public readonly name: string = "mfa";
     private options: MFAStrategyOptions;
 
     constructor(options: MFAStrategyOptions) {
@@ -197,6 +197,9 @@ export class MFAStrategy implements AuthStrategy {
             throw new Error("Invalid secondary authentication method.");
         }
 
+        // Store the method ID used in the session
+        req.session.methodId = method.id;
+
         switch (method.type) {
             case MFAMethodType.FIDO2:
                 {
@@ -204,6 +207,7 @@ export class MFAStrategy implements AuthStrategy {
                         throw new Error("No configuration exists for MFA method: FIDO2");
                     }
                     const result = await generatePasskeyChallenge(this.options.fidoConfig, req);
+                    res.status(200);
                     res.json(result);
                 }
                 break;
@@ -211,15 +215,13 @@ export class MFAStrategy implements AuthStrategy {
                 {
                     const totp: string = await generateOTP(req, payload);
                     await this.options.notifyContact(method.data, totp);
+                    res.status(200);
+                    res.json({});
                 }
                 break;
             default:
                 throw new Error("Unsupported MFA method: " + method.type);
         }
-
-        // Store the method ID used in the session
-        req.session.methodId = method.id;
-        res.status(200);
     }
 
     protected async verifyBasic(req: HttpRequest, res: HttpResponse): Promise<JWTUser | undefined> {

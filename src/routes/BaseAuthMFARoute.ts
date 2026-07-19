@@ -11,7 +11,7 @@ import { UserUtils } from "./UserUtils.js";
 
 const { Config, Init, Inject } = ObjectDecorators;
 const { Summary, Description, Returns } = DocDecorators;
-const { Auth, Get } = RouteDecorators;
+const { Auth, Get, Post } = RouteDecorators;
 const AuthUser = RouteDecorators.User;
 
 /**
@@ -108,8 +108,9 @@ export abstract class BaseAuthMFARoute<U extends User, S extends Secret, A exten
         "Authenticates the user using HTTP MFA and returns a JSON Web Token access token to be used with future API requests.",
     )
     @Returns([AuthResult, undefined])
-    @Auth(["basic"])
+    @Auth(["mfa"])
     @Get()
+    @Post()
     public async authenticate(@AuthUser user: JWTUser): Promise<AuthResult | undefined> {
         const token: string = await JWTUtils.createToken(this.jwtConfig, user);
         return new AuthResult({
@@ -186,11 +187,7 @@ export abstract class BaseAuthMFARoute<U extends User, S extends Secret, A exten
         // It's not a secret, let's try alias
         const alias: A | undefined = await this.aliasRepo.findOne(id, { ignoreACL: true });
         if (alias) {
-            return {
-                id: alias.uid,
-                data: alias,
-                type: MFAMethodType.OTP,
-            };
+            return this.convertAliasToMethod(alias);
         }
 
         return undefined;

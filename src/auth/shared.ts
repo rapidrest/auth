@@ -18,7 +18,7 @@ const headerSchemeRegExps: Map<string, RegExp> = new Map();
  */
 export const getBasicData = function (
     req: HttpRequest,
-    headerKey: string = "Authorization",
+    headerKey: string = "authorization",
     headerScheme: string = "basic",
 ): any {
     let result: any = undefined;
@@ -138,7 +138,6 @@ export const getRequestData = function (
             const parts: string[] = data.split(":");
             obj.id = parts[0];
             obj.password = parts[1];
-            obj.token = parts[1];
         }
 
         payload = obj;

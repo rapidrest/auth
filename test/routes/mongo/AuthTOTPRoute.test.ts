@@ -189,7 +189,7 @@ describe("Route:AuthBasicMongo Tests", () => {
             .get(baseUrl)
             .set(
                 "Authorization",
-                `totp ${Buffer.from(`${user.uid}:${await otplib.generate(secret.data)}`).toString("base64")}`,
+                `totp ${Buffer.from(`id=${user.uid}&token=${await otplib.generate(secret.data)}`).toString("base64")}`,
             );
 
         expect(result).toBeDefined();
