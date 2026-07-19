@@ -205,7 +205,7 @@ export const generateOTP = async function (req: HttpRequest, requestData?: any):
 
     const otplib = await importOTPLib();
     const secret = otplib.generateSecret();
-    const token: string = otplib.generate({ secret });
+    const token: string = await otplib.generate({ secret });
 
     // Store the OTP data in the session for later verification
     req.session.id = requestData.id;
@@ -241,7 +241,7 @@ export const verifyOTP = async function (req: HttpRequest, payload?: any): Promi
     const otplib = await importOTPLib();
     const result = await otplib.verify({
         secret: req.session.secret,
-        token: payload.code,
+        token: payload.token,
     });
     return result.valid;
 };

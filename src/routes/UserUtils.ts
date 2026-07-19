@@ -64,9 +64,12 @@ export class UserUtils<U extends User, A extends Alias> {
             return user;
         }
 
-        // Okay, now let's try looking through the user's aliases
-        const aliases: A[] = await this.aliasRepo.find({ userUid: id }, { ignoreACL: true });
-        user = aliases.length > 0 ? await this.userRepo.findOne(aliases[0].userUid, { ignoreACL: true }) : user;
+        // Okay, now let's try looking up the id as an Alias (by its uid or alias value) and resolve
+        // the user that it belongs to.
+        const alias: A | undefined = await this.aliasRepo.findOne(id, { ignoreACL: true });
+        if (alias) {
+            user = await this.userRepo.findOne(alias.userUid, { ignoreACL: true });
+        }
 
         return user;
     }

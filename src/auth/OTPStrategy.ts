@@ -20,8 +20,8 @@ export class OTPStrategyOptions {
     public allowDiscovery?: boolean;
     /** The name of the header to look for when performing header based authentication. Default value is `Authorization`. */
     public headerKey: string = "authorization";
-    /** The authorization scheme type when using header based authentication. Default value is `totp`. */
-    public headerScheme: string = "totp";
+    /** The authorization scheme type when using header based authentication. Default value is `otp`. */
+    public headerScheme: string = "otp";
     /**
      * Retrieves the user's contact information for a given id.
      * NOTE: You must override this function when using this strategy.
@@ -104,20 +104,26 @@ export class OTPStrategy implements AuthStrategy {
         res: HttpResponse,
         required?: boolean,
     ): Promise<AuthResult | undefined> {
-        const { data, payload } = getRequestData(req);
+        const { data, payload } = getRequestData(req, this.options.headerKey, this.options.headerScheme);
 
         if (payload.id && payload.token) {
             const user: JWTUser | undefined = await this.verify(payload, req, res);
-            return {
-                data,
-                method: this.name,
-                payload,
-                user,
-            };
+            if (user) {
+                return {
+                    data,
+                    method: this.name,
+                    payload,
+                    user,
+                };
+            }
         } else if (payload.id) {
             return await this.challenge(payload, req, res);
         } else if (this.options.allowDiscovery) {
             return await this.discovery(req, res);
+        }
+
+        if (required) {
+            throw new Error("Invalid authentication request.");
         }
 
         return undefined;
@@ -153,6 +159,7 @@ export class OTPStrategy implements AuthStrategy {
         await this.options.notifyContact(contact, token);
 
         res.status(200);
+        res.json({});
         return undefined;
     }
 

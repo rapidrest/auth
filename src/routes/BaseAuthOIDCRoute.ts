@@ -86,7 +86,7 @@ export abstract class BaseAuthOIDCRoute<U extends User, A extends Alias, P exten
             });
         }
 
-        const options: OIDCStrategyOptions = new OIDCStrategyOptions(this.providerConfig.name, this.providerConfig);
+        const options: OIDCStrategyOptions = new OIDCStrategyOptions("oauth", this.providerConfig);
         options.getUser = async (token: string, profile: OIDCProfile): Promise<JWTUser | undefined> => {
             if (!this.aliasRepo) {
                 throw new Error("aliasRepo is not set.");
@@ -188,7 +188,7 @@ export abstract class BaseAuthOIDCRoute<U extends User, A extends Alias, P exten
         "Authenticates the user using OAuth 2.0 / OpenID Connect and returns a JSON Web Token access token to be used with future API requests.",
     )
     @Returns([AuthResult, undefined])
-    @Auth(["totp"])
+    @Auth(["oauth"])
     @Get()
     @Post()
     public async login(@AuthUser user: JWTUser): Promise<AuthResult | undefined> {
