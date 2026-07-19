@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<testsuites name="vitest tests" tests="3" failures="1" errors="0" time="1.1904745">
+    <testsuite name="test/routes/mongo/AuthTOTPRoute.test.ts" timestamp="2026-07-19T18:46:45.733Z" hostname="Jane" tests="3" failures="1" errors="0" skipped="2" time="1.1904745">
+        <testcase classname="test/routes/mongo/AuthTOTPRoute.test.ts" name="Route:AuthBasicMongo Tests &gt; Can authenticate with valid user id and totp." time="0.0267211">
+            <system-out>
+2026-07-19T18:46:45.515Z [34mdebug[39m: Cannot read properties of undefined (reading &apos;id&apos;)
+
+            </system-out>
+            <failure message="expected 401 to be less than 300" type="AssertionError">
+AssertionError: expected 401 to be less than 300
+ ❯ test/routes/mongo/AuthTOTPRoute.test.ts:173:31
+            </failure>
+        </testcase>
+        <testcase classname="test/routes/mongo/AuthTOTPRoute.test.ts" name="Route:AuthBasicMongo Tests &gt; Can authenticate with valid user id and totp when multiple totp secrets exist." time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="test/routes/mongo/AuthTOTPRoute.test.ts" name="Route:AuthBasicMongo Tests &gt; Cannot authenticate with invalid user id and totp." time="0">
+            <skipped/>
+        </testcase>
+    </testsuite>
+</testsuites>

@@ -1,0 +1,54 @@
+///////////////////////////////////////////////////////////////////////////////
+// Copyright (C) 2026 Jean-Philippe Steinmetz. All rights reserved.
+///////////////////////////////////////////////////////////////////////////////
+import { BaseEntity, DocDecorators, ModelDecorators, PersistenceDecorators } from "@rapidrest/service-core";
+import { Secret, SecretType } from "../types.js";
+import { ObjectDecorators } from "@rapidrest/core";
+const { Description } = DocDecorators;
+const { DataStore, Protect } = ModelDecorators;
+const { Nullable } = ObjectDecorators;
+const { Column, Entity } = PersistenceDecorators;
+
+/**
+ * Implementation of the `Secret` interface for storage in a SQL database. If MongoDB is desired, please use
+ * `models.mongo.SecretMongo` instead.
+ *
+ * @author Jean-Philippe Steinmetz
+ */
+@DataStore("sql")
+@Entity()
+@Description("Defines a record for a single user alias in the system.")
+@Protect({
+    uid: "UserMongo",
+    records: [
+        {
+            userOrRoleId: "anonymous",
+            actions: [],
+        },
+        {
+            userOrRoleId: ".*",
+            actions: [],
+        },
+    ],
+})
+export class SecretSQL extends BaseEntity implements Secret {
+    @Column({ type: "simple-json" })
+    @Nullable
+    public data: any;
+
+    @Column({ type: "varchar" })
+    public type: SecretType = SecretType.PASSWORD;
+
+    @Column()
+    public userUid: string = "";
+
+    constructor(other?: Partial<SecretSQL>) {
+        super(other);
+
+        if (other) {
+            this.data = "data" in other ? other.data : this.data;
+            this.type = other.type !== undefined ? other.type : this.type;
+            this.userUid = other.userUid !== undefined ? other.userUid : this.userUid;
+        }
+    }
+}
