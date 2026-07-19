@@ -101,7 +101,11 @@ export abstract class BaseAuthOIDCRoute<U extends User, A extends Alias, P exten
                 throw new Error("userUtils is not set.");
             }
 
-            let user: U | undefined = await this.userUtils.lookup(profile.id);
+            // `profile.id` (the provider's external identifier) is never itself persisted anywhere
+            // lookup-able — only the verified email alias created below survives across logins — so a
+            // returning user can only be recognized by that email. Without a verified email there is no
+            // way to recognize a returning user and a new account is created on every login.
+            let user: U | undefined = await this.userUtils.lookup(profile.email ?? profile.id);
             if (!user) {
                 // Create a new user for the given profile
                 const newUser: User = {
@@ -112,15 +116,15 @@ export abstract class BaseAuthOIDCRoute<U extends User, A extends Alias, P exten
                     roles: [],
                     scopes: [],
                 };
-                user = await this.userRepo.create(newUser as U);
+                user = await this.userRepo.create(newUser as U, { ignoreACL: true });
 
                 // Now create a profile for the user
                 const newProfile: Profile = {
-                    avatar: "",
+                    avatar: profile.avatar ?? "",
                     birthdate: profile.birthdate ? new Date(profile.birthdate) : undefined,
                     contacts: [],
-                    givenName: "",
-                    familyName: "",
+                    givenName: profile.givenName ?? "",
+                    familyName: profile.familyName ?? "",
                     preferences: {
                         contact: [],
                     },

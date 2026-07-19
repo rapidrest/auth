@@ -328,7 +328,7 @@ export class OIDCStrategy implements AuthStrategy {
             delete req.session.redirect_uri;
 
             // 3. Notify the verify callback to create a user object for this profile.
-            const user: JWTUser | undefined = await this.options.getUser(profile, accessToken);
+            const user: JWTUser | undefined = await this.options.getUser(accessToken, profile);
 
             return {
                 data: accessToken,

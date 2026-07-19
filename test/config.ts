@@ -57,6 +57,7 @@ conf.defaults({
             authorizationURL: "https://oidc-test.com/authorize",
             clientID: "123457890",
             clientSecret: "f32fa983732aq9rf7ab39f",
+            profileURL: "https://oidc-test.com/userinfo",
             protocol: "openid",
             redirectURI: "http://localhost:3000",
             tokenURL: "https://oidc-test.com/profile",
