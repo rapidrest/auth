@@ -4,7 +4,7 @@
 import type { JWTUser } from "@rapidrest/core";
 import { AuthResult, AuthStrategy, HttpRequest, HttpResponse } from "@rapidrest/service-core";
 import { PasskeyConfig, PasskeyTransport, StoredPasskeyCredential } from "./types.js";
-import { generatePasskeyChallenge, verifyPasskeyChallenge } from "./shared.js";
+import { generatePasskeyChallenge, isPasskeyResponse, verifyPasskeyChallenge } from "./shared.js";
 
 /**
  * Describes the configuration options that can be used to initialize PasskeyStrategy.
@@ -166,6 +166,20 @@ export class PasskeyStrategy implements AuthStrategy {
             throw new Error("No passkey ceremony in progress for this session.");
         }
 
+        // The challenge is single-use regardless of outcome — cleared as soon as it's read, before
+        // verification is even attempted, rather than only on the success path.
+        const expectedChallenge: string = req.session.challenge;
+        delete req.session.challenge;
+
+        // Strict shape validation before touching storage or SimpleWebAuthn — a malformed finish
+        // attempt should fail with a clean, actionable error rather than crashing deep inside the
+        // verification library with a confusing low-level error. This alone doesn't reveal whether
+        // any particular account/credential exists, so it's kept distinct from the generic failure
+        // message below.
+        if (!isPasskeyResponse(req.body)) {
+            throw new Error("Malformed passkey authentication response.");
+        }
+
         // Every failure from here on is reported with the same generic message, regardless of
         // whether the credential ID is unknown, the signature failed to verify, the counter
         // regressed, or the resolved user was rejected by verify() — distinguishing between these
@@ -177,7 +191,7 @@ export class PasskeyStrategy implements AuthStrategy {
             throw genericFailure();
         }
 
-        const result = await verifyPasskeyChallenge(credential, this.options.config, req);
+        const result = await verifyPasskeyChallenge(credential, this.options.config, expectedChallenge, req.body);
         if (!result.verified) {
             throw genericFailure();
         }

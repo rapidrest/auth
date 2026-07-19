@@ -153,7 +153,7 @@ export const isOTPResponse = function (response: any): boolean {
 
 export const isPasskeyResponse = function (response: any): boolean {
     if (
-        typeof response.id === "string" ||
+        typeof response.id !== "string" ||
         typeof response.response?.clientDataJSON !== "string" ||
         typeof response.response?.authenticatorData !== "string" ||
         typeof response.response?.signature !== "string"
@@ -279,32 +279,10 @@ export const generatePasskeyChallenge = async function (
 export const verifyPasskeyChallenge = async function (
     credential: StoredPasskeyCredential,
     config: PasskeyConfig,
-    req: HttpRequest,
-    payload?: any,
+    expectedChallenge: string,
+    payload: any,
 ): Promise<any> {
-    if (!req.session) {
-        throw new Error(
-            "This function requires session support. Configure the `session` config " +
-                "block so the session middleware is registered.",
-        );
-    }
-
     const { verifyAuthenticationResponse } = await importSimpleWebAuthn();
-    payload = payload ?? getRequestData(req).payload;
-
-    // The challenge is single-use regardless of outcome — cleared as soon as it's read, before
-    // verification is even attempted, rather than only on the success path.
-    const expectedChallenge: string = req.session.challenge;
-    delete req.session.challenge;
-
-    // Strict shape validation before touching storage or SimpleWebAuthn — a malformed finish
-    // attempt should fail with a clean, actionable error rather than crashing deep inside the
-    // verification library with a confusing low-level error. This alone doesn't reveal whether
-    // any particular account/credential exists, so it's kept distinct from the generic failure
-    // message below.
-    if (!isPasskeyResponse(payload)) {
-        throw new Error("Malformed passkey authentication response.");
-    }
 
     if (!Number.isFinite(credential.counter)) {
         throw new Error("Stored passkey credential has an invalid counter.");

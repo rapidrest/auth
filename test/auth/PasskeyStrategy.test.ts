@@ -96,7 +96,7 @@ describe("PasskeyStrategy Tests", () => {
         options.getCredentialById = vi.fn();
         options.getCredentials = vi.fn();
         options.updateCredentialCounter = vi.fn();
-        options.verify = vi.fn();
+        options.getUser = vi.fn();
         strategy = new PasskeyStrategy(options);
     });
 
@@ -172,7 +172,7 @@ describe("PasskeyStrategy Tests", () => {
                 authenticationInfo: { newCounter: 6, credentialID: "cred-id-1" },
             });
             const jwtUser: JWTUser = { uid: "user-uid-1", name: "test", roles: [] };
-            (options.verify as any).mockResolvedValue(jwtUser);
+            (options.getUser as any).mockResolvedValue(jwtUser);
 
             const result = await strategy.authenticate(req, undefined as any);
 
@@ -284,7 +284,7 @@ describe("PasskeyStrategy Tests", () => {
                 authenticationInfo: { newCounter: 0, credentialID: "cred-id-1" },
             });
             const jwtUser: JWTUser = { uid: "user-uid-1", name: "test", roles: [] };
-            (options.verify as any).mockResolvedValue(jwtUser);
+            (options.getUser as any).mockResolvedValue(jwtUser);
 
             const result = await strategy.authenticate(req, undefined as any);
 
@@ -299,7 +299,7 @@ describe("PasskeyStrategy Tests", () => {
                 verified: true,
                 authenticationInfo: { newCounter: 6, credentialID: "cred-id-1" },
             });
-            (options.verify as any).mockResolvedValue(undefined);
+            (options.getUser as any).mockResolvedValue(undefined);
 
             // required omitted (falsy), matching TOTPStrategy's precedent: a valid credential whose
             // resolved uid is rejected by verify() (e.g. disabled account) must NOT come back as a
@@ -317,7 +317,7 @@ describe("PasskeyStrategy Tests", () => {
                 verified: true,
                 authenticationInfo: { newCounter: 6, credentialID: "cred-id-1" },
             });
-            (options.verify as any).mockResolvedValue(undefined);
+            (options.getUser as any).mockResolvedValue(undefined);
 
             await expect(strategy.authenticate(req, undefined as any, true)).rejects.toThrow(/authentication failed/i);
         });
