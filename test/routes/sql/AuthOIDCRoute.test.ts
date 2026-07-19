@@ -20,19 +20,20 @@ vi.mock("axios", async (importOriginal) => {
 import config from "../../config.js";
 import { agent, request } from "@rapidrest/service-core/test";
 import {
-    ACLRecord,
     MongoConnection,
     MongoRepository,
     Server,
     ObjectFactory,
     ConnectionManager,
+    isSqlDataSource,
 } from "@rapidrest/service-core";
 import { Logger } from "@rapidrest/core";
 import axios from "axios";
-import { UserMongo } from "../../../src/models/mongo/UserMongo.js";
+import { Repository } from "typeorm";
+import { UserSQL } from "../../../src/models/sql/UserSQL.js";
 import { MongoMemoryServer } from "mongodb-memory-server";
-import { AliasMongo } from "../../../src/models/mongo/AliasMongo.js";
-import { ProfileMongo } from "../../../src/models/mongo/ProfileMongo.js";
+import { AliasSQL } from "../../../src/models/sql/AliasSQL.js";
+import { ProfileSQL } from "../../../src/models/sql/ProfileSQL.js";
 
 const mockPost = axios.post as unknown as ReturnType<typeof vi.fn>;
 const mockGet = axios.get as unknown as ReturnType<typeof vi.fn>;
@@ -44,15 +45,15 @@ const mongod: MongoMemoryServer = new MongoMemoryServer({
     },
 });
 
-describe("Route:AuthOIDCMongo Tests", () => {
+describe("Route:AuthOIDCSQL Tests", () => {
     const logger = Logger();
     const objectFactory: ObjectFactory = new ObjectFactory(config, logger);
-    const server: Server = new Server({ config, basePath: "./test/server-mongo", logger, objectFactory });
-    const baseUrl = "/mongo/auth/oidc";
-    let userRepo: MongoRepository<UserMongo>;
+    const server: Server = new Server({ config, basePath: "./test/server-sql", logger, objectFactory });
+    const baseUrl = "/sql/auth/oidc";
+    let userRepo: Repository<UserSQL>;
     let aclRepo: MongoRepository<any>;
-    let aliasRepo: MongoRepository<AliasMongo>;
-    let profileRepo: MongoRepository<ProfileMongo>;
+    let aliasRepo: Repository<AliasSQL>;
+    let profileRepo: Repository<ProfileSQL>;
 
     beforeAll(async () => {
         await mongod.start();
@@ -63,13 +64,13 @@ describe("Route:AuthOIDCMongo Tests", () => {
         if (conn instanceof MongoConnection) {
             aclRepo = conn.getMongoRepository("AccessControlListMongo");
         }
-        conn = connMgr?.connections.get("mongo");
-        if (conn instanceof MongoConnection) {
-            userRepo = conn.getMongoRepository("UserMongo");
-            aliasRepo = conn.getMongoRepository("AliasMongo");
-            profileRepo = conn.getMongoRepository("ProfileMongo");
+        conn = connMgr?.connections.get("sql");
+        if (isSqlDataSource(conn)) {
+            userRepo = conn.getRepository(UserSQL);
+            aliasRepo = conn.getRepository(AliasSQL);
+            profileRepo = conn.getRepository(ProfileSQL);
         } else {
-            throw new Error("Could not find user connection");
+            throw new Error("Could not find sql connection");
         }
     });
 
@@ -80,16 +81,9 @@ describe("Route:AuthOIDCMongo Tests", () => {
     });
 
     beforeEach(async () => {
-        try {
-            await userRepo.clear();
-            await aliasRepo.clear();
-            await profileRepo.clear();
-        } catch (err: any) {
-            // The error "ns not found" occurs when the collection doesn't exist yet. We can ignore this error.
-            if (err.message !== "ns not found") {
-                throw err;
-            }
-        }
+        await userRepo.clear();
+        await aliasRepo.clear();
+        await profileRepo.clear();
 
         mockPost.mockReset();
         mockGet.mockReset();
@@ -162,13 +156,13 @@ describe("Route:AuthOIDCMongo Tests", () => {
         );
 
         // A new user, profile and verified email alias should have been provisioned.
-        const users = await userRepo.find({}).toArray();
+        const users = await userRepo.find();
         expect(users.length).toBe(1);
-        const profiles = await profileRepo.find({}).toArray();
+        const profiles = await profileRepo.find();
         expect(profiles.length).toBe(1);
         expect(profiles[0].givenName).toBe("Test");
         expect(profiles[0].familyName).toBe("User");
-        const aliases = await aliasRepo.find({}).toArray();
+        const aliases = await aliasRepo.find();
         expect(aliases.length).toBe(1);
         expect(aliases[0].alias).toBe("test@example.com");
         expect(aliases[0].verified).toBe(true);
@@ -198,7 +192,7 @@ describe("Route:AuthOIDCMongo Tests", () => {
         expect(result.status).toBeGreaterThanOrEqual(200);
         expect(result.status).toBeLessThan(300);
 
-        const users = await userRepo.find({}).toArray();
+        const users = await userRepo.find();
         expect(users.length).toBe(1);
     });
 

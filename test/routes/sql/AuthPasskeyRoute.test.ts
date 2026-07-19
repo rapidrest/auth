@@ -20,13 +20,15 @@ import {
     ObjectFactory,
     ConnectionManager,
     ACLAction,
+    isSqlDataSource,
 } from "@rapidrest/service-core";
 import { Logger } from "@rapidrest/core";
 import { generateAuthenticationOptions, verifyAuthenticationResponse } from "@simplewebauthn/server";
 import * as uuid from "uuid";
-import { UserMongo } from "../../../src/models/mongo/UserMongo.js";
+import { Repository } from "typeorm";
+import { UserSQL } from "../../../src/models/sql/UserSQL.js";
 import { MongoMemoryServer } from "mongodb-memory-server";
-import { SecretMongo } from "../../../src/models/mongo/SecretMongo.js";
+import { SecretSQL } from "../../../src/models/sql/SecretSQL.js";
 import { SecretType } from "../../../src/models/types.js";
 import { StoredPasskeyCredential } from "../../../src/auth/types.js";
 
@@ -55,24 +57,24 @@ function makeAssertionBody(credentialId: string, overrides: any = {}) {
     };
 }
 
-describe("Route:AuthPasskeyMongo Tests", () => {
+describe("Route:AuthPasskeySQL Tests", () => {
     const logger = Logger();
     const objectFactory: ObjectFactory = new ObjectFactory(config, logger);
-    const server: Server = new Server({ config, basePath: "./test/server-mongo", logger, objectFactory });
-    const baseUrl = "/mongo/auth/passkey";
-    let userRepo: MongoRepository<UserMongo>;
+    const server: Server = new Server({ config, basePath: "./test/server-sql", logger, objectFactory });
+    const baseUrl = "/sql/auth/passkey";
+    let userRepo: Repository<UserSQL>;
     let aclRepo: MongoRepository<any>;
-    let secretRepo: MongoRepository<SecretMongo>;
+    let secretRepo: Repository<SecretSQL>;
 
-    const createUserMongo = async function (data?: any): Promise<UserMongo> {
-        const obj: UserMongo = new UserMongo({
+    const createUserSQL = async function (data?: any): Promise<UserSQL> {
+        const obj: UserSQL = new UserSQL({
             roles: [],
             scopes: [],
             verified: true,
             ...data,
         });
 
-        const result: UserMongo = await userRepo.save(obj);
+        const result: UserSQL = await userRepo.save(obj);
 
         const records: ACLRecord[] = [];
 
@@ -97,7 +99,7 @@ describe("Route:AuthPasskeyMongo Tests", () => {
             dateModified: new Date(),
             version: 0,
             records,
-            parentUid: "UserMongo",
+            parentUid: "UserSQL",
         };
         await aclRepo.save(acl);
 
@@ -106,7 +108,7 @@ describe("Route:AuthPasskeyMongo Tests", () => {
 
     // The credential's own `uid` doubles as its WebAuthn credential ID here, since
     // `BaseAuthPasskeyRoute.getCredentialById()` looks secrets up by their own `uid`.
-    const createPasskeySecretMongo = async function (data?: Partial<StoredPasskeyCredential> & { userUid?: string }) {
+    const createPasskeySecretSQL = async function (data?: Partial<StoredPasskeyCredential> & { userUid?: string }) {
         const credentialId: string = data?.id ?? uuid.v4();
         const userUid: string = data?.userUid ?? uuid.v4();
         const credential: StoredPasskeyCredential = {
@@ -118,14 +120,14 @@ describe("Route:AuthPasskeyMongo Tests", () => {
             ...data,
         };
 
-        const obj: SecretMongo = new SecretMongo({
+        const obj: SecretSQL = new SecretSQL({
             uid: credentialId,
             data: credential,
             type: SecretType.PASSKEY,
             userUid,
         });
 
-        const result: SecretMongo = await secretRepo.save(obj);
+        const result: SecretSQL = await secretRepo.save(obj);
 
         const records: ACLRecord[] = [];
 
@@ -150,7 +152,7 @@ describe("Route:AuthPasskeyMongo Tests", () => {
             dateModified: new Date(),
             version: 0,
             records,
-            parentUid: "SecretMongo",
+            parentUid: "SecretSQL",
         };
         await aclRepo.save(acl);
 
@@ -166,12 +168,12 @@ describe("Route:AuthPasskeyMongo Tests", () => {
         if (conn instanceof MongoConnection) {
             aclRepo = conn.getMongoRepository("AccessControlListMongo");
         }
-        conn = connMgr?.connections.get("mongo");
-        if (conn instanceof MongoConnection) {
-            userRepo = conn.getMongoRepository("UserMongo");
-            secretRepo = conn.getMongoRepository("SecretMongo");
+        conn = connMgr?.connections.get("sql");
+        if (isSqlDataSource(conn)) {
+            userRepo = conn.getRepository(UserSQL);
+            secretRepo = conn.getRepository(SecretSQL);
         } else {
-            throw new Error("Could not find user connection");
+            throw new Error("Could not find sql connection");
         }
     });
 
@@ -182,15 +184,8 @@ describe("Route:AuthPasskeyMongo Tests", () => {
     });
 
     beforeEach(async () => {
-        try {
-            await userRepo.clear();
-            await secretRepo.clear();
-        } catch (err: any) {
-            // The error "ns not found" occurs when the collection doesn't exist yet. We can ignore this error.
-            if (err.message !== "ns not found") {
-                throw err;
-            }
-        }
+        await userRepo.clear();
+        await secretRepo.clear();
 
         mockGenerateAuthenticationOptions.mockReset();
         mockVerifyAuthenticationResponse.mockReset();
@@ -208,9 +203,9 @@ describe("Route:AuthPasskeyMongo Tests", () => {
     });
 
     it("Can complete a passkey ceremony with a valid assertion and authenticate.", async () => {
-        const user: UserMongo = await createUserMongo();
+        const user: UserSQL = await createUserSQL();
         const credentialId = uuid.v4();
-        await createPasskeySecretMongo({ id: credentialId, userUid: user.uid, counter: 5 });
+        await createPasskeySecretSQL({ id: credentialId, userUid: user.uid, counter: 5 });
 
         mockGenerateAuthenticationOptions.mockResolvedValue({ challenge: "test-challenge", rpId: "rapidrest" });
         const client = agent(server.getApplication());
@@ -241,7 +236,7 @@ describe("Route:AuthPasskeyMongo Tests", () => {
         );
 
         // The signature counter should have been persisted for clone detection on the next login.
-        const updated: SecretMongo | undefined = await secretRepo.findOne({ uid: credentialId });
+        const updated: SecretSQL | null = await secretRepo.findOne({ where: { uid: credentialId } });
         expect((updated?.data as StoredPasskeyCredential).counter).toBe(6);
     });
 
@@ -258,9 +253,9 @@ describe("Route:AuthPasskeyMongo Tests", () => {
     });
 
     it("Cannot authenticate when SimpleWebAuthn fails to verify the assertion.", async () => {
-        const user: UserMongo = await createUserMongo();
+        const user: UserSQL = await createUserSQL();
         const credentialId = uuid.v4();
-        await createPasskeySecretMongo({ id: credentialId, userUid: user.uid, counter: 5 });
+        await createPasskeySecretSQL({ id: credentialId, userUid: user.uid, counter: 5 });
 
         mockGenerateAuthenticationOptions.mockResolvedValue({ challenge: "test-challenge", rpId: "rapidrest" });
         const client = agent(server.getApplication());

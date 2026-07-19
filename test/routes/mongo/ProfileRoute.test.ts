@@ -27,7 +27,7 @@ const mongod: MongoMemoryServer = new MongoMemoryServer({
 describe("Route:ProfileMongo Tests", () => {
     const logger = Logger();
     const objectFactory: ObjectFactory = new ObjectFactory(config, logger);
-    const server: Server = new Server({ config, basePath: "./test/server", logger, objectFactory });
+    const server: Server = new Server({ config, basePath: "./test/server-mongo", logger, objectFactory });
     const baseUrl = "/mongo/profiles";
     let repo: MongoRepository<ProfileMongo>;
     let aclRepo: MongoRepository<any>;

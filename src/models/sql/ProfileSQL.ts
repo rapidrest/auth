@@ -32,12 +32,12 @@ const { Column, Entity } = PersistenceDecorators;
     ],
 })
 export class ProfileSQL extends BaseEntity implements Profile {
-    @Column()
+    @Column({ nullable: true })
     @Description("The URL or path to the user's avatar image (e.g. gravatar).")
     @Nullable
     public avatar?: string;
 
-    @Column()
+    @Column({ nullable: true })
     @Validator(ValidationUtils.checkDate)
     @Description("The user's date of birth.")
     @Nullable
@@ -48,12 +48,12 @@ export class ProfileSQL extends BaseEntity implements Profile {
     @Description("The user's list of contact e-mails.")
     public contacts: Contact[] = [];
 
-    @Column()
+    @Column({ nullable: true })
     @Description("The user's given name (aka: first name).")
     @Nullable
     public givenName?: string;
 
-    @Column()
+    @Column({ nullable: true })
     @Description("The user's family surname (or last name).")
     @Nullable
     public familyName?: string;

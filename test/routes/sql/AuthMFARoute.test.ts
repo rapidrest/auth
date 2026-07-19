@@ -12,13 +12,15 @@ import {
     ObjectFactory,
     ConnectionManager,
     ACLAction,
+    isSqlDataSource,
 } from "@rapidrest/service-core";
 import { Logger, MessagingUtils } from "@rapidrest/core";
 import * as uuid from "uuid";
-import { UserMongo } from "../../../src/models/mongo/UserMongo.js";
+import { Repository } from "typeorm";
+import { UserSQL } from "../../../src/models/sql/UserSQL.js";
 import { MongoMemoryServer } from "mongodb-memory-server";
-import { SecretMongo } from "../../../src/models/mongo/SecretMongo.js";
-import { AliasMongo } from "../../../src/models/mongo/AliasMongo.js";
+import { SecretSQL } from "../../../src/models/sql/SecretSQL.js";
+import { AliasSQL } from "../../../src/models/sql/AliasSQL.js";
 import { AliasType, SecretType } from "../../../src/models/types.js";
 
 const mongod: MongoMemoryServer = new MongoMemoryServer({
@@ -28,26 +30,26 @@ const mongod: MongoMemoryServer = new MongoMemoryServer({
     },
 });
 
-describe("Route:AuthMFAMongo Tests", () => {
+describe("Route:AuthMFASQL Tests", () => {
     const logger = Logger();
     const objectFactory: ObjectFactory = new ObjectFactory(config, logger);
-    const server: Server = new Server({ config, basePath: "./test/server-mongo", logger, objectFactory });
-    const baseUrl = "/mongo/auth/mfa";
-    let userRepo: MongoRepository<UserMongo>;
+    const server: Server = new Server({ config, basePath: "./test/server-sql", logger, objectFactory });
+    const baseUrl = "/sql/auth/mfa";
+    let userRepo: Repository<UserSQL>;
     let aclRepo: MongoRepository<any>;
-    let secretRepo: MongoRepository<SecretMongo>;
-    let aliasRepo: MongoRepository<AliasMongo>;
+    let secretRepo: Repository<SecretSQL>;
+    let aliasRepo: Repository<AliasSQL>;
     let messagingUtils: MessagingUtils;
 
-    const createUserMongo = async function (data?: any): Promise<UserMongo> {
-        const obj: UserMongo = new UserMongo({
+    const createUserSQL = async function (data?: any): Promise<UserSQL> {
+        const obj: UserSQL = new UserSQL({
             roles: [],
             scopes: [],
             verified: true,
             ...data,
         });
 
-        const result: UserMongo = await userRepo.save(obj);
+        const result: UserSQL = await userRepo.save(obj);
 
         const records: ACLRecord[] = [];
 
@@ -72,22 +74,22 @@ describe("Route:AuthMFAMongo Tests", () => {
             dateModified: new Date(),
             version: 0,
             records,
-            parentUid: "UserMongo",
+            parentUid: "UserSQL",
         };
         await aclRepo.save(acl);
 
         return result;
     };
 
-    const createPasswordSecretMongo = async function (data?: any): Promise<SecretMongo> {
-        const obj: SecretMongo = new SecretMongo({
+    const createPasswordSecretSQL = async function (data?: any): Promise<SecretSQL> {
+        const obj: SecretSQL = new SecretSQL({
             data: await argon2.hash("password"),
             type: SecretType.PASSWORD,
             userUid: uuid.v4(),
             ...data,
         });
 
-        const result: SecretMongo = await secretRepo.save(obj);
+        const result: SecretSQL = await secretRepo.save(obj);
 
         const records: ACLRecord[] = [
             {
@@ -111,15 +113,15 @@ describe("Route:AuthMFAMongo Tests", () => {
             dateModified: new Date(),
             version: 0,
             records,
-            parentUid: "SecretMongo",
+            parentUid: "SecretSQL",
         };
         await aclRepo.save(acl);
 
         return result;
     };
 
-    const createAliasMongo = async function (data?: any): Promise<AliasMongo> {
-        const obj: AliasMongo = new AliasMongo({
+    const createAliasSQL = async function (data?: any): Promise<AliasSQL> {
+        const obj: AliasSQL = new AliasSQL({
             alias: uuid.v4(),
             type: AliasType.EMAIL,
             userUid: uuid.v4(),
@@ -127,7 +129,7 @@ describe("Route:AuthMFAMongo Tests", () => {
             ...data,
         });
 
-        const result: AliasMongo = await aliasRepo.save(obj);
+        const result: AliasSQL = await aliasRepo.save(obj);
 
         const records: ACLRecord[] = [
             {
@@ -151,7 +153,7 @@ describe("Route:AuthMFAMongo Tests", () => {
             dateModified: new Date(),
             version: 0,
             records,
-            parentUid: "AliasMongo",
+            parentUid: "AliasSQL",
         };
         await aclRepo.save(acl);
 
@@ -167,13 +169,13 @@ describe("Route:AuthMFAMongo Tests", () => {
         if (conn instanceof MongoConnection) {
             aclRepo = conn.getMongoRepository("AccessControlListMongo");
         }
-        conn = connMgr?.connections.get("mongo");
-        if (conn instanceof MongoConnection) {
-            userRepo = conn.getMongoRepository("UserMongo");
-            secretRepo = conn.getMongoRepository("SecretMongo");
-            aliasRepo = conn.getMongoRepository("AliasMongo");
+        conn = connMgr?.connections.get("sql");
+        if (isSqlDataSource(conn)) {
+            userRepo = conn.getRepository(UserSQL);
+            secretRepo = conn.getRepository(SecretSQL);
+            aliasRepo = conn.getRepository(AliasSQL);
         } else {
-            throw new Error("Could not find user connection");
+            throw new Error("Could not find sql connection");
         }
 
         messagingUtils = objectFactory.getInstance(MessagingUtils) as MessagingUtils;
@@ -186,16 +188,9 @@ describe("Route:AuthMFAMongo Tests", () => {
     });
 
     beforeEach(async () => {
-        try {
-            await userRepo.clear();
-            await secretRepo.clear();
-            await aliasRepo.clear();
-        } catch (err: any) {
-            // The error "ns not found" occurs when the collection doesn't exist yet. We can ignore this error.
-            if (err.message !== "ns not found") {
-                throw err;
-            }
-        }
+        await userRepo.clear();
+        await secretRepo.clear();
+        await aliasRepo.clear();
 
         // No SMTP provider is configured in the test environment; stub it out and recover the
         // generated token from the captured call args, the way the real contact would have received it.
@@ -203,9 +198,9 @@ describe("Route:AuthMFAMongo Tests", () => {
     });
 
     it("Returns the list of available 2FA methods after a valid password check.", async () => {
-        const user: UserMongo = await createUserMongo();
-        await createPasswordSecretMongo({ userUid: user.uid });
-        const alias: AliasMongo = await createAliasMongo({ userUid: user.uid });
+        const user: UserSQL = await createUserSQL();
+        await createPasswordSecretSQL({ userUid: user.uid });
+        const alias: AliasSQL = await createAliasSQL({ userUid: user.uid });
 
         const result = await request(server.getApplication())
             .get(baseUrl)
@@ -220,8 +215,8 @@ describe("Route:AuthMFAMongo Tests", () => {
     });
 
     it("Cannot authenticate phase 1 with an invalid password.", async () => {
-        const user: UserMongo = await createUserMongo();
-        await createPasswordSecretMongo({ userUid: user.uid });
+        const user: UserSQL = await createUserSQL();
+        await createPasswordSecretSQL({ userUid: user.uid });
 
         const result = await request(server.getApplication())
             .get(baseUrl)
@@ -231,9 +226,9 @@ describe("Route:AuthMFAMongo Tests", () => {
     });
 
     it("Can complete the full 3-phase MFA flow using an OTP contact method.", async () => {
-        const user: UserMongo = await createUserMongo();
-        await createPasswordSecretMongo({ userUid: user.uid });
-        const alias: AliasMongo = await createAliasMongo({ userUid: user.uid });
+        const user: UserSQL = await createUserSQL();
+        await createPasswordSecretSQL({ userUid: user.uid });
+        const alias: AliasSQL = await createAliasSQL({ userUid: user.uid });
 
         const client = agent(server.getApplication());
 
@@ -268,9 +263,9 @@ describe("Route:AuthMFAMongo Tests", () => {
     });
 
     it("Cannot complete phase 3 with an invalid OTP token.", async () => {
-        const user: UserMongo = await createUserMongo();
-        await createPasswordSecretMongo({ userUid: user.uid });
-        const alias: AliasMongo = await createAliasMongo({ userUid: user.uid });
+        const user: UserSQL = await createUserSQL();
+        await createPasswordSecretSQL({ userUid: user.uid });
+        const alias: AliasSQL = await createAliasSQL({ userUid: user.uid });
 
         const client = agent(server.getApplication());
         await client
@@ -283,9 +278,9 @@ describe("Route:AuthMFAMongo Tests", () => {
     });
 
     it("Cannot request a challenge for an unknown method id.", async () => {
-        const user: UserMongo = await createUserMongo();
-        await createPasswordSecretMongo({ userUid: user.uid });
-        await createAliasMongo({ userUid: user.uid });
+        const user: UserSQL = await createUserSQL();
+        await createPasswordSecretSQL({ userUid: user.uid });
+        await createAliasSQL({ userUid: user.uid });
 
         const client = agent(server.getApplication());
         await client

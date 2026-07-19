@@ -28,7 +28,7 @@ const mongod: MongoMemoryServer = new MongoMemoryServer({
 describe("Route:AliasMongo Tests", () => {
     const logger = Logger();
     const objectFactory: ObjectFactory = new ObjectFactory(config, logger);
-    const server: Server = new Server({ config, basePath: "./test/server", logger, objectFactory });
+    const server: Server = new Server({ config, basePath: "./test/server-mongo", logger, objectFactory });
     const baseUrl = "/mongo/aliases";
     let repo: MongoRepository<AliasMongo>;
     let aclRepo: MongoRepository<any>;

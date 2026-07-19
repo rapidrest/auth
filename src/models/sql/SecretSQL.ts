@@ -32,7 +32,7 @@ const { Column, Entity } = PersistenceDecorators;
     ],
 })
 export class SecretSQL extends BaseEntity implements Secret {
-    @Column({ type: "simple-json" })
+    @Column({ type: "simple-json", nullable: true })
     @Nullable
     public data: any;
 

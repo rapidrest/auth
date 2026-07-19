@@ -1,8 +1,7 @@
 ///////////////////////////////////////////////////////////////////////////////
 // Copyright (C) 2026 Jean-Philippe Steinmetz
 ///////////////////////////////////////////////////////////////////////////////
-import config from "../../config";
-import * as argon2 from "argon2";
+import config from "../../config.js";
 import { request } from "@rapidrest/service-core/test";
 import {
     ACLRecord,
@@ -12,12 +11,15 @@ import {
     ObjectFactory,
     ConnectionManager,
     ACLAction,
+    isSqlDataSource,
 } from "@rapidrest/service-core";
 import { Logger } from "@rapidrest/core";
+import * as otplib from "otplib";
 import * as uuid from "uuid";
-import { UserMongo } from "../../../src/models/mongo/UserMongo.js";
+import { Repository } from "typeorm";
+import { UserSQL } from "../../../src/models/sql/UserSQL.js";
 import { MongoMemoryServer } from "mongodb-memory-server";
-import { SecretMongo } from "../../../src/models/mongo/SecretMongo.js";
+import { SecretSQL } from "../../../src/models/sql/SecretSQL.js";
 import { SecretType } from "../../../src/models/types.js";
 
 const mongod: MongoMemoryServer = new MongoMemoryServer({
@@ -27,24 +29,24 @@ const mongod: MongoMemoryServer = new MongoMemoryServer({
     },
 });
 
-describe("Route:AuthBasicMongo Tests", () => {
+describe("Route:AuthTOTPSQL Tests", () => {
     const logger = Logger();
     const objectFactory: ObjectFactory = new ObjectFactory(config, logger);
-    const server: Server = new Server({ config, basePath: "./test/server-mongo", logger, objectFactory });
-    const baseUrl = "/mongo/auth/password";
-    let userRepo: MongoRepository<UserMongo>;
+    const server: Server = new Server({ config, basePath: "./test/server-sql", logger, objectFactory });
+    const baseUrl = "/sql/auth/totp";
+    let userRepo: Repository<UserSQL>;
     let aclRepo: MongoRepository<any>;
-    let secretRepo: MongoRepository<SecretMongo>;
+    let secretRepo: Repository<SecretSQL>;
 
-    const createUserMongo = async function (data?: any): Promise<UserMongo> {
-        const obj: UserMongo = new UserMongo({
+    const createUserSQL = async function (data?: any): Promise<UserSQL> {
+        const obj: UserSQL = new UserSQL({
             roles: [],
             scopes: [],
             verified: true,
             ...data,
         });
 
-        const result: UserMongo = await userRepo.save(obj);
+        const result: UserSQL = await userRepo.save(obj);
 
         const records: ACLRecord[] = [];
 
@@ -69,22 +71,25 @@ describe("Route:AuthBasicMongo Tests", () => {
             dateModified: new Date(),
             version: 0,
             records,
-            parentUid: "UserMongo",
+            parentUid: "UserSQL",
         };
         await aclRepo.save(acl);
 
         return result;
     };
 
-    const createSecretMongo = async function (data?: any): Promise<SecretMongo> {
-        const obj: SecretMongo = new SecretMongo({
-            data: await argon2.hash("password"),
-            type: SecretType.PASSWORD,
+    const createSecretSQL = async function (data?: any): Promise<SecretSQL> {
+        const obj: SecretSQL = new SecretSQL({
+            data: {
+                secret: otplib.generateSecret(),
+                epochTolerance: [5, 0],
+            },
+            type: SecretType.TOTP,
             userUid: uuid.v4(),
             ...data,
         });
 
-        const result: SecretMongo = await secretRepo.save(obj);
+        const result: SecretSQL = await secretRepo.save(obj);
 
         const records: ACLRecord[] = [];
 
@@ -109,7 +114,7 @@ describe("Route:AuthBasicMongo Tests", () => {
             dateModified: new Date(),
             version: 0,
             records,
-            parentUid: "SecretMongo",
+            parentUid: "SecretSQL",
         };
         await aclRepo.save(acl);
 
@@ -125,12 +130,12 @@ describe("Route:AuthBasicMongo Tests", () => {
         if (conn instanceof MongoConnection) {
             aclRepo = conn.getMongoRepository("AccessControlListMongo");
         }
-        conn = connMgr?.connections.get("mongo");
-        if (conn instanceof MongoConnection) {
-            userRepo = conn.getMongoRepository("UserMongo");
-            secretRepo = conn.getMongoRepository("SecretMongo");
+        conn = connMgr?.connections.get("sql");
+        if (isSqlDataSource(conn)) {
+            userRepo = conn.getRepository(UserSQL);
+            secretRepo = conn.getRepository(SecretSQL);
         } else {
-            throw new Error("Could not find user connection");
+            throw new Error("Could not find sql connection");
         }
     });
 
@@ -141,26 +146,22 @@ describe("Route:AuthBasicMongo Tests", () => {
     });
 
     beforeEach(async () => {
-        try {
-            await userRepo.clear();
-            await secretRepo.clear();
-        } catch (err: any) {
-            // The error "ns not found" occurs when the collection doesn't exist yet. We can ignore this error.
-            if (err.message !== "ns not found") {
-                throw err;
-            }
-        }
+        await userRepo.clear();
+        await secretRepo.clear();
     });
 
-    it("Can authenticate with valid user id and password.", async () => {
-        const user: UserMongo = await createUserMongo();
-        await createSecretMongo({
+    it("Can authenticate with valid user id and totp.", async () => {
+        const user: UserSQL = await createUserSQL();
+        const secret: SecretSQL = await createSecretSQL({
             userUid: user.uid,
         });
 
         const result = await request(server.getApplication())
             .get(baseUrl)
-            .set("Authorization", `basic ${Buffer.from(user.uid + ":password").toString("base64")}`);
+            .set(
+                "Authorization",
+                `totp ${Buffer.from(`id=${user.uid}&token=${await otplib.generate(secret.data)}`).toString("base64")}`,
+            );
 
         expect(result).toBeDefined();
         expect(result.status).toBeGreaterThanOrEqual(200);
@@ -170,19 +171,21 @@ describe("Route:AuthBasicMongo Tests", () => {
         expect(result.body).toHaveProperty("user");
     });
 
-    it("Can authenticate with valid user id and password when multiple passwords exist.", async () => {
-        const user: UserMongo = await createUserMongo();
-        await createSecretMongo({
+    it("Can authenticate with valid user id and totp when multiple totp secrets exist.", async () => {
+        const user: UserSQL = await createUserSQL();
+        await createSecretSQL({
             userUid: user.uid,
         });
-        await createSecretMongo({
-            data: await argon2.hash("another-password"),
+        const secret: SecretSQL = await createSecretSQL({
             userUid: user.uid,
         });
 
         const result = await request(server.getApplication())
             .get(baseUrl)
-            .set("Authorization", `basic ${Buffer.from(user.uid + ":another-password").toString("base64")}`);
+            .set(
+                "Authorization",
+                `totp ${Buffer.from(`id=${user.uid}&token=${await otplib.generate(secret.data)}`).toString("base64")}`,
+            );
 
         expect(result).toBeDefined();
         expect(result.status).toBeGreaterThanOrEqual(200);
@@ -192,15 +195,15 @@ describe("Route:AuthBasicMongo Tests", () => {
         expect(result.body).toHaveProperty("user");
     });
 
-    it("Cannot authenticate with invalid user id and password.", async () => {
-        const user: UserMongo = await createUserMongo();
-        await createSecretMongo({
+    it("Cannot authenticate with invalid user id and totp.", async () => {
+        const user: UserSQL = await createUserSQL();
+        await createSecretSQL({
             userUid: user.uid,
         });
 
         const result = await request(server.getApplication())
             .get(baseUrl)
-            .set("Authorization", `basic ${Buffer.from(user.uid + ":bogus").toString("base64")}`);
+            .set("Authorization", `totp ${Buffer.from(user.uid + ":123456").toString("base64")}`);
 
         expect(result).toBeDefined();
         expect(result.status).toBe(401);

@@ -12,12 +12,14 @@ import {
     ObjectFactory,
     ConnectionManager,
     ACLAction,
+    isSqlDataSource,
 } from "@rapidrest/service-core";
 import { Logger } from "@rapidrest/core";
 import * as uuid from "uuid";
-import { UserMongo } from "../../../src/models/mongo/UserMongo.js";
+import { Repository } from "typeorm";
+import { UserSQL } from "../../../src/models/sql/UserSQL.js";
 import { MongoMemoryServer } from "mongodb-memory-server";
-import { SecretMongo } from "../../../src/models/mongo/SecretMongo.js";
+import { SecretSQL } from "../../../src/models/sql/SecretSQL.js";
 import { SecretType } from "../../../src/models/types.js";
 
 const mongod: MongoMemoryServer = new MongoMemoryServer({
@@ -27,24 +29,24 @@ const mongod: MongoMemoryServer = new MongoMemoryServer({
     },
 });
 
-describe("Route:AuthBasicMongo Tests", () => {
+describe("Route:AuthBasicSQL Tests", () => {
     const logger = Logger();
     const objectFactory: ObjectFactory = new ObjectFactory(config, logger);
-    const server: Server = new Server({ config, basePath: "./test/server-mongo", logger, objectFactory });
-    const baseUrl = "/mongo/auth/password";
-    let userRepo: MongoRepository<UserMongo>;
+    const server: Server = new Server({ config, basePath: "./test/server-sql", logger, objectFactory });
+    const baseUrl = "/sql/auth/password";
+    let userRepo: Repository<UserSQL>;
     let aclRepo: MongoRepository<any>;
-    let secretRepo: MongoRepository<SecretMongo>;
+    let secretRepo: Repository<SecretSQL>;
 
-    const createUserMongo = async function (data?: any): Promise<UserMongo> {
-        const obj: UserMongo = new UserMongo({
+    const createUserSQL = async function (data?: any): Promise<UserSQL> {
+        const obj: UserSQL = new UserSQL({
             roles: [],
             scopes: [],
             verified: true,
             ...data,
         });
 
-        const result: UserMongo = await userRepo.save(obj);
+        const result: UserSQL = await userRepo.save(obj);
 
         const records: ACLRecord[] = [];
 
@@ -69,22 +71,22 @@ describe("Route:AuthBasicMongo Tests", () => {
             dateModified: new Date(),
             version: 0,
             records,
-            parentUid: "UserMongo",
+            parentUid: "UserSQL",
         };
         await aclRepo.save(acl);
 
         return result;
     };
 
-    const createSecretMongo = async function (data?: any): Promise<SecretMongo> {
-        const obj: SecretMongo = new SecretMongo({
+    const createSecretSQL = async function (data?: any): Promise<SecretSQL> {
+        const obj: SecretSQL = new SecretSQL({
             data: await argon2.hash("password"),
             type: SecretType.PASSWORD,
             userUid: uuid.v4(),
             ...data,
         });
 
-        const result: SecretMongo = await secretRepo.save(obj);
+        const result: SecretSQL = await secretRepo.save(obj);
 
         const records: ACLRecord[] = [];
 
@@ -109,7 +111,7 @@ describe("Route:AuthBasicMongo Tests", () => {
             dateModified: new Date(),
             version: 0,
             records,
-            parentUid: "SecretMongo",
+            parentUid: "SecretSQL",
         };
         await aclRepo.save(acl);
 
@@ -125,12 +127,12 @@ describe("Route:AuthBasicMongo Tests", () => {
         if (conn instanceof MongoConnection) {
             aclRepo = conn.getMongoRepository("AccessControlListMongo");
         }
-        conn = connMgr?.connections.get("mongo");
-        if (conn instanceof MongoConnection) {
-            userRepo = conn.getMongoRepository("UserMongo");
-            secretRepo = conn.getMongoRepository("SecretMongo");
+        conn = connMgr?.connections.get("sql");
+        if (isSqlDataSource(conn)) {
+            userRepo = conn.getRepository(UserSQL);
+            secretRepo = conn.getRepository(SecretSQL);
         } else {
-            throw new Error("Could not find user connection");
+            throw new Error("Could not find sql connection");
         }
     });
 
@@ -141,20 +143,13 @@ describe("Route:AuthBasicMongo Tests", () => {
     });
 
     beforeEach(async () => {
-        try {
-            await userRepo.clear();
-            await secretRepo.clear();
-        } catch (err: any) {
-            // The error "ns not found" occurs when the collection doesn't exist yet. We can ignore this error.
-            if (err.message !== "ns not found") {
-                throw err;
-            }
-        }
+        await userRepo.clear();
+        await secretRepo.clear();
     });
 
     it("Can authenticate with valid user id and password.", async () => {
-        const user: UserMongo = await createUserMongo();
-        await createSecretMongo({
+        const user: UserSQL = await createUserSQL();
+        await createSecretSQL({
             userUid: user.uid,
         });
 
@@ -171,11 +166,11 @@ describe("Route:AuthBasicMongo Tests", () => {
     });
 
     it("Can authenticate with valid user id and password when multiple passwords exist.", async () => {
-        const user: UserMongo = await createUserMongo();
-        await createSecretMongo({
+        const user: UserSQL = await createUserSQL();
+        await createSecretSQL({
             userUid: user.uid,
         });
-        await createSecretMongo({
+        await createSecretSQL({
             data: await argon2.hash("another-password"),
             userUid: user.uid,
         });
@@ -193,8 +188,8 @@ describe("Route:AuthBasicMongo Tests", () => {
     });
 
     it("Cannot authenticate with invalid user id and password.", async () => {
-        const user: UserMongo = await createUserMongo();
-        await createSecretMongo({
+        const user: UserSQL = await createUserSQL();
+        await createSecretSQL({
             userUid: user.uid,
         });
 

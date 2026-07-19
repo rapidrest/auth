@@ -11,12 +11,14 @@ import {
     ObjectFactory,
     ConnectionManager,
     ACLAction,
+    isSqlDataSource,
 } from "@rapidrest/service-core";
 import { Logger, MessagingUtils } from "@rapidrest/core";
 import * as uuid from "uuid";
-import { UserMongo } from "../../../src/models/mongo/UserMongo.js";
+import { Repository } from "typeorm";
+import { UserSQL } from "../../../src/models/sql/UserSQL.js";
 import { MongoMemoryServer } from "mongodb-memory-server";
-import { AliasMongo } from "../../../src/models/mongo/AliasMongo.js";
+import { AliasSQL } from "../../../src/models/sql/AliasSQL.js";
 import { AliasType } from "../../../src/models/types.js";
 
 const mongod: MongoMemoryServer = new MongoMemoryServer({
@@ -26,25 +28,25 @@ const mongod: MongoMemoryServer = new MongoMemoryServer({
     },
 });
 
-describe("Route:AuthOTPMongo Tests", () => {
+describe("Route:AuthOTPSQL Tests", () => {
     const logger = Logger();
     const objectFactory: ObjectFactory = new ObjectFactory(config, logger);
-    const server: Server = new Server({ config, basePath: "./test/server-mongo", logger, objectFactory });
-    const baseUrl = "/mongo/auth/otp";
-    let userRepo: MongoRepository<UserMongo>;
+    const server: Server = new Server({ config, basePath: "./test/server-sql", logger, objectFactory });
+    const baseUrl = "/sql/auth/otp";
+    let userRepo: Repository<UserSQL>;
     let aclRepo: MongoRepository<any>;
-    let aliasRepo: MongoRepository<AliasMongo>;
+    let aliasRepo: Repository<AliasSQL>;
     let messagingUtils: MessagingUtils;
 
-    const createUserMongo = async function (data?: any): Promise<UserMongo> {
-        const obj: UserMongo = new UserMongo({
+    const createUserSQL = async function (data?: any): Promise<UserSQL> {
+        const obj: UserSQL = new UserSQL({
             roles: [],
             scopes: [],
             verified: true,
             ...data,
         });
 
-        const result: UserMongo = await userRepo.save(obj);
+        const result: UserSQL = await userRepo.save(obj);
 
         const records: ACLRecord[] = [];
 
@@ -69,15 +71,15 @@ describe("Route:AuthOTPMongo Tests", () => {
             dateModified: new Date(),
             version: 0,
             records,
-            parentUid: "UserMongo",
+            parentUid: "UserSQL",
         };
         await aclRepo.save(acl);
 
         return result;
     };
 
-    const createAliasMongo = async function (data?: any): Promise<AliasMongo> {
-        const obj: AliasMongo = new AliasMongo({
+    const createAliasSQL = async function (data?: any): Promise<AliasSQL> {
+        const obj: AliasSQL = new AliasSQL({
             alias: uuid.v4(),
             type: AliasType.EMAIL,
             userUid: uuid.v4(),
@@ -85,7 +87,7 @@ describe("Route:AuthOTPMongo Tests", () => {
             ...data,
         });
 
-        const result: AliasMongo = await aliasRepo.save(obj);
+        const result: AliasSQL = await aliasRepo.save(obj);
 
         const records: ACLRecord[] = [];
 
@@ -110,7 +112,7 @@ describe("Route:AuthOTPMongo Tests", () => {
             dateModified: new Date(),
             version: 0,
             records,
-            parentUid: "AliasMongo",
+            parentUid: "AliasSQL",
         };
         await aclRepo.save(acl);
 
@@ -126,12 +128,12 @@ describe("Route:AuthOTPMongo Tests", () => {
         if (conn instanceof MongoConnection) {
             aclRepo = conn.getMongoRepository("AccessControlListMongo");
         }
-        conn = connMgr?.connections.get("mongo");
-        if (conn instanceof MongoConnection) {
-            userRepo = conn.getMongoRepository("UserMongo");
-            aliasRepo = conn.getMongoRepository("AliasMongo");
+        conn = connMgr?.connections.get("sql");
+        if (isSqlDataSource(conn)) {
+            userRepo = conn.getRepository(UserSQL);
+            aliasRepo = conn.getRepository(AliasSQL);
         } else {
-            throw new Error("Could not find user connection");
+            throw new Error("Could not find sql connection");
         }
 
         messagingUtils = objectFactory.getInstance(MessagingUtils) as MessagingUtils;
@@ -144,15 +146,8 @@ describe("Route:AuthOTPMongo Tests", () => {
     });
 
     beforeEach(async () => {
-        try {
-            await userRepo.clear();
-            await aliasRepo.clear();
-        } catch (err: any) {
-            // The error "ns not found" occurs when the collection doesn't exist yet. We can ignore this error.
-            if (err.message !== "ns not found") {
-                throw err;
-            }
-        }
+        await userRepo.clear();
+        await aliasRepo.clear();
 
         // No SMTP/Twilio provider is configured in the test environment, so sending would otherwise
         // reject in the background (fire-and-forget, per `BaseAuthOTPRoute.notifyContact`). Stub it out
@@ -162,8 +157,8 @@ describe("Route:AuthOTPMongo Tests", () => {
     });
 
     it("Can request and verify an OTP challenge sent to a verified contact.", async () => {
-        const user: UserMongo = await createUserMongo();
-        const alias: AliasMongo = await createAliasMongo({
+        const user: UserSQL = await createUserSQL();
+        const alias: AliasSQL = await createAliasSQL({
             userUid: user.uid,
         });
         const client = agent(server.getApplication());
@@ -191,8 +186,8 @@ describe("Route:AuthOTPMongo Tests", () => {
     });
 
     it("Cannot verify an OTP challenge with an invalid token.", async () => {
-        const user: UserMongo = await createUserMongo();
-        const alias: AliasMongo = await createAliasMongo({
+        const user: UserSQL = await createUserSQL();
+        const alias: AliasSQL = await createAliasSQL({
             userUid: user.uid,
         });
         const client = agent(server.getApplication());
@@ -206,8 +201,8 @@ describe("Route:AuthOTPMongo Tests", () => {
     });
 
     it("Cannot verify an OTP challenge without first requesting one (no session state).", async () => {
-        const user: UserMongo = await createUserMongo();
-        const alias: AliasMongo = await createAliasMongo({
+        const user: UserSQL = await createUserSQL();
+        const alias: AliasSQL = await createAliasSQL({
             userUid: user.uid,
         });
 
