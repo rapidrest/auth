@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Jean-Philippe Steinmetz
 ////////////////////////////////////////////////////////////////////////////////
 import { HttpRequest } from "@rapidrest/service-core";
-import { OTPContactType, PasskeyConfig, StoredPasskeyCredential, TOTPSecret } from "./types.js";
+import { OTPContactType, PasskeyConfig, PasskeyTransport, StoredPasskeyCredential, TOTPSecret } from "./types.js";
 
 const headerSchemeRegExps: Map<string, RegExp> = new Map();
 
@@ -164,6 +164,24 @@ export const isPasskeyResponse = function (response: any): boolean {
 };
 
 /**
+ * Determines if the given value has the shape of a WebAuthn `RegistrationResponseJSON`, as produced by
+ * `navigator.credentials.create()` and submitted to finish a passkey registration ceremony.
+ *
+ * @param response The value to check.
+ */
+export const isPasskeyRegistrationResponse = function (response: any): boolean {
+    if (
+        typeof response?.id !== "string" ||
+        typeof response.response?.clientDataJSON !== "string" ||
+        typeof response.response?.attestationObject !== "string"
+    ) {
+        return false;
+    }
+
+    return true;
+};
+
+/**
  * Obfuscates the given contact and returns the obfuscated value.
  * @param contact The contact to obfuscate.
  */
@@ -298,6 +316,75 @@ export const verifyPasskeyChallenge = async function (
             publicKey: credential.publicKey,
             transports: credential.transports,
         },
+        requireUserVerification: config.requireUserVerification ?? true,
+    });
+};
+
+/**
+ * Begins a registration ceremony: generates a set of `PublicKeyCredentialCreationOptions` and stores the
+ * challenge in the session for later verification. The result is meant to be returned directly to the
+ * client for use with `navigator.credentials.create()`.
+ *
+ * @param config The relying party configuration to use for this ceremony.
+ * @param req The source HTTP request. Used to persist the generated challenge in the session.
+ * @param user The user the new credential will be associated with.
+ * @param excludeCredentials The user's already-registered credentials, if any, so that the authenticator
+ * can avoid creating a duplicate credential for one it already holds.
+ */
+export const generatePasskeyRegistrationOptions = async function (
+    config: PasskeyConfig,
+    req: HttpRequest,
+    user: { id: string; name: string; displayName?: string },
+    excludeCredentials?: { id: string; transports?: PasskeyTransport[] }[],
+): Promise<any> {
+    if (!req.session) {
+        throw new Error(
+            "This function requires session support. Configure the `session` config " +
+                "block so the session middleware is registered.",
+        );
+    }
+
+    const { generateRegistrationOptions } = await importSimpleWebAuthn();
+    const result = await generateRegistrationOptions({
+        rpName: config.rpName,
+        rpID: config.rpID,
+        userName: user.name,
+        userID: new TextEncoder().encode(user.id),
+        userDisplayName: user.displayName,
+        timeout: config.timeout,
+        authenticatorSelection: {
+            userVerification: config.userVerification ?? "preferred",
+        },
+        excludeCredentials,
+    });
+
+    // Store the challenge in the session so it can be verified once the ceremony finishes.
+    req.session.challenge = result.challenge;
+
+    return result;
+};
+
+/**
+ * Finishes a registration ceremony: verifies the client-submitted attestation response against the
+ * stored challenge and relying party configuration.
+ *
+ * @param config The relying party configuration to verify the response against.
+ * @param expectedChallenge The challenge previously stored in the session by
+ * `generatePasskeyRegistrationOptions()`.
+ * @param payload The client-submitted `RegistrationResponseJSON`.
+ */
+export const verifyPasskeyRegistrationResponse = async function (
+    config: PasskeyConfig,
+    expectedChallenge: string,
+    payload: any,
+): Promise<any> {
+    const { verifyRegistrationResponse } = await importSimpleWebAuthn();
+
+    return await verifyRegistrationResponse({
+        response: payload,
+        expectedChallenge,
+        expectedOrigin: config.origin,
+        expectedRPID: config.rpID,
         requireUserVerification: config.requireUserVerification ?? true,
     });
 };

@@ -1,9 +1,17 @@
 ///////////////////////////////////////////////////////////////////////////////
 // Copyright (C) 2026 Jean-Philippe Steinmetz
 ///////////////////////////////////////////////////////////////////////////////
+// The real cryptographic verification is SimpleWebAuthn's own tested responsibility. Here we mock its two
+// registration ceremony functions so we can exercise the full HTTP route (session handling, credential
+// storage) end to end without a real authenticator.
+vi.mock("@simplewebauthn/server", () => ({
+    generateRegistrationOptions: vi.fn(),
+    verifyRegistrationResponse: vi.fn(),
+}));
+
 import config from "../../config";
 import * as argon2 from "argon2";
-import { request } from "@rapidrest/service-core/test";
+import { agent, request } from "@rapidrest/service-core/test";
 import {
     ACLRecord,
     MongoConnection,
@@ -15,11 +23,30 @@ import {
     isSqlDataSource,
 } from "@rapidrest/service-core";
 import { JWTUtils, Logger } from "@rapidrest/core";
+import { generateRegistrationOptions, verifyRegistrationResponse } from "@simplewebauthn/server";
 import * as uuid from "uuid";
 import { Repository } from "typeorm";
 import { SecretSQL } from "../../../src/models/sql/SecretSQL.js";
 import { MongoMemoryServer } from "mongodb-memory-server";
 import { SecretType } from "../../../src/models/types.js";
+import { StoredPasskeyCredential } from "../../../src/auth/types.js";
+
+const mockGenerateRegistrationOptions = generateRegistrationOptions as unknown as ReturnType<typeof vi.fn>;
+const mockVerifyRegistrationResponse = verifyRegistrationResponse as unknown as ReturnType<typeof vi.fn>;
+
+function makeRegistrationBody(credentialId: string, overrides: any = {}) {
+    return {
+        id: credentialId,
+        rawId: credentialId,
+        response: {
+            clientDataJSON: "clientDataJSON-base64",
+            attestationObject: "attestationObject-base64",
+        },
+        type: "public-key",
+        clientExtensionResults: {},
+        ...overrides,
+    };
+}
 
 const mongod: MongoMemoryServer = new MongoMemoryServer({
     instance: {
@@ -139,6 +166,8 @@ describe("Route:SecretSQL Tests", () => {
 
     beforeEach(async () => {
         await repo.clear();
+        mockGenerateRegistrationOptions.mockReset();
+        mockVerifyRegistrationResponse.mockReset();
     });
 
     it("Can make count request (with admin token).", async () => {
@@ -245,5 +274,127 @@ describe("Route:SecretSQL Tests", () => {
 
         count = await repo.count();
         expect(count).toBe(0);
+    });
+
+    it("Cannot begin passkey registration without authentication.", async () => {
+        const result = await request(server.getApplication()).get(baseUrl + "/passkey/register");
+
+        expect(result.status).toBe(401);
+        expect(mockGenerateRegistrationOptions).not.toHaveBeenCalled();
+    });
+
+    it("Can begin passkey registration and receive creation options (with admin token).", async () => {
+        mockGenerateRegistrationOptions.mockResolvedValue({ challenge: "test-challenge", rp: { id: "rapidrest" } });
+
+        const result = await request(server.getApplication())
+            .get(baseUrl + "/passkey/register")
+            .set("Authorization", "jwt " + adminToken);
+
+        expect(result.status).toBeGreaterThanOrEqual(200);
+        expect(result.status).toBeLessThan(300);
+        expect(result.body).toEqual({ challenge: "test-challenge", rp: { id: "rapidrest" } });
+    });
+
+    it("Cannot create a passkey secret without a prior registration ceremony.", async () => {
+        const credentialId = uuid.v4();
+
+        const result = await request(server.getApplication())
+            .post(baseUrl)
+            .set("Authorization", "jwt " + adminToken)
+            .send({
+                data: makeRegistrationBody(credentialId),
+                type: SecretType.PASSKEY,
+                userUid: uuid.v4(),
+            });
+
+        expect(result.status).toBe(400);
+        expect(mockVerifyRegistrationResponse).not.toHaveBeenCalled();
+    });
+
+    it("Can create a passkey secret with a valid registration response (with admin token).", async () => {
+        const credentialId = uuid.v4();
+        const userUid = uuid.v4();
+        mockGenerateRegistrationOptions.mockResolvedValue({ challenge: "test-challenge", rp: { id: "rapidrest" } });
+
+        const client = agent(server.getApplication());
+        const beginResult = await client
+            .get(baseUrl + "/passkey/register")
+            .set("Authorization", "jwt " + adminToken);
+        expect(beginResult.status).toBeGreaterThanOrEqual(200);
+        expect(beginResult.status).toBeLessThan(300);
+
+        mockVerifyRegistrationResponse.mockResolvedValue({
+            verified: true,
+            registrationInfo: {
+                credential: {
+                    id: credentialId,
+                    publicKey: new Uint8Array([1, 2, 3, 4]),
+                    counter: 0,
+                    transports: ["internal"],
+                },
+            },
+        });
+
+        const finishResult = await client
+            .post(baseUrl)
+            .set("Authorization", "jwt " + adminToken)
+            .send({
+                data: makeRegistrationBody(credentialId),
+                type: SecretType.PASSKEY,
+                userUid,
+            });
+
+        expect(finishResult.status).toBeGreaterThanOrEqual(200);
+        expect(finishResult.status).toBeLessThan(300);
+        expect(finishResult.body).toBeDefined();
+        expect(finishResult.body).not.toHaveProperty("data");
+        expect(mockVerifyRegistrationResponse).toHaveBeenCalledWith(
+            expect.objectContaining({
+                expectedChallenge: "test-challenge",
+                expectedOrigin: "http://localhost:3000",
+                expectedRPID: "rapidrest",
+            }),
+        );
+
+        // The credential's own `uid` should double as its WebAuthn credential ID, so that a login
+        // ceremony (which only has the credential ID to go on) can look the secret up directly.
+        const stored: SecretSQL | null = await repo.findOne({ where: { uid: credentialId } });
+        expect(stored).toBeDefined();
+        expect((stored?.data as StoredPasskeyCredential)?.uid).toBe(userUid);
+        expect((stored?.data as StoredPasskeyCredential)?.counter).toBe(0);
+    });
+
+    it("Cannot register the same passkey credential twice.", async () => {
+        const credentialId = uuid.v4();
+        mockGenerateRegistrationOptions.mockResolvedValue({ challenge: "test-challenge", rp: { id: "rapidrest" } });
+        mockVerifyRegistrationResponse.mockResolvedValue({
+            verified: true,
+            registrationInfo: {
+                credential: {
+                    id: credentialId,
+                    publicKey: new Uint8Array([1, 2, 3, 4]),
+                    counter: 0,
+                    transports: ["internal"],
+                },
+            },
+        });
+
+        const firstClient = agent(server.getApplication());
+        await firstClient.get(baseUrl + "/passkey/register").set("Authorization", "jwt " + adminToken);
+        const firstResult = await firstClient
+            .post(baseUrl)
+            .set("Authorization", "jwt " + adminToken)
+            .send({ data: makeRegistrationBody(credentialId), type: SecretType.PASSKEY, userUid: uuid.v4() });
+        expect(firstResult.status).toBeGreaterThanOrEqual(200);
+        expect(firstResult.status).toBeLessThan(300);
+
+        const secondClient = agent(server.getApplication());
+        await secondClient.get(baseUrl + "/passkey/register").set("Authorization", "jwt " + adminToken);
+        const secondResult = await secondClient
+            .post(baseUrl)
+            .set("Authorization", "jwt " + adminToken)
+            .send({ data: makeRegistrationBody(credentialId), type: SecretType.PASSKEY, userUid: uuid.v4() });
+
+        expect(secondResult.status).toBe(400);
     });
 });
