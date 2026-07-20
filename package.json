@@ -121,6 +121,14 @@
         ".": {
             "import": "./dist/lib/index.js",
             "types": "./dist/types/index.d.ts"
+        },
+        "./mongo": {
+            "import": "./dist/lib/mongo.js",
+            "types": "./dist/types/mongo.d.ts"
+        },
+        "./sql": {
+            "import": "./dist/lib/sql.js",
+            "types": "./dist/types/sql.d.ts"
         }
     },
     "typings": "dist/types/index.d.ts",
