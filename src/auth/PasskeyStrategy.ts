@@ -55,7 +55,7 @@ export class PasskeyStrategyOptions {
      * @param id The unique identifier of the user that has been successfully authenticated.
      */
     public getUser(uid: string): Promise<JWTUser | undefined> {
-        throw new Error("Did you forget to override TOTPStrategyOptions.getUser?");
+        throw new Error("Did you forget to override PasskeyStrategyOptions.getUser?");
     }
 }
 

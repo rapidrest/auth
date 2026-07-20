@@ -1,779 +1,1549 @@
 <?xml version="1.0" encoding="UTF-8" ?>
-<testsuites name="vitest tests" tests="192" failures="0" errors="0" time="24.5139439">
-    <testsuite name="test/auth/FIDO2Strategy.test.ts" timestamp="2026-07-19T22:33:04.377Z" hostname="Jane" tests="19" failures="0" errors="0" skipped="0" time="0.0147587">
-        <testcase classname="test/auth/FIDO2Strategy.test.ts" name="FIDO2Strategy Tests &gt; Begin (phase 1) &gt; Generates options with no allowCredentials when no uid hint is given." time="0.0029522">
+<testsuites name="vitest tests" tests="560" failures="0" errors="0" time="24.7727227">
+    <testsuite name="test/auth/BasicStrategy.test.ts" timestamp="2026-07-20T00:31:12.195Z" hostname="Jane" tests="10" failures="0" errors="0" skipped="0" time="0.0066608">
+        <testcase classname="test/auth/BasicStrategy.test.ts" name="BasicStrategy Tests &gt; authenticate &gt; Returns an AuthResult when verify() resolves a user." time="0.0027365">
         </testcase>
-        <testcase classname="test/auth/FIDO2Strategy.test.ts" name="FIDO2Strategy Tests &gt; Begin (phase 1) &gt; Builds allowCredentials from getCredentials when a uid hint has registered credentials." time="0.0012261">
+        <testcase classname="test/auth/BasicStrategy.test.ts" name="BasicStrategy Tests &gt; authenticate &gt; Throws when verify() resolves undefined and auth is required." time="0.0010891">
         </testcase>
-        <testcase classname="test/auth/FIDO2Strategy.test.ts" name="FIDO2Strategy Tests &gt; Begin (phase 1) &gt; Leaves allowCredentials undefined (not an empty array) when a uid hint has zero credentials." time="0.0002844">
+        <testcase classname="test/auth/BasicStrategy.test.ts" name="BasicStrategy Tests &gt; authenticate &gt; Returns undefined when verify() resolves undefined and auth is not required." time="0.000178">
         </testcase>
-        <testcase classname="test/auth/FIDO2Strategy.test.ts" name="FIDO2Strategy Tests &gt; Begin (phase 1) &gt; Throws if req.session is missing." time="0.0011446">
+        <testcase classname="test/auth/BasicStrategy.test.ts" name="BasicStrategy Tests &gt; authenticate &gt; Returns undefined without calling verify() when no id/password is present." time="0.0002167">
         </testcase>
-        <testcase classname="test/auth/FIDO2Strategy.test.ts" name="FIDO2Strategy Tests &gt; Begin (phase 1) &gt; Throws if res is missing." time="0.0002345">
+        <testcase classname="test/auth/BasicStrategy.test.ts" name="BasicStrategy Tests &gt; authenticate &gt; The default verify() throws if the consumer forgot to override it." time="0.0002884">
         </testcase>
-        <testcase classname="test/auth/FIDO2Strategy.test.ts" name="FIDO2Strategy Tests &gt; Finish (phase 2) &gt; Verifies successfully, updates the counter, clears the session challenge, and returns the AuthResult." time="0.0006703">
+        <testcase classname="test/auth/BasicStrategy.test.ts" name="BasicStrategy Tests &gt; authenticateSync &gt; Returns an AuthResult when verifySync() resolves a user." time="0.0002715">
         </testcase>
-        <testcase classname="test/auth/FIDO2Strategy.test.ts" name="FIDO2Strategy Tests &gt; Finish (phase 2) &gt; Throws if req.session is missing." time="0.0002419">
+        <testcase classname="test/auth/BasicStrategy.test.ts" name="BasicStrategy Tests &gt; authenticateSync &gt; Throws when verifySync() returns undefined and auth is required." time="0.0002209">
         </testcase>
-        <testcase classname="test/auth/FIDO2Strategy.test.ts" name="FIDO2Strategy Tests &gt; Finish (phase 2) &gt; Throws if there is no challenge stored in the session." time="0.0009962">
+        <testcase classname="test/auth/BasicStrategy.test.ts" name="BasicStrategy Tests &gt; authenticateSync &gt; Returns undefined when verifySync() returns undefined and auth is not required." time="0.0001399">
         </testcase>
-        <testcase classname="test/auth/FIDO2Strategy.test.ts" name="FIDO2Strategy Tests &gt; Finish (phase 2) &gt; Throws on a malformed response body without calling storage or SimpleWebAuthn." time="0.0002558">
+        <testcase classname="test/auth/BasicStrategy.test.ts" name="BasicStrategy Tests &gt; authenticateSync &gt; Returns undefined without calling verifySync() when no id/password is present." time="0.0001837">
         </testcase>
-        <testcase classname="test/auth/FIDO2Strategy.test.ts" name="FIDO2Strategy Tests &gt; Finish (phase 2) &gt; Throws a generic failure on an unknown credential ID without calling verifyAuthenticationResponse." time="0.0002186">
-        </testcase>
-        <testcase classname="test/auth/FIDO2Strategy.test.ts" name="FIDO2Strategy Tests &gt; Finish (phase 2) &gt; Throws a generic failure when verification resolves verified: false, without updating the counter." time="0.0002688">
-        </testcase>
-        <testcase classname="test/auth/FIDO2Strategy.test.ts" name="FIDO2Strategy Tests &gt; Finish (phase 2) &gt; Clears the session challenge before verification is attempted, even on failure." time="0.0001691">
-        </testcase>
-        <testcase classname="test/auth/FIDO2Strategy.test.ts" name="FIDO2Strategy Tests &gt; Finish (phase 2) &gt; Rejects a non-finite stored counter as an invalid credential." time="0.000208">
-        </testcase>
-        <testcase classname="test/auth/FIDO2Strategy.test.ts" name="FIDO2Strategy Tests &gt; Finish (phase 2) &gt; Propagates a thrown/rejected verifyAuthenticationResponse error without updating the counter." time="0.0003171">
-        </testcase>
-        <testcase classname="test/auth/FIDO2Strategy.test.ts" name="FIDO2Strategy Tests &gt; Finish (phase 2) &gt; Rejects a non-zero counter that does not exceed the stored counter (cloned authenticator), without updating." time="0.0002347">
-        </testcase>
-        <testcase classname="test/auth/FIDO2Strategy.test.ts" name="FIDO2Strategy Tests &gt; Finish (phase 2) &gt; Accepts a newCounter of 0 despite not exceeding the stored counter." time="0.0001983">
-        </testcase>
-        <testcase classname="test/auth/FIDO2Strategy.test.ts" name="FIDO2Strategy Tests &gt; Finish (phase 2) &gt; Returns undefined (does not throw) when verify() resolves undefined and auth is not required." time="0.0001715">
-        </testcase>
-        <testcase classname="test/auth/FIDO2Strategy.test.ts" name="FIDO2Strategy Tests &gt; Finish (phase 2) &gt; Throws when verify() resolves undefined and auth is required." time="0.0001984">
-        </testcase>
-        <testcase classname="test/auth/FIDO2Strategy.test.ts" name="FIDO2Strategy Tests &gt; authenticateSync throws &apos;Not supported&apos;." time="0.0001785">
+        <testcase classname="test/auth/BasicStrategy.test.ts" name="BasicStrategy Tests &gt; authenticateSync &gt; The default verifySync() throws if the consumer forgot to override it." time="0.0002514">
         </testcase>
     </testsuite>
-    <testsuite name="test/auth/PasskeyStrategy.test.ts" timestamp="2026-07-19T22:33:04.382Z" hostname="Jane" tests="19" failures="0" errors="0" skipped="0" time="0.0108697">
-        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Begin (phase 1) &gt; Generates options with no allowCredentials when no uid hint is given." time="0.0029226">
+    <testsuite name="test/auth/FIDO2Strategy.test.ts" timestamp="2026-07-20T00:31:12.199Z" hostname="Jane" tests="24" failures="0" errors="0" skipped="0" time="0.0119698">
+        <testcase classname="test/auth/FIDO2Strategy.test.ts" name="FIDO2Strategy Tests &gt; Begin (phase 1) &gt; Generates options with no allowCredentials when no uid hint is given." time="0.0028849">
         </testcase>
-        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Begin (phase 1) &gt; Builds allowCredentials from getCredentials when a uid hint has registered credentials." time="0.0012264">
+        <testcase classname="test/auth/FIDO2Strategy.test.ts" name="FIDO2Strategy Tests &gt; Begin (phase 1) &gt; Builds allowCredentials from getCredentials when a uid hint has registered credentials." time="0.0011948">
         </testcase>
-        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Begin (phase 1) &gt; Leaves allowCredentials undefined (not an empty array) when a uid hint has zero credentials." time="0.0002636">
+        <testcase classname="test/auth/FIDO2Strategy.test.ts" name="FIDO2Strategy Tests &gt; Begin (phase 1) &gt; Leaves allowCredentials undefined (not an empty array) when a uid hint has zero credentials." time="0.0002642">
         </testcase>
-        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Begin (phase 1) &gt; Throws if req.session is missing." time="0.0009944">
+        <testcase classname="test/auth/FIDO2Strategy.test.ts" name="FIDO2Strategy Tests &gt; Begin (phase 1) &gt; Throws if req.session is missing." time="0.0009623">
         </testcase>
-        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Begin (phase 1) &gt; Throws if res is missing." time="0.0002044">
+        <testcase classname="test/auth/FIDO2Strategy.test.ts" name="FIDO2Strategy Tests &gt; Begin (phase 1) &gt; Throws if res is missing." time="0.0002049">
         </testcase>
-        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Finish (phase 2) &gt; Verifies successfully, updates the counter, clears the session challenge, and returns the AuthResult." time="0.0006582">
+        <testcase classname="test/auth/FIDO2Strategy.test.ts" name="FIDO2Strategy Tests &gt; Finish (phase 2) &gt; Verifies successfully, updates the counter, clears the session challenge, and returns the AuthResult." time="0.0006856">
         </testcase>
-        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Finish (phase 2) &gt; Throws if req.session is missing." time="0.0008565">
+        <testcase classname="test/auth/FIDO2Strategy.test.ts" name="FIDO2Strategy Tests &gt; Finish (phase 2) &gt; Throws if req.session is missing." time="0.0002396">
         </testcase>
-        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Finish (phase 2) &gt; Throws if there is no challenge stored in the session." time="0.0002174">
+        <testcase classname="test/auth/FIDO2Strategy.test.ts" name="FIDO2Strategy Tests &gt; Finish (phase 2) &gt; Throws if there is no challenge stored in the session." time="0.0009694">
         </testcase>
-        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Finish (phase 2) &gt; Throws on a malformed response body without calling storage or SimpleWebAuthn." time="0.0002548">
+        <testcase classname="test/auth/FIDO2Strategy.test.ts" name="FIDO2Strategy Tests &gt; Finish (phase 2) &gt; Throws on a malformed response body without calling storage or SimpleWebAuthn." time="0.0002642">
         </testcase>
-        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Finish (phase 2) &gt; Throws a generic failure on an unknown credential ID without calling verifyAuthenticationResponse." time="0.0002296">
+        <testcase classname="test/auth/FIDO2Strategy.test.ts" name="FIDO2Strategy Tests &gt; Finish (phase 2) &gt; Throws a generic failure on an unknown credential ID without calling verifyAuthenticationResponse." time="0.0002512">
         </testcase>
-        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Finish (phase 2) &gt; Throws a generic failure when verification resolves verified: false, without updating the counter." time="0.0002739">
+        <testcase classname="test/auth/FIDO2Strategy.test.ts" name="FIDO2Strategy Tests &gt; Finish (phase 2) &gt; Throws a generic failure when verification resolves verified: false, without updating the counter." time="0.000296">
         </testcase>
-        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Finish (phase 2) &gt; Clears the session challenge before verification is attempted, even on failure." time="0.0001797">
+        <testcase classname="test/auth/FIDO2Strategy.test.ts" name="FIDO2Strategy Tests &gt; Finish (phase 2) &gt; Clears the session challenge before verification is attempted, even on failure." time="0.0001816">
         </testcase>
-        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Finish (phase 2) &gt; Rejects a non-finite stored counter as an invalid credential." time="0.000222">
+        <testcase classname="test/auth/FIDO2Strategy.test.ts" name="FIDO2Strategy Tests &gt; Finish (phase 2) &gt; Rejects a non-finite stored counter as an invalid credential." time="0.000225">
         </testcase>
-        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Finish (phase 2) &gt; Propagates a thrown/rejected verifyAuthenticationResponse error without updating the counter." time="0.0003074">
+        <testcase classname="test/auth/FIDO2Strategy.test.ts" name="FIDO2Strategy Tests &gt; Finish (phase 2) &gt; Propagates a thrown/rejected verifyAuthenticationResponse error without updating the counter." time="0.0002939">
         </testcase>
-        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Finish (phase 2) &gt; Rejects a non-zero counter that does not exceed the stored counter (cloned authenticator), without updating." time="0.0002196">
+        <testcase classname="test/auth/FIDO2Strategy.test.ts" name="FIDO2Strategy Tests &gt; Finish (phase 2) &gt; Rejects a non-zero counter that does not exceed the stored counter (cloned authenticator), without updating." time="0.000227">
         </testcase>
-        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Finish (phase 2) &gt; Accepts a newCounter of 0 despite not exceeding the stored counter (multi-device/backed-up authenticator)." time="0.0001978">
+        <testcase classname="test/auth/FIDO2Strategy.test.ts" name="FIDO2Strategy Tests &gt; Finish (phase 2) &gt; Accepts a newCounter of 0 despite not exceeding the stored counter." time="0.0002035">
         </testcase>
-        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Finish (phase 2) &gt; Returns undefined (does not throw) when verify() resolves undefined and auth is not required." time="0.0001658">
+        <testcase classname="test/auth/FIDO2Strategy.test.ts" name="FIDO2Strategy Tests &gt; Finish (phase 2) &gt; Returns undefined (does not throw) when verify() resolves undefined and auth is not required." time="0.000176">
         </testcase>
-        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Finish (phase 2) &gt; Throws when verify() resolves undefined and auth is required." time="0.0001891">
+        <testcase classname="test/auth/FIDO2Strategy.test.ts" name="FIDO2Strategy Tests &gt; Finish (phase 2) &gt; Throws when verify() resolves undefined and auth is required." time="0.0001904">
         </testcase>
-        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; authenticateSync throws &apos;Not supported&apos;." time="0.0001744">
+        <testcase classname="test/auth/FIDO2Strategy.test.ts" name="FIDO2Strategy Tests &gt; authenticateSync throws &apos;Not supported&apos;." time="0.0002042">
         </testcase>
-    </testsuite>
-    <testsuite name="test/routes/mongo/AliasRoute.test.ts" timestamp="2026-07-19T22:33:04.384Z" hostname="Jane" tests="8" failures="0" errors="0" skipped="0" time="1.0159707">
-        <testcase classname="test/routes/mongo/AliasRoute.test.ts" name="Route:AliasMongo Tests &gt; Can make count request (with admin token)." time="0.0214107">
+        <testcase classname="test/auth/FIDO2Strategy.test.ts" name="FIDO2Strategy Tests &gt; Dispatches to verify() when the body has a response but no id." time="0.0001931">
         </testcase>
-        <testcase classname="test/routes/mongo/AliasRoute.test.ts" name="Route:AliasMongo Tests &gt; Can make create request (with admin token)." time="0.0061256">
+        <testcase classname="test/auth/FIDO2Strategy.test.ts" name="FIDO2Strategy Tests &gt; Default FIDO2StrategyOptions &gt; getCredentialById throws if the consumer forgot to override it." time="0.0001869">
         </testcase>
-        <testcase classname="test/routes/mongo/AliasRoute.test.ts" name="Route:AliasMongo Tests &gt; Can make delete request (with admin token)." time="0.0063954">
+        <testcase classname="test/auth/FIDO2Strategy.test.ts" name="FIDO2Strategy Tests &gt; Default FIDO2StrategyOptions &gt; getCredentials throws if the consumer forgot to override it." time="0.0001733">
         </testcase>
-        <testcase classname="test/routes/mongo/AliasRoute.test.ts" name="Route:AliasMongo Tests &gt; Can make findAll request (with admin token)." time="0.0067215">
+        <testcase classname="test/auth/FIDO2Strategy.test.ts" name="FIDO2Strategy Tests &gt; Default FIDO2StrategyOptions &gt; updateCredentialCounter throws if the consumer forgot to override it." time="0.0001949">
         </testcase>
-        <testcase classname="test/routes/mongo/AliasRoute.test.ts" name="Route:AliasMongo Tests &gt; Can make findById request (with admin token)." time="0.0040393">
-        </testcase>
-        <testcase classname="test/routes/mongo/AliasRoute.test.ts" name="Route:AliasMongo Tests &gt; Can make truncate request (with admin token)." time="0.0067203">
-        </testcase>
-        <testcase classname="test/routes/mongo/AliasRoute.test.ts" name="Route:AliasMongo Tests &gt; Can make update request (with admin token)." time="0.0069163">
-        </testcase>
-        <testcase classname="test/routes/mongo/AliasRoute.test.ts" name="Route:AliasMongo Tests &gt; Can make update property request (with admin token)." time="0.0068503">
+        <testcase classname="test/auth/FIDO2Strategy.test.ts" name="FIDO2Strategy Tests &gt; Default FIDO2StrategyOptions &gt; getUser throws if the consumer forgot to override it." time="0.0001586">
         </testcase>
     </testsuite>
-    <testsuite name="test/routes/mongo/AuthBasicRoute.test.ts" timestamp="2026-07-19T22:33:04.387Z" hostname="Jane" tests="3" failures="0" errors="0" skipped="0" time="1.1844715">
-        <testcase classname="test/routes/mongo/AuthBasicRoute.test.ts" name="Route:AuthBasicMongo Tests &gt; Can authenticate with valid user id and password." time="0.0817586">
+    <testsuite name="test/auth/MFAStrategy.test.ts" timestamp="2026-07-20T00:31:12.202Z" hostname="Jane" tests="25" failures="0" errors="0" skipped="0" time="0.014874">
+        <testcase classname="test/auth/MFAStrategy.test.ts" name="MFAStrategy Tests &gt; authenticateSync throws &apos;Not supported&apos;." time="0.0018229">
         </testcase>
-        <testcase classname="test/routes/mongo/AuthBasicRoute.test.ts" name="Route:AuthBasicMongo Tests &gt; Can authenticate with valid user id and password when multiple passwords exist." time="0.1590949">
+        <testcase classname="test/auth/MFAStrategy.test.ts" name="MFAStrategy Tests &gt; Dispatch &gt; Routes an OTP-shaped payload (id+token) to verifyOTP and authenticates on success." time="0.0048501">
         </testcase>
-        <testcase classname="test/routes/mongo/AuthBasicRoute.test.ts" name="Route:AuthBasicMongo Tests &gt; Cannot authenticate with invalid user id and password." time="0.0722617">
+        <testcase classname="test/auth/MFAStrategy.test.ts" name="MFAStrategy Tests &gt; Dispatch &gt; Falls through to the required check when the OTP token is invalid." time="0.0004999">
+        </testcase>
+        <testcase classname="test/auth/MFAStrategy.test.ts" name="MFAStrategy Tests &gt; Dispatch &gt; Routes a passkey-shaped payload to verifyFIDO, which is not yet implemented." time="0.0007268">
+        </testcase>
+        <testcase classname="test/auth/MFAStrategy.test.ts" name="MFAStrategy Tests &gt; Dispatch &gt; Authenticates on a passkey-shaped payload once verifyFIDO resolves a user." time="0.0002311">
+        </testcase>
+        <testcase classname="test/auth/MFAStrategy.test.ts" name="MFAStrategy Tests &gt; Dispatch &gt; Falls through to the required check on a passkey-shaped payload once verifyFIDO resolves undefined." time="0.0001753">
+        </testcase>
+        <testcase classname="test/auth/MFAStrategy.test.ts" name="MFAStrategy Tests &gt; Dispatch &gt; Routes an id+password payload to verifyBasic and authenticates when there are no 2FA methods and require2FA is false." time="0.0003529">
+        </testcase>
+        <testcase classname="test/auth/MFAStrategy.test.ts" name="MFAStrategy Tests &gt; Dispatch &gt; Routes an id+methodId payload to challenge() and returns undefined." time="0.0004621">
+        </testcase>
+        <testcase classname="test/auth/MFAStrategy.test.ts" name="MFAStrategy Tests &gt; Dispatch &gt; Throws when no dispatch condition matches and auth is required." time="0.0003066">
+        </testcase>
+        <testcase classname="test/auth/MFAStrategy.test.ts" name="MFAStrategy Tests &gt; Dispatch &gt; Returns undefined when no dispatch condition matches and auth is not required." time="0.0001515">
+        </testcase>
+        <testcase classname="test/auth/MFAStrategy.test.ts" name="MFAStrategy Tests &gt; challenge (phase 2) &gt; Throws if req.session is missing." time="0.0002589">
+        </testcase>
+        <testcase classname="test/auth/MFAStrategy.test.ts" name="MFAStrategy Tests &gt; challenge (phase 2) &gt; Throws when the selected method id does not resolve." time="0.0002366">
+        </testcase>
+        <testcase classname="test/auth/MFAStrategy.test.ts" name="MFAStrategy Tests &gt; challenge (phase 2) &gt; Throws for a FIDO2 method when no fidoConfig is configured." time="0.0002191">
+        </testcase>
+        <testcase classname="test/auth/MFAStrategy.test.ts" name="MFAStrategy Tests &gt; challenge (phase 2) &gt; Generates a FIDO2 challenge and writes it to the response when fidoConfig is configured." time="0.0006061">
+        </testcase>
+        <testcase classname="test/auth/MFAStrategy.test.ts" name="MFAStrategy Tests &gt; challenge (phase 2) &gt; Throws for an unsupported method type." time="0.0002241">
+        </testcase>
+        <testcase classname="test/auth/MFAStrategy.test.ts" name="MFAStrategy Tests &gt; verifyBasic (phase 1) &gt; Throws when no Basic auth header is present, even if the dispatch payload has id/password." time="0.0007394">
+        </testcase>
+        <testcase classname="test/auth/MFAStrategy.test.ts" name="MFAStrategy Tests &gt; verifyBasic (phase 1) &gt; Throws when verify() resolves undefined." time="0.0002688">
+        </testcase>
+        <testcase classname="test/auth/MFAStrategy.test.ts" name="MFAStrategy Tests &gt; verifyBasic (phase 1) &gt; Returns the list of 2FA methods and does not authenticate when methods are available." time="0.0002779">
+        </testcase>
+        <testcase classname="test/auth/MFAStrategy.test.ts" name="MFAStrategy Tests &gt; verifyBasic (phase 1) &gt; Throws when there are no 2FA methods and require2FA is true (the default)." time="0.0002398">
+        </testcase>
+        <testcase classname="test/auth/MFAStrategy.test.ts" name="MFAStrategy Tests &gt; verifyTOTP is not yet implemented." time="0.0002015">
+        </testcase>
+        <testcase classname="test/auth/MFAStrategy.test.ts" name="MFAStrategy Tests &gt; Default MFAStrategyOptions &gt; getMethod throws if the consumer forgot to override it." time="0.0001782">
+        </testcase>
+        <testcase classname="test/auth/MFAStrategy.test.ts" name="MFAStrategy Tests &gt; Default MFAStrategyOptions &gt; getMethods throws if the consumer forgot to override it." time="0.0001729">
+        </testcase>
+        <testcase classname="test/auth/MFAStrategy.test.ts" name="MFAStrategy Tests &gt; Default MFAStrategyOptions &gt; getUser throws if the consumer forgot to override it." time="0.0001869">
+        </testcase>
+        <testcase classname="test/auth/MFAStrategy.test.ts" name="MFAStrategy Tests &gt; Default MFAStrategyOptions &gt; notifyContact throws if the consumer forgot to override it." time="0.0001731">
+        </testcase>
+        <testcase classname="test/auth/MFAStrategy.test.ts" name="MFAStrategy Tests &gt; Default MFAStrategyOptions &gt; verify throws if the consumer forgot to override it." time="0.0001624">
+        </testcase>
+    </testsuite>
+    <testsuite name="test/auth/OIDCStrategy.test.ts" timestamp="2026-07-20T00:31:12.205Z" hostname="Jane" tests="56" failures="0" errors="0" skipped="0" time="0.0271093">
+        <testcase classname="test/auth/OIDCStrategy.test.ts" name="OIDCStrategy Tests &gt; constructor &gt; Uses options.name for the strategy name." time="0.0013586">
+        </testcase>
+        <testcase classname="test/auth/OIDCStrategy.test.ts" name="OIDCStrategy Tests &gt; constructor &gt; Falls back to the default &apos;oauth&apos; name when options.name is not set." time="0.0001314">
+        </testcase>
+        <testcase classname="test/auth/OIDCStrategy.test.ts" name="OIDCStrategy Tests &gt; authenticate — redirect phase (no code) &gt; Throws when the provider reports an error via query, with description." time="0.0011492">
+        </testcase>
+        <testcase classname="test/auth/OIDCStrategy.test.ts" name="OIDCStrategy Tests &gt; authenticate — redirect phase (no code) &gt; Throws when the provider reports an error via body, without a description." time="0.0002443">
+        </testcase>
+        <testcase classname="test/auth/OIDCStrategy.test.ts" name="OIDCStrategy Tests &gt; authenticate — redirect phase (no code) &gt; Redirects to the authorization URL and returns undefined." time="0.0021278">
+        </testcase>
+        <testcase classname="test/auth/OIDCStrategy.test.ts" name="OIDCStrategy Tests &gt; authenticate — redirect phase (no code) &gt; Throws if req.session is missing." time="0.0002168">
+        </testcase>
+        <testcase classname="test/auth/OIDCStrategy.test.ts" name="OIDCStrategy Tests &gt; authenticate — redirect phase (no code) &gt; Rejects a redirect_uri not in the allowed list." time="0.0002263">
+        </testcase>
+        <testcase classname="test/auth/OIDCStrategy.test.ts" name="OIDCStrategy Tests &gt; authenticate — redirect phase (no code) &gt; Accepts a redirect_uri that matches one of multiple allowed values." time="0.0001729">
+        </testcase>
+        <testcase classname="test/auth/OIDCStrategy.test.ts" name="OIDCStrategy Tests &gt; authenticate — redirect phase (no code) &gt; Includes the client-supplied state as app-correlation data alongside the CSRF token." time="0.0002916">
+        </testcase>
+        <testcase classname="test/auth/OIDCStrategy.test.ts" name="OIDCStrategy Tests &gt; authenticate — redirect phase (no code) &gt; Includes a nonce for the openid protocol but not for oauth2." time="0.0011514">
+        </testcase>
+        <testcase classname="test/auth/OIDCStrategy.test.ts" name="OIDCStrategy Tests &gt; authenticate — redirect phase (no code) &gt; Uses the requested scope query param over the provider&apos;s configured scope." time="0.0002059">
+        </testcase>
+        <testcase classname="test/auth/OIDCStrategy.test.ts" name="OIDCStrategy Tests &gt; authenticate — redirect phase (no code) &gt; Falls back to the provider&apos;s configured scope when none is requested." time="0.0002084">
+        </testcase>
+        <testcase classname="test/auth/OIDCStrategy.test.ts" name="OIDCStrategy Tests &gt; authenticate — redirect phase (no code) &gt; PKCE &gt; Rejects an invalid code_challenge_method." time="0.0002828">
+        </testcase>
+        <testcase classname="test/auth/OIDCStrategy.test.ts" name="OIDCStrategy Tests &gt; authenticate — redirect phase (no code) &gt; PKCE &gt; Accepts a client-requested method that does not conflict with any provider requirement." time="0.000217">
+        </testcase>
+        <testcase classname="test/auth/OIDCStrategy.test.ts" name="OIDCStrategy Tests &gt; authenticate — redirect phase (no code) &gt; PKCE &gt; Rejects a client method that conflicts with a provider-mandated method." time="0.0002193">
+        </testcase>
+        <testcase classname="test/auth/OIDCStrategy.test.ts" name="OIDCStrategy Tests &gt; authenticate — redirect phase (no code) &gt; PKCE &gt; Rejects a code_verifier that does not meet RFC 7636 requirements." time="0.0002177">
+        </testcase>
+        <testcase classname="test/auth/OIDCStrategy.test.ts" name="OIDCStrategy Tests &gt; authenticate — redirect phase (no code) &gt; PKCE &gt; Uses a client-supplied code_verifier and computes the S256 code_challenge." time="0.0005153">
+        </testcase>
+        <testcase classname="test/auth/OIDCStrategy.test.ts" name="OIDCStrategy Tests &gt; authenticate — redirect phase (no code) &gt; PKCE &gt; Uses the plain code_challenge (equal to the verifier) for the plain method." time="0.0001631">
+        </testcase>
+        <testcase classname="test/auth/OIDCStrategy.test.ts" name="OIDCStrategy Tests &gt; authenticate — redirect phase (no code) &gt; PKCE &gt; Uses an explicit code_challenge query param over computing one." time="0.0001635">
+        </testcase>
+        <testcase classname="test/auth/OIDCStrategy.test.ts" name="OIDCStrategy Tests &gt; authenticate — redirect phase (no code) &gt; PKCE &gt; Generates a random verifier when the client does not supply one." time="0.0002058">
+        </testcase>
+        <testcase classname="test/auth/OIDCStrategy.test.ts" name="OIDCStrategy Tests &gt; authenticate — callback phase (code present) &gt; Throws if req.session is missing." time="0.0001973">
+        </testcase>
+        <testcase classname="test/auth/OIDCStrategy.test.ts" name="OIDCStrategy Tests &gt; authenticate — callback phase (code present) &gt; Throws on a missing/mismatched CSRF state." time="0.0002044">
+        </testcase>
+        <testcase classname="test/auth/OIDCStrategy.test.ts" name="OIDCStrategy Tests &gt; authenticate — callback phase (code present) &gt; Throws when no state is supplied at all." time="0.0001844">
+        </testcase>
+        <testcase classname="test/auth/OIDCStrategy.test.ts" name="OIDCStrategy Tests &gt; authenticate — callback phase (code present) &gt; Exchanges the code, retrieves the profile, resolves the user, and clears one-shot session state." time="0.0007026">
+        </testcase>
+        <testcase classname="test/auth/OIDCStrategy.test.ts" name="OIDCStrategy Tests &gt; authenticate — callback phase (code present) &gt; Accepts the code and state via the request body instead of the query." time="0.0002146">
+        </testcase>
+        <testcase classname="test/auth/OIDCStrategy.test.ts" name="OIDCStrategy Tests &gt; authenticateSync &gt; Throws &apos;Not supported&apos;." time="0.0001776">
+        </testcase>
+        <testcase classname="test/auth/OIDCStrategy.test.ts" name="OIDCStrategy Tests &gt; exchangeOIDCCode (via authenticate callback phase) &gt; Throws when the code is missing entirely." time="0.000159">
+        </testcase>
+        <testcase classname="test/auth/OIDCStrategy.test.ts" name="OIDCStrategy Tests &gt; exchangeOIDCCode (via authenticate callback phase) &gt; Sends a Basic auth header when the provider has a clientSecret." time="0.0002243">
+        </testcase>
+        <testcase classname="test/auth/OIDCStrategy.test.ts" name="OIDCStrategy Tests &gt; exchangeOIDCCode (via authenticate callback phase) &gt; Sends client_id in the body instead of a Basic header when there is no clientSecret." time="0.0001719">
+        </testcase>
+        <testcase classname="test/auth/OIDCStrategy.test.ts" name="OIDCStrategy Tests &gt; exchangeOIDCCode (via authenticate callback phase) &gt; Includes the PKCE code_verifier from the request body when provided." time="0.000164">
+        </testcase>
+        <testcase classname="test/auth/OIDCStrategy.test.ts" name="OIDCStrategy Tests &gt; exchangeOIDCCode (via authenticate callback phase) &gt; Throws when the token exchange responds with a non-200 status." time="0.0001968">
+        </testcase>
+        <testcase classname="test/auth/OIDCStrategy.test.ts" name="OIDCStrategy Tests &gt; exchangeOIDCCode (via authenticate callback phase) &gt; Throws when the token exchange responds with no data." time="0.0002136">
+        </testcase>
+        <testcase classname="test/auth/OIDCStrategy.test.ts" name="OIDCStrategy Tests &gt; exchangeOIDCCode (via authenticate callback phase) &gt; Parses a string response body as JSON." time="0.0001864">
+        </testcase>
+        <testcase classname="test/auth/OIDCStrategy.test.ts" name="OIDCStrategy Tests &gt; exchangeOIDCCode (via authenticate callback phase) &gt; Propagates the provider&apos;s error response body when the request rejects." time="0.0005711">
+        </testcase>
+        <testcase classname="test/auth/OIDCStrategy.test.ts" name="OIDCStrategy Tests &gt; exchangeOIDCCode (via authenticate callback phase) &gt; Wraps a bare network error with a generic message when there is no response body." time="0.0002361">
+        </testcase>
+        <testcase classname="test/auth/OIDCStrategy.test.ts" name="OIDCStrategy Tests &gt; exchangeOIDCCode (via authenticate callback phase) &gt; Wraps a rejection with no .message at all, defaulting to an empty string." time="0.0002191">
+        </testcase>
+        <testcase classname="test/auth/OIDCStrategy.test.ts" name="OIDCStrategy Tests &gt; exchangeOIDCCode (via authenticate callback phase) &gt; Resolves the redirect_uri fallback from the first entry of an allowed-list array." time="0.0002034">
+        </testcase>
+        <testcase classname="test/auth/OIDCStrategy.test.ts" name="OIDCStrategy Tests &gt; exchangeOIDCCode (via authenticate callback phase) &gt; Falls back to the code_verifier from the query string when the body has none." time="0.0001959">
+        </testcase>
+        <testcase classname="test/auth/OIDCStrategy.test.ts" name="OIDCStrategy Tests &gt; exchangeOIDCCode (via authenticate callback phase) &gt; Falls back to the code_verifier stashed in the session when neither body nor query has one." time="0.0001879">
+        </testcase>
+        <testcase classname="test/auth/OIDCStrategy.test.ts" name="OIDCStrategy Tests &gt; retrieveUserProfile (via authenticate callback phase) &gt; Returns undefined (and skips getUser&apos;s profile arg) when there&apos;s no id_token and no profileURL." time="0.0002043">
+        </testcase>
+        <testcase classname="test/auth/OIDCStrategy.test.ts" name="OIDCStrategy Tests &gt; retrieveUserProfile (via authenticate callback phase) &gt; Verifies and decodes the id_token for the openid protocol." time="0.0020065">
+        </testcase>
+        <testcase classname="test/auth/OIDCStrategy.test.ts" name="OIDCStrategy Tests &gt; retrieveUserProfile (via authenticate callback phase) &gt; Throws when jwksURI/issuer are missing for the openid protocol." time="0.0004575">
+        </testcase>
+        <testcase classname="test/auth/OIDCStrategy.test.ts" name="OIDCStrategy Tests &gt; retrieveUserProfile (via authenticate callback phase) &gt; Throws when the id_token cannot be decoded." time="0.0004284">
+        </testcase>
+        <testcase classname="test/auth/OIDCStrategy.test.ts" name="OIDCStrategy Tests &gt; retrieveUserProfile (via authenticate callback phase) &gt; Throws when the id_token&apos;s nonce does not match the session." time="0.0005151">
+        </testcase>
+        <testcase classname="test/auth/OIDCStrategy.test.ts" name="OIDCStrategy Tests &gt; retrieveUserProfile (via authenticate callback phase) &gt; Throws when the session has no nonce to validate against." time="0.0005028">
+        </testcase>
+        <testcase classname="test/auth/OIDCStrategy.test.ts" name="OIDCStrategy Tests &gt; retrieveUserProfile (via authenticate callback phase) &gt; Fetches the profile from profileURL when there is no id_token." time="0.0006832">
+        </testcase>
+        <testcase classname="test/auth/OIDCStrategy.test.ts" name="OIDCStrategy Tests &gt; retrieveUserProfile (via authenticate callback phase) &gt; Parses a string profile response body as JSON." time="0.0004816">
+        </testcase>
+        <testcase classname="test/auth/OIDCStrategy.test.ts" name="OIDCStrategy Tests &gt; retrieveUserProfile (via authenticate callback phase) &gt; Throws when the profile request responds with a non-200 status." time="0.0004217">
+        </testcase>
+        <testcase classname="test/auth/OIDCStrategy.test.ts" name="OIDCStrategy Tests &gt; retrieveUserProfile (via authenticate callback phase) &gt; Propagates the provider&apos;s error response body when the profile request rejects." time="0.0004436">
+        </testcase>
+        <testcase classname="test/auth/OIDCStrategy.test.ts" name="OIDCStrategy Tests &gt; retrieveUserProfile (via authenticate callback phase) &gt; Wraps a bare network error from the profile request with a generic message." time="0.0005069">
+        </testcase>
+        <testcase classname="test/auth/OIDCStrategy.test.ts" name="OIDCStrategy Tests &gt; retrieveUserProfile (via authenticate callback phase) &gt; Wraps a profile-request rejection with no .message at all, defaulting to an empty string." time="0.0004691">
+        </testcase>
+        <testcase classname="test/auth/OIDCStrategy.test.ts" name="OIDCStrategy Tests &gt; convertProfile mapping &gt; Supports nested array entries in the profile map." time="0.0004778">
+        </testcase>
+        <testcase classname="test/auth/OIDCStrategy.test.ts" name="OIDCStrategy Tests &gt; convertProfile mapping &gt; Supports nested object entries in the profile map." time="0.0004159">
+        </testcase>
+        <testcase classname="test/auth/OIDCStrategy.test.ts" name="OIDCStrategy Tests &gt; convertProfile mapping &gt; Throws a descriptive error when a mapped expression fails to evaluate." time="0.0005107">
+        </testcase>
+        <testcase classname="test/auth/OIDCStrategy.test.ts" name="OIDCStrategy Tests &gt; importOptionalDependency &gt; Throws a helpful install-hint error when the optional &apos;jwks-rsa&apos; peer dependency is missing." time="0.0028174">
+        </testcase>
+        <testcase classname="test/auth/OIDCStrategy.test.ts" name="OIDCStrategy Tests &gt; Default OIDCStrategyOptions &gt; getUser throws if the consumer forgot to override it." time="0.0002679">
+        </testcase>
+    </testsuite>
+    <testsuite name="test/auth/OTPStrategy.test.ts" timestamp="2026-07-20T00:31:12.211Z" hostname="Jane" tests="16" failures="0" errors="0" skipped="0" time="0.01297">
+        <testcase classname="test/auth/OTPStrategy.test.ts" name="OTPStrategy Tests &gt; authenticateSync throws &apos;Not supported&apos;." time="0.0021059">
+        </testcase>
+        <testcase classname="test/auth/OTPStrategy.test.ts" name="OTPStrategy Tests &gt; Dispatch &gt; Throws when nothing matches and auth is required." time="0.0007983">
+        </testcase>
+        <testcase classname="test/auth/OTPStrategy.test.ts" name="OTPStrategy Tests &gt; Dispatch &gt; Returns undefined when nothing matches and auth is not required." time="0.0001855">
+        </testcase>
+        <testcase classname="test/auth/OTPStrategy.test.ts" name="OTPStrategy Tests &gt; Dispatch &gt; Ignores discovery when allowDiscovery is not enabled." time="0.0003116">
+        </testcase>
+        <testcase classname="test/auth/OTPStrategy.test.ts" name="OTPStrategy Tests &gt; discovery &gt; Returns obfuscated contacts for the given id." time="0.0014464">
+        </testcase>
+        <testcase classname="test/auth/OTPStrategy.test.ts" name="OTPStrategy Tests &gt; discovery &gt; Passes undefined when no id query param is given." time="0.0002173">
+        </testcase>
+        <testcase classname="test/auth/OTPStrategy.test.ts" name="OTPStrategy Tests &gt; discovery &gt; Defaults to an empty list when getContacts() resolves nullish." time="0.0001975">
+        </testcase>
+        <testcase classname="test/auth/OTPStrategy.test.ts" name="OTPStrategy Tests &gt; challenge (phase 2) &gt; Throws if req.session is missing." time="0.0002758">
+        </testcase>
+        <testcase classname="test/auth/OTPStrategy.test.ts" name="OTPStrategy Tests &gt; challenge (phase 2) &gt; Falls through to the required check when the contact id is unknown." time="0.0002385">
+        </testcase>
+        <testcase classname="test/auth/OTPStrategy.test.ts" name="OTPStrategy Tests &gt; challenge (phase 2) &gt; Generates and sends a token, then completes the response." time="0.0038853">
+        </testcase>
+        <testcase classname="test/auth/OTPStrategy.test.ts" name="OTPStrategy Tests &gt; verify (phase 3) &gt; Authenticates when the OTP token is valid." time="0.0009725">
+        </testcase>
+        <testcase classname="test/auth/OTPStrategy.test.ts" name="OTPStrategy Tests &gt; verify (phase 3) &gt; Falls through to the required check when the OTP token is invalid." time="0.0003998">
+        </testcase>
+        <testcase classname="test/auth/OTPStrategy.test.ts" name="OTPStrategy Tests &gt; Default OTPStrategyOptions &gt; getContact throws if the consumer forgot to override it." time="0.0002332">
+        </testcase>
+        <testcase classname="test/auth/OTPStrategy.test.ts" name="OTPStrategy Tests &gt; Default OTPStrategyOptions &gt; getContacts throws if the consumer forgot to override it." time="0.0001761">
+        </testcase>
+        <testcase classname="test/auth/OTPStrategy.test.ts" name="OTPStrategy Tests &gt; Default OTPStrategyOptions &gt; getUser throws if the consumer forgot to override it." time="0.0001831">
+        </testcase>
+        <testcase classname="test/auth/OTPStrategy.test.ts" name="OTPStrategy Tests &gt; Default OTPStrategyOptions &gt; notifyContact throws if the consumer forgot to override it." time="0.0001787">
+        </testcase>
+    </testsuite>
+    <testsuite name="test/auth/PasskeyStrategy.test.ts" timestamp="2026-07-20T00:31:12.212Z" hostname="Jane" tests="24" failures="0" errors="0" skipped="0" time="0.0118852">
+        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Begin (phase 1) &gt; Generates options with no allowCredentials when no uid hint is given." time="0.0028735">
+        </testcase>
+        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Begin (phase 1) &gt; Builds allowCredentials from getCredentials when a uid hint has registered credentials." time="0.001224">
+        </testcase>
+        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Begin (phase 1) &gt; Leaves allowCredentials undefined (not an empty array) when a uid hint has zero credentials." time="0.0002734">
+        </testcase>
+        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Begin (phase 1) &gt; Throws if req.session is missing." time="0.0010785">
+        </testcase>
+        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Begin (phase 1) &gt; Throws if res is missing." time="0.0002073">
+        </testcase>
+        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Finish (phase 2) &gt; Verifies successfully, updates the counter, clears the session challenge, and returns the AuthResult." time="0.0006673">
+        </testcase>
+        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Finish (phase 2) &gt; Throws if req.session is missing." time="0.0009491">
+        </testcase>
+        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Finish (phase 2) &gt; Throws if there is no challenge stored in the session." time="0.0002102">
+        </testcase>
+        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Finish (phase 2) &gt; Throws on a malformed response body without calling storage or SimpleWebAuthn." time="0.0002447">
+        </testcase>
+        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Finish (phase 2) &gt; Throws a generic failure on an unknown credential ID without calling verifyAuthenticationResponse." time="0.0002196">
+        </testcase>
+        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Finish (phase 2) &gt; Throws a generic failure when verification resolves verified: false, without updating the counter." time="0.0002797">
+        </testcase>
+        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Finish (phase 2) &gt; Clears the session challenge before verification is attempted, even on failure." time="0.0001708">
+        </testcase>
+        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Finish (phase 2) &gt; Rejects a non-finite stored counter as an invalid credential." time="0.0002198">
+        </testcase>
+        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Finish (phase 2) &gt; Propagates a thrown/rejected verifyAuthenticationResponse error without updating the counter." time="0.000291">
+        </testcase>
+        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Finish (phase 2) &gt; Rejects a non-zero counter that does not exceed the stored counter (cloned authenticator), without updating." time="0.0002126">
+        </testcase>
+        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Finish (phase 2) &gt; Accepts a newCounter of 0 despite not exceeding the stored counter (multi-device/backed-up authenticator)." time="0.0001876">
+        </testcase>
+        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Finish (phase 2) &gt; Returns undefined (does not throw) when verify() resolves undefined and auth is not required." time="0.0001638">
+        </testcase>
+        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Finish (phase 2) &gt; Throws when verify() resolves undefined and auth is required." time="0.000183">
+        </testcase>
+        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; authenticateSync throws &apos;Not supported&apos;." time="0.0001726">
+        </testcase>
+        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Dispatches to verify() when the body has a response but no id." time="0.0002005">
+        </testcase>
+        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Default PasskeyStrategyOptions &gt; getCredentialById throws if the consumer forgot to override it." time="0.0001756">
+        </testcase>
+        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Default PasskeyStrategyOptions &gt; getCredentials throws if the consumer forgot to override it." time="0.0001665">
+        </testcase>
+        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Default PasskeyStrategyOptions &gt; updateCredentialCounter throws if the consumer forgot to override it." time="0.0001951">
+        </testcase>
+        <testcase classname="test/auth/PasskeyStrategy.test.ts" name="PasskeyStrategy Tests &gt; Default PasskeyStrategyOptions &gt; getUser throws if the consumer forgot to override it." time="0.0001528">
+        </testcase>
+    </testsuite>
+    <testsuite name="test/auth/shared.test.ts" timestamp="2026-07-20T00:31:12.215Z" hostname="Jane" tests="67" failures="0" errors="0" skipped="0" time="0.0269142">
+        <testcase classname="test/auth/shared.test.ts" name="getBasicData &gt; Returns undefined when the header key is not present." time="0.0013079">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="getBasicData &gt; Returns undefined when the header key is present but its value is nullish." time="0.0001263">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="getBasicData &gt; Parses a single matching header into {id, password}." time="0.0005239">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="getBasicData &gt; Finds the matching header among an array of header values." time="0.0001615">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="getBasicData &gt; Skips a malformed header value (not exactly scheme + credentials)." time="0.0000942">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="getBasicData &gt; Skips a header whose scheme does not match." time="0.0001045">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="getBasicData &gt; Supports a custom headerKey/headerScheme." time="0.0001214">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="getRequestData &gt; Uses the request body directly when it is an object." time="0.0002254">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="getRequestData &gt; Parses a JSON string body." time="0.0001163">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="getRequestData &gt; Falls back to form-data parsing when the body is a non-JSON string." time="0.0001082">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="getRequestData &gt; Falls back to colon parsing when the non-JSON string body has no &apos;&amp;&apos;." time="0.0001125">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="getRequestData &gt; Returns an empty payload object for a non-JSON string body with neither &apos;&amp;&apos; nor &apos;:&apos;." time="0.0000974">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="getRequestData &gt; Reads from the header when there is no body." time="0.0001193">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="getRequestData &gt; Finds the matching header among an array of header values." time="0.000116">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="getRequestData &gt; Skips a malformed header value." time="0.0000724">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="getRequestData &gt; Finds no data when the header key is present but its value is nullish." time="0.0000728">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="getRequestData &gt; Treats a form-data key with no &apos;=value&apos; part as undefined." time="0.0001018">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="getRequestData &gt; Skips a header whose scheme does not match." time="0.0000842">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="getRequestData &gt; Skips the header search entirely when headerKey is an empty string." time="0.0001051">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="getRequestData &gt; Compiles and caches the scheme regex on first use of a not-yet-seen headerScheme." time="0.0001184">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="isOTPResponse &gt; Returns true when both id and token are present." time="0.0000967">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="isOTPResponse &gt; Returns false when token is missing." time="0.0000698">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="isPasskeyResponse &gt; Returns true for a well-formed assertion response." time="0.0001567">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="isPasskeyResponse &gt; Returns false when id is not a string." time="0.0000666">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="isPasskeyResponse &gt; Returns false when clientDataJSON is missing." time="0.0000602">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="isPasskeyResponse &gt; Returns false when authenticatorData is missing." time="0.0000585">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="isPasskeyResponse &gt; Returns false when signature is missing." time="0.0000569">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="isPasskeyRegistrationResponse &gt; Returns true for a well-formed registration response." time="0.0000981">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="isPasskeyRegistrationResponse &gt; Returns false when the response is nullish." time="0.0000547">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="isPasskeyRegistrationResponse &gt; Returns false when id is not a string." time="0.0000583">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="isPasskeyRegistrationResponse &gt; Returns false when clientDataJSON is missing." time="0.0000562">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="isPasskeyRegistrationResponse &gt; Returns false when attestationObject is missing." time="0.0000546">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="obfuscateContact &gt; Obfuscates an email address." time="0.0001082">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="obfuscateContact &gt; Obfuscates a phone number." time="0.0000905">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="obfuscateContact &gt; Returns the contact unchanged for an unrecognized type." time="0.0000591">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="OTP helpers &gt; generateOTP &gt; Throws if req.session is missing." time="0.0009033">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="OTP helpers &gt; generateOTP &gt; Derives requestData from the request itself when not provided." time="0.0028435">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="OTP helpers &gt; generateOTP &gt; Stores the generated secret/token/id in the session." time="0.0003334">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="OTP helpers &gt; verifyOTP &gt; Throws if req.session is missing." time="0.0002005">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="OTP helpers &gt; verifyOTP &gt; Derives payload from the request itself when not provided." time="0.0005667">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="OTP helpers &gt; verifyOTP &gt; Throws when the payload is not a valid OTP response shape." time="0.0001492">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="OTP helpers &gt; verifyOTP &gt; Throws when the session id does not match the payload id." time="0.0001397">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="OTP helpers &gt; verifyOTP &gt; Returns true for a valid token." time="0.0003501">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="OTP helpers &gt; verifyOTP &gt; Returns false for an invalid token." time="0.0002043">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="Passkey helpers &gt; generatePasskeyChallenge &gt; Throws if req.session is missing." time="0.0008636">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="Passkey helpers &gt; generatePasskeyChallenge &gt; Stores the returned challenge in the session." time="0.0002821">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="Passkey helpers &gt; verifyPasskeyChallenge &gt; Throws when the stored counter is not finite." time="0.0003714">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="Passkey helpers &gt; verifyPasskeyChallenge &gt; Delegates to verifyAuthenticationResponse with the expected shape." time="0.0008225">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="Passkey helpers &gt; generatePasskeyRegistrationOptions &gt; Throws if req.session is missing." time="0.0002066">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="Passkey helpers &gt; generatePasskeyRegistrationOptions &gt; Stores the returned challenge in the session." time="0.0001558">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="Passkey helpers &gt; verifyPasskeyRegistrationResponse &gt; Delegates to verifyRegistrationResponse with the expected shape." time="0.0002112">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="TOTP helpers &gt; generateTOTP &gt; Throws if req.session is missing." time="0.0002407">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="TOTP helpers &gt; generateTOTP &gt; Derives requestData from the request itself when not provided." time="0.0002413">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="TOTP helpers &gt; generateTOTP &gt; Stores the generated secret/token/id in the session." time="0.0002299">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="TOTP helpers &gt; verifyTOTP &gt; Returns the verification result for a single valid secret." time="0.0003323">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="TOTP helpers &gt; verifyTOTP &gt; Checks each secret in an array until one is valid." time="0.0003906">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="TOTP helpers &gt; verifyTOTP &gt; Returns undefined when no secret validates the token." time="0.0001869">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="TOTP helpers &gt; isValidTOTPSecret &gt; Returns false for a non-string value." time="0.0001066">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="TOTP helpers &gt; isValidTOTPSecret &gt; Returns false for an empty string." time="0.0000634">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="TOTP helpers &gt; isValidTOTPSecret &gt; Returns false for a string that isn&apos;t valid Base32." time="0.0001096">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="TOTP helpers &gt; isValidTOTPSecret &gt; Returns false for a Base32 string decoding to fewer than 128 bits." time="0.000126">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="TOTP helpers &gt; isValidTOTPSecret &gt; Returns true for a Base32 string decoding to at least 128 bits." time="0.0001136">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="TOTP helpers &gt; generateTOTPURI &gt; Uses the issuer config defaults when the secret has no per-secret overrides." time="0.0003436">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="TOTP helpers &gt; generateTOTPURI &gt; Prefers the secret&apos;s own algorithm/digits/period over the issuer config&apos;s." time="0.0001539">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="Library imports &gt; importArgon2 throws a helpful error when argon2 cannot be imported." time="0.0017779">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="Library imports &gt; importOTPLib throws a helpful error when otplib cannot be imported." time="0.0057966">
+        </testcase>
+        <testcase classname="test/auth/shared.test.ts" name="Library imports &gt; importSimpleWebAuthn throws a helpful error when @simplewebauthn/server cannot be imported." time="0.0016335">
+        </testcase>
+    </testsuite>
+    <testsuite name="test/auth/TOTPStrategy.test.ts" timestamp="2026-07-20T00:31:12.221Z" hostname="Jane" tests="10" failures="0" errors="0" skipped="0" time="0.0110619">
+        <testcase classname="test/auth/TOTPStrategy.test.ts" name="TOTPStrategy Tests &gt; Uses default options when none are provided to the constructor." time="0.0025712">
+        </testcase>
+        <testcase classname="test/auth/TOTPStrategy.test.ts" name="TOTPStrategy Tests &gt; authenticateSync throws &apos;Not supported&apos;." time="0.000247">
+        </testcase>
+        <testcase classname="test/auth/TOTPStrategy.test.ts" name="TOTPStrategy Tests &gt; Authenticates with a valid TOTP token." time="0.0048781">
+        </testcase>
+        <testcase classname="test/auth/TOTPStrategy.test.ts" name="TOTPStrategy Tests &gt; Authenticates when at least one of multiple secrets is valid." time="0.0007685">
+        </testcase>
+        <testcase classname="test/auth/TOTPStrategy.test.ts" name="TOTPStrategy Tests &gt; Throws when the user id does not resolve and auth is required." time="0.0004053">
+        </testcase>
+        <testcase classname="test/auth/TOTPStrategy.test.ts" name="TOTPStrategy Tests &gt; Returns undefined when the user id does not resolve and auth is not required." time="0.0001657">
+        </testcase>
+        <testcase classname="test/auth/TOTPStrategy.test.ts" name="TOTPStrategy Tests &gt; Throws when the user has no registered secrets." time="0.0002176">
+        </testcase>
+        <testcase classname="test/auth/TOTPStrategy.test.ts" name="TOTPStrategy Tests &gt; Throws when the TOTP token is invalid for all registered secrets." time="0.0003703">
+        </testcase>
+        <testcase classname="test/auth/TOTPStrategy.test.ts" name="TOTPStrategy Tests &gt; Default TOTPStrategyOptions &gt; getSecrets throws if the consumer forgot to override it." time="0.0002046">
+        </testcase>
+        <testcase classname="test/auth/TOTPStrategy.test.ts" name="TOTPStrategy Tests &gt; Default TOTPStrategyOptions &gt; getUser throws if the consumer forgot to override it." time="0.0001594">
+        </testcase>
+    </testsuite>
+    <testsuite name="test/models/mongo.test.ts" timestamp="2026-07-20T00:31:12.222Z" hostname="Jane" tests="4" failures="0" errors="0" skipped="0" time="0.0040909">
+        <testcase classname="test/models/mongo.test.ts" name="Mongo model default construction &gt; AliasMongo falls back to class defaults when constructed with no data." time="0.0019988">
+        </testcase>
+        <testcase classname="test/models/mongo.test.ts" name="Mongo model default construction &gt; ProfileMongo falls back to class defaults when constructed with no data." time="0.0006893">
+        </testcase>
+        <testcase classname="test/models/mongo.test.ts" name="Mongo model default construction &gt; SecretMongo falls back to class defaults when constructed with no data." time="0.0001466">
+        </testcase>
+        <testcase classname="test/models/mongo.test.ts" name="Mongo model default construction &gt; UserMongo falls back to class defaults when constructed with no data." time="0.0001802">
+        </testcase>
+    </testsuite>
+    <testsuite name="test/models/sql.test.ts" timestamp="2026-07-20T00:31:12.222Z" hostname="Jane" tests="4" failures="0" errors="0" skipped="0" time="0.003677">
+        <testcase classname="test/models/sql.test.ts" name="SQL model default construction &gt; AliasSQL falls back to class defaults when constructed with no data." time="0.0016739">
+        </testcase>
+        <testcase classname="test/models/sql.test.ts" name="SQL model default construction &gt; ProfileSQL falls back to class defaults when constructed with no data." time="0.0007028">
+        </testcase>
+        <testcase classname="test/models/sql.test.ts" name="SQL model default construction &gt; SecretSQL falls back to class defaults when constructed with no data." time="0.0001491">
+        </testcase>
+        <testcase classname="test/models/sql.test.ts" name="SQL model default construction &gt; UserSQL falls back to class defaults when constructed with no data." time="0.0001371">
+        </testcase>
+    </testsuite>
+    <testsuite name="test/routes/BaseAuthBasicRoute.test.ts" timestamp="2026-07-20T00:31:12.223Z" hostname="Jane" tests="9" failures="0" errors="0" skipped="0" time="0.1805726">
+        <testcase classname="test/routes/BaseAuthBasicRoute.test.ts" name="BaseAuthBasicRoute Tests &gt; Throws during initialize() if authMiddleware was not injected." time="0.0024856">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthBasicRoute.test.ts" name="BaseAuthBasicRoute Tests &gt; Throws during initialize() if objectFactory was not injected." time="0.0002166">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthBasicRoute.test.ts" name="BaseAuthBasicRoute Tests &gt; Does not recreate secretRepo/userUtils if initialize() runs again." time="0.0003832">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthBasicRoute.test.ts" name="BaseAuthBasicRoute Tests &gt; Registers a BasicStrategy under its name once initialized." time="0.001473">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthBasicRoute.test.ts" name="BaseAuthBasicRoute Tests &gt; options.verify closure &gt; Throws if secretRepo is not set when verify() runs." time="0.000318">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthBasicRoute.test.ts" name="BaseAuthBasicRoute Tests &gt; options.verify closure &gt; Throws if userUtils is not set when verify() runs." time="0.0001907">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthBasicRoute.test.ts" name="BaseAuthBasicRoute Tests &gt; options.verify closure &gt; Throws when the user cannot be found." time="0.0002176">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthBasicRoute.test.ts" name="BaseAuthBasicRoute Tests &gt; options.verify closure &gt; Throws when none of the user&apos;s stored passwords match." time="0.0650111">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthBasicRoute.test.ts" name="BaseAuthBasicRoute Tests &gt; options.verify closure &gt; Resolves the user when at least one stored password matches." time="0.1089052">
+        </testcase>
+    </testsuite>
+    <testsuite name="test/routes/BaseAuthFIDO2Route.test.ts" timestamp="2026-07-20T00:31:12.224Z" hostname="Jane" tests="16" failures="0" errors="0" skipped="0" time="0.008964">
+        <testcase classname="test/routes/BaseAuthFIDO2Route.test.ts" name="BaseAuthFIDO2Route Tests &gt; Throws during initialize() if authMiddleware was not injected." time="0.0023803">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthFIDO2Route.test.ts" name="BaseAuthFIDO2Route Tests &gt; Throws during initialize() if objectFactory was not injected." time="0.0002166">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthFIDO2Route.test.ts" name="BaseAuthFIDO2Route Tests &gt; Does not recreate repos/utils if initialize() runs again." time="0.0004246">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthFIDO2Route.test.ts" name="BaseAuthFIDO2Route Tests &gt; Registers a FIDO2Strategy under its name once initialized." time="0.0014828">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthFIDO2Route.test.ts" name="BaseAuthFIDO2Route Tests &gt; getCredentialById &gt; Throws if secretRepo is not set." time="0.0001941">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthFIDO2Route.test.ts" name="BaseAuthFIDO2Route Tests &gt; getCredentialById &gt; Returns undefined if no matching secret exists." time="0.0004823">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthFIDO2Route.test.ts" name="BaseAuthFIDO2Route Tests &gt; getCredentialById &gt; Returns the .data of the matching secret." time="0.000157">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthFIDO2Route.test.ts" name="BaseAuthFIDO2Route Tests &gt; getCredentials &gt; Throws if secretRepo is not set." time="0.0002097">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthFIDO2Route.test.ts" name="BaseAuthFIDO2Route Tests &gt; getCredentials &gt; Throws if userUtils is not set." time="0.0002008">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthFIDO2Route.test.ts" name="BaseAuthFIDO2Route Tests &gt; getCredentials &gt; Throws if the user cannot be found." time="0.0002081">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthFIDO2Route.test.ts" name="BaseAuthFIDO2Route Tests &gt; getCredentials &gt; Returns the .data of all matching FIDO2 secrets for the user." time="0.0002857">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthFIDO2Route.test.ts" name="BaseAuthFIDO2Route Tests &gt; getUser &gt; Throws if userUtils is not set." time="0.0001906">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthFIDO2Route.test.ts" name="BaseAuthFIDO2Route Tests &gt; getUser &gt; Delegates to userUtils.lookup()." time="0.0001505">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthFIDO2Route.test.ts" name="BaseAuthFIDO2Route Tests &gt; updateCredentialCounter &gt; Throws if secretRepo is not set." time="0.0001729">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthFIDO2Route.test.ts" name="BaseAuthFIDO2Route Tests &gt; updateCredentialCounter &gt; Does nothing if no matching secret is found." time="0.0001679">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthFIDO2Route.test.ts" name="BaseAuthFIDO2Route Tests &gt; updateCredentialCounter &gt; Updates the secret&apos;s counter when a matching secret is found." time="0.0002777">
+        </testcase>
+    </testsuite>
+    <testsuite name="test/routes/BaseAuthMFARoute.test.ts" timestamp="2026-07-20T00:31:12.226Z" hostname="Jane" tests="35" failures="0" errors="0" skipped="0" time="0.1801035">
+        <testcase classname="test/routes/BaseAuthMFARoute.test.ts" name="BaseAuthMFARoute Tests &gt; Throws during initialize() if authMiddleware was not injected." time="0.0024162">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthMFARoute.test.ts" name="BaseAuthMFARoute Tests &gt; Throws during initialize() if objectFactory was not injected." time="0.0002302">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthMFARoute.test.ts" name="BaseAuthMFARoute Tests &gt; Does not recreate repos/utils if initialize() runs again." time="0.0004276">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthMFARoute.test.ts" name="BaseAuthMFARoute Tests &gt; Registers an MFAStrategy under its name once initialized." time="0.001471">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthMFARoute.test.ts" name="BaseAuthMFARoute Tests &gt; convertAliasToMethod &gt; Converts an EMAIL alias into an OTP method." time="0.0002847">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthMFARoute.test.ts" name="BaseAuthMFARoute Tests &gt; convertAliasToMethod &gt; Obfuscates an EMAIL alias&apos;s contact when requested." time="0.0002305">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthMFARoute.test.ts" name="BaseAuthMFARoute Tests &gt; convertAliasToMethod &gt; Converts a PHONE alias into an OTP method." time="0.0001171">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthMFARoute.test.ts" name="BaseAuthMFARoute Tests &gt; convertAliasToMethod &gt; Obfuscates a PHONE alias&apos;s contact when requested." time="0.0001367">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthMFARoute.test.ts" name="BaseAuthMFARoute Tests &gt; convertAliasToMethod &gt; Returns undefined for an alias type that has no MFA equivalent." time="0.0001512">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthMFARoute.test.ts" name="BaseAuthMFARoute Tests &gt; convertSecretToMethod &gt; Converts a FIDO2 secret into a FIDO2 method." time="0.0001474">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthMFARoute.test.ts" name="BaseAuthMFARoute Tests &gt; convertSecretToMethod &gt; Converts a TOTP secret into a TOTP method." time="0.0001031">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthMFARoute.test.ts" name="BaseAuthMFARoute Tests &gt; convertSecretToMethod &gt; Returns undefined for a secret type that has no MFA equivalent." time="0.0000867">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthMFARoute.test.ts" name="BaseAuthMFARoute Tests &gt; getMethod &gt; Throws if aliasRepo is not set." time="0.0002012">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthMFARoute.test.ts" name="BaseAuthMFARoute Tests &gt; getMethod &gt; Throws if secretRepo is not set." time="0.0001579">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthMFARoute.test.ts" name="BaseAuthMFARoute Tests &gt; getMethod &gt; Returns the method for a matching secret." time="0.0004083">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthMFARoute.test.ts" name="BaseAuthMFARoute Tests &gt; getMethod &gt; Falls back to alias lookup when no secret matches." time="0.0001381">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthMFARoute.test.ts" name="BaseAuthMFARoute Tests &gt; getMethod &gt; Returns undefined when neither a secret nor an alias matches." time="0.0001109">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthMFARoute.test.ts" name="BaseAuthMFARoute Tests &gt; getMethods &gt; Throws if aliasRepo is not set." time="0.0002339">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthMFARoute.test.ts" name="BaseAuthMFARoute Tests &gt; getMethods &gt; Throws if secretRepo is not set." time="0.0001637">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthMFARoute.test.ts" name="BaseAuthMFARoute Tests &gt; getMethods &gt; Throws if userRepo is not set." time="0.0001547">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthMFARoute.test.ts" name="BaseAuthMFARoute Tests &gt; getMethods &gt; Combines eligible secrets and aliases into a list of methods." time="0.0004068">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthMFARoute.test.ts" name="BaseAuthMFARoute Tests &gt; getUser &gt; Throws if userUtils is not set." time="0.0001464">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthMFARoute.test.ts" name="BaseAuthMFARoute Tests &gt; getUser &gt; Delegates to userUtils.lookup()." time="0.0001361">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthMFARoute.test.ts" name="BaseAuthMFARoute Tests &gt; notifyContact &gt; Sends an email when the contact type is EMAIL." time="0.0003415">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthMFARoute.test.ts" name="BaseAuthMFARoute Tests &gt; notifyContact &gt; Sends an SMS when the contact type is SMS." time="0.0001949">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthMFARoute.test.ts" name="BaseAuthMFARoute Tests &gt; notifyContact &gt; Does nothing (and does not throw) when messagingUtils is unset." time="0.0002542">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthMFARoute.test.ts" name="BaseAuthMFARoute Tests &gt; obfuscateAlias &gt; Obfuscates an EMAIL alias." time="0.00019">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthMFARoute.test.ts" name="BaseAuthMFARoute Tests &gt; obfuscateAlias &gt; Obfuscates a NAME alias." time="0.0001808">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthMFARoute.test.ts" name="BaseAuthMFARoute Tests &gt; obfuscateAlias &gt; Obfuscates a PHONE alias." time="0.0000842">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthMFARoute.test.ts" name="BaseAuthMFARoute Tests &gt; obfuscateAlias &gt; Returns the alias unchanged for an unhandled type." time="0.000063">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthMFARoute.test.ts" name="BaseAuthMFARoute Tests &gt; verify &gt; Throws if secretRepo is not set." time="0.000205">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthMFARoute.test.ts" name="BaseAuthMFARoute Tests &gt; verify &gt; Throws if userUtils is not set." time="0.0001676">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthMFARoute.test.ts" name="BaseAuthMFARoute Tests &gt; verify &gt; Throws when the user cannot be found." time="0.0001639">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthMFARoute.test.ts" name="BaseAuthMFARoute Tests &gt; verify &gt; Throws when none of the user&apos;s stored passwords match." time="0.062645">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthMFARoute.test.ts" name="BaseAuthMFARoute Tests &gt; verify &gt; Resolves the user when at least one stored password matches." time="0.1057396">
+        </testcase>
+    </testsuite>
+    <testsuite name="test/routes/BaseAuthOIDCRoute.test.ts" timestamp="2026-07-20T00:31:12.230Z" hostname="Jane" tests="20" failures="0" errors="0" skipped="0" time="0.0141884">
+        <testcase classname="test/routes/BaseAuthOIDCRoute.test.ts" name="BaseAuthOIDCRoute Tests &gt; Throws during initialize() if authMiddleware was not injected." time="0.0025295">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthOIDCRoute.test.ts" name="BaseAuthOIDCRoute Tests &gt; Throws during initialize() if objectFactory was not injected." time="0.0002118">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthOIDCRoute.test.ts" name="BaseAuthOIDCRoute Tests &gt; Does not recreate repos/utils if initialize() runs again." time="0.0004266">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthOIDCRoute.test.ts" name="BaseAuthOIDCRoute Tests &gt; Registers an OIDCStrategy under its name once initialized." time="0.0014912">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthOIDCRoute.test.ts" name="BaseAuthOIDCRoute Tests &gt; options.getUser closure &gt; Throws if aliasRepo is not set when getUser() runs." time="0.0003991">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthOIDCRoute.test.ts" name="BaseAuthOIDCRoute Tests &gt; options.getUser closure &gt; Throws if profileRepo is not set when getUser() runs." time="0.0002053">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthOIDCRoute.test.ts" name="BaseAuthOIDCRoute Tests &gt; options.getUser closure &gt; Throws if userRepo is not set when getUser() runs." time="0.0001913">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthOIDCRoute.test.ts" name="BaseAuthOIDCRoute Tests &gt; options.getUser closure &gt; Throws if userUtils is not set when getUser() runs." time="0.0002144">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthOIDCRoute.test.ts" name="BaseAuthOIDCRoute Tests &gt; options.getUser closure &gt; Recognizes a returning user found via the provider-scoped oauth alias without creating a new alias." time="0.0007759">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthOIDCRoute.test.ts" name="BaseAuthOIDCRoute Tests &gt; options.getUser closure &gt; Falls back to email alias lookup, then persists the oauth alias since it wasn&apos;t found by it." time="0.0015528">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthOIDCRoute.test.ts" name="BaseAuthOIDCRoute Tests &gt; options.getUser closure &gt; Falls back to profile.id when no email is present on the fallback lookup." time="0.0002338">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthOIDCRoute.test.ts" name="BaseAuthOIDCRoute Tests &gt; options.getUser closure &gt; Creates a new user and minimal profile when no existing user is found." time="0.0006426">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthOIDCRoute.test.ts" name="BaseAuthOIDCRoute Tests &gt; options.getUser closure &gt; Uses profile avatar/birthdate/givenName/familyName when provided." time="0.0004379">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthOIDCRoute.test.ts" name="BaseAuthOIDCRoute Tests &gt; options.getUser closure &gt; Adds a verified email contact and email alias when the provider verifies the email." time="0.0004494">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthOIDCRoute.test.ts" name="BaseAuthOIDCRoute Tests &gt; options.getUser closure &gt; Adds an unverified email contact but does not create an email alias when unverified." time="0.0002952">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthOIDCRoute.test.ts" name="BaseAuthOIDCRoute Tests &gt; options.getUser closure &gt; Defaults an omitted email_verified to false on the profile contact." time="0.0002983">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthOIDCRoute.test.ts" name="BaseAuthOIDCRoute Tests &gt; options.getUser closure &gt; Defaults an omitted phone_verified to false on the profile contact." time="0.0002341">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthOIDCRoute.test.ts" name="BaseAuthOIDCRoute Tests &gt; options.getUser closure &gt; Adds a verified phone contact and phone alias when the provider verifies the phone." time="0.000322">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthOIDCRoute.test.ts" name="BaseAuthOIDCRoute Tests &gt; options.getUser closure &gt; Adds an unverified phone contact but does not create a phone alias when unverified." time="0.0002475">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthOIDCRoute.test.ts" name="BaseAuthOIDCRoute Tests &gt; login &gt; Returns an AuthResult containing a signed JWT for the authenticated user." time="0.0017849">
+        </testcase>
+    </testsuite>
+    <testsuite name="test/routes/BaseAuthOTPRoute.test.ts" timestamp="2026-07-20T00:31:12.232Z" hostname="Jane" tests="21" failures="0" errors="0" skipped="0" time="0.010356">
+        <testcase classname="test/routes/BaseAuthOTPRoute.test.ts" name="BaseAuthOTPRoute Tests &gt; Throws during initialize() if authMiddleware was not injected." time="0.0023812">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthOTPRoute.test.ts" name="BaseAuthOTPRoute Tests &gt; Throws during initialize() if objectFactory was not injected." time="0.0002232">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthOTPRoute.test.ts" name="BaseAuthOTPRoute Tests &gt; Does not recreate repos/utils if initialize() runs again." time="0.0004381">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthOTPRoute.test.ts" name="BaseAuthOTPRoute Tests &gt; Registers an OTPStrategy under its name once initialized." time="0.0014473">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthOTPRoute.test.ts" name="BaseAuthOTPRoute Tests &gt; convertAliasType &gt; Converts EMAIL to OTPContactType.EMAIL." time="0.0001292">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthOTPRoute.test.ts" name="BaseAuthOTPRoute Tests &gt; convertAliasType &gt; Converts PHONE to OTPContactType.SMS." time="0.0000759">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthOTPRoute.test.ts" name="BaseAuthOTPRoute Tests &gt; convertAliasType &gt; Throws for an unsupported alias type." time="0.0001413">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthOTPRoute.test.ts" name="BaseAuthOTPRoute Tests &gt; getContact &gt; Throws if aliasRepo is not set." time="0.0001795">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthOTPRoute.test.ts" name="BaseAuthOTPRoute Tests &gt; getContact &gt; Returns undefined if no matching alias exists." time="0.0001681">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthOTPRoute.test.ts" name="BaseAuthOTPRoute Tests &gt; getContact &gt; Returns the contact for a matching alias." time="0.000287">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthOTPRoute.test.ts" name="BaseAuthOTPRoute Tests &gt; getContacts &gt; Throws if aliasRepo is not set." time="0.0002556">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthOTPRoute.test.ts" name="BaseAuthOTPRoute Tests &gt; getContacts &gt; Throws if userRepo is not set." time="0.0001605">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthOTPRoute.test.ts" name="BaseAuthOTPRoute Tests &gt; getContacts &gt; Looks up aliases by userUid when the id resolves to a user." time="0.0004292">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthOTPRoute.test.ts" name="BaseAuthOTPRoute Tests &gt; getContacts &gt; Falls back to alias lookup by value, then re-resolves by userUid, when the id is not a user." time="0.0012714">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthOTPRoute.test.ts" name="BaseAuthOTPRoute Tests &gt; getContacts &gt; Leaves the user unresolved when the re-fetch by userUid yields no aliases." time="0.0002218">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthOTPRoute.test.ts" name="BaseAuthOTPRoute Tests &gt; getContacts &gt; Returns an empty list when the id is not a user and no aliases match it." time="0.0003283">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthOTPRoute.test.ts" name="BaseAuthOTPRoute Tests &gt; getUser &gt; Throws if userUtils is not set." time="0.0001646">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthOTPRoute.test.ts" name="BaseAuthOTPRoute Tests &gt; getUser &gt; Delegates to userUtils.lookup()." time="0.0001549">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthOTPRoute.test.ts" name="BaseAuthOTPRoute Tests &gt; notifyContact &gt; Sends an email when the contact type is EMAIL." time="0.0002236">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthOTPRoute.test.ts" name="BaseAuthOTPRoute Tests &gt; notifyContact &gt; Sends an SMS when the contact type is SMS." time="0.0001654">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthOTPRoute.test.ts" name="BaseAuthOTPRoute Tests &gt; notifyContact &gt; Does nothing (and does not throw) when messagingUtils is unset." time="0.0002596">
+        </testcase>
+    </testsuite>
+    <testsuite name="test/routes/BaseAuthPasskeyRoute.test.ts" timestamp="2026-07-20T00:31:12.235Z" hostname="Jane" tests="16" failures="0" errors="0" skipped="0" time="0.00938">
+        <testcase classname="test/routes/BaseAuthPasskeyRoute.test.ts" name="BaseAuthPasskeyRoute Tests &gt; Throws during initialize() if authMiddleware was not injected." time="0.00241">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthPasskeyRoute.test.ts" name="BaseAuthPasskeyRoute Tests &gt; Throws during initialize() if objectFactory was not injected." time="0.0002373">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthPasskeyRoute.test.ts" name="BaseAuthPasskeyRoute Tests &gt; Does not recreate repos/utils if initialize() runs again." time="0.000433">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthPasskeyRoute.test.ts" name="BaseAuthPasskeyRoute Tests &gt; Registers a PasskeyStrategy under its name once initialized." time="0.0014747">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthPasskeyRoute.test.ts" name="BaseAuthPasskeyRoute Tests &gt; getCredentialById &gt; Throws if secretRepo is not set." time="0.0001937">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthPasskeyRoute.test.ts" name="BaseAuthPasskeyRoute Tests &gt; getCredentialById &gt; Returns undefined if no matching secret exists." time="0.000824">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthPasskeyRoute.test.ts" name="BaseAuthPasskeyRoute Tests &gt; getCredentialById &gt; Returns the .data of the matching secret." time="0.0001766">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthPasskeyRoute.test.ts" name="BaseAuthPasskeyRoute Tests &gt; getCredentials &gt; Throws if secretRepo is not set." time="0.0002279">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthPasskeyRoute.test.ts" name="BaseAuthPasskeyRoute Tests &gt; getCredentials &gt; Throws if userUtils is not set." time="0.0006436">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthPasskeyRoute.test.ts" name="BaseAuthPasskeyRoute Tests &gt; getCredentials &gt; Throws if the user cannot be found." time="0.0002033">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthPasskeyRoute.test.ts" name="BaseAuthPasskeyRoute Tests &gt; getCredentials &gt; Returns the .data of all matching PASSKEY secrets for the user." time="0.0003046">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthPasskeyRoute.test.ts" name="BaseAuthPasskeyRoute Tests &gt; getUser &gt; Throws if userUtils is not set." time="0.000201">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthPasskeyRoute.test.ts" name="BaseAuthPasskeyRoute Tests &gt; getUser &gt; Delegates to userUtils.lookup()." time="0.000176">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthPasskeyRoute.test.ts" name="BaseAuthPasskeyRoute Tests &gt; updateCredentialCounter &gt; Throws if secretRepo is not set." time="0.0001726">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthPasskeyRoute.test.ts" name="BaseAuthPasskeyRoute Tests &gt; updateCredentialCounter &gt; Does nothing if no matching secret is found." time="0.0001704">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthPasskeyRoute.test.ts" name="BaseAuthPasskeyRoute Tests &gt; updateCredentialCounter &gt; Updates the secret&apos;s counter when a matching secret is found." time="0.0002952">
+        </testcase>
+    </testsuite>
+    <testsuite name="test/routes/BaseAuthTOTPRoute.test.ts" timestamp="2026-07-20T00:31:12.237Z" hostname="Jane" tests="8" failures="0" errors="0" skipped="0" time="0.0071838">
+        <testcase classname="test/routes/BaseAuthTOTPRoute.test.ts" name="BaseAuthTOTPRoute Tests &gt; Throws during initialize() if authMiddleware was not injected." time="0.0026339">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthTOTPRoute.test.ts" name="BaseAuthTOTPRoute Tests &gt; Throws during initialize() if objectFactory was not injected." time="0.0002608">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthTOTPRoute.test.ts" name="BaseAuthTOTPRoute Tests &gt; Does not recreate secretRepo/userUtils if initialize() runs again." time="0.0004541">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthTOTPRoute.test.ts" name="BaseAuthTOTPRoute Tests &gt; Registers a TOTPStrategy under its name once initialized." time="0.001492">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthTOTPRoute.test.ts" name="BaseAuthTOTPRoute Tests &gt; getSecrets &gt; Throws if secretRepo is not set." time="0.000208">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthTOTPRoute.test.ts" name="BaseAuthTOTPRoute Tests &gt; getSecrets &gt; Returns the .data of each matching secret." time="0.0005992">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthTOTPRoute.test.ts" name="BaseAuthTOTPRoute Tests &gt; getUser &gt; Throws if userUtils is not set." time="0.0001766">
+        </testcase>
+        <testcase classname="test/routes/BaseAuthTOTPRoute.test.ts" name="BaseAuthTOTPRoute Tests &gt; getUser &gt; Delegates to userUtils.lookup()." time="0.0001829">
+        </testcase>
+    </testsuite>
+    <testsuite name="test/routes/BaseSecretRoute.test.ts" timestamp="2026-07-20T00:31:12.238Z" hostname="Jane" tests="32" failures="0" errors="0" skipped="0" time="0.1125549">
+        <testcase classname="test/routes/BaseSecretRoute.test.ts" name="BaseSecretRoute Tests &gt; cleanData &gt; Removes the data property from a single object." time="0.001398">
+        </testcase>
+        <testcase classname="test/routes/BaseSecretRoute.test.ts" name="BaseSecretRoute Tests &gt; cleanData &gt; Removes the data property from an array of objects." time="0.000138">
+        </testcase>
+        <testcase classname="test/routes/BaseSecretRoute.test.ts" name="BaseSecretRoute Tests &gt; count &gt; Delegates to ModelRoute.doCount()." time="0.0015536">
+        </testcase>
+        <testcase classname="test/routes/BaseSecretRoute.test.ts" name="BaseSecretRoute Tests &gt; delete &gt; Delegates to ModelRoute.doDelete(), converting purge=&apos;true&apos; to a boolean." time="0.0003038">
+        </testcase>
+        <testcase classname="test/routes/BaseSecretRoute.test.ts" name="BaseSecretRoute Tests &gt; delete &gt; Converts a non-&apos;true&apos; purge value to false." time="0.0002271">
+        </testcase>
+        <testcase classname="test/routes/BaseSecretRoute.test.ts" name="BaseSecretRoute Tests &gt; exists &gt; Delegates to ModelRoute.doExists()." time="0.0002466">
+        </testcase>
+        <testcase classname="test/routes/BaseSecretRoute.test.ts" name="BaseSecretRoute Tests &gt; find &gt; Delegates to ModelRoute.doFind() and cleans data from all results." time="0.0001746">
+        </testcase>
+        <testcase classname="test/routes/BaseSecretRoute.test.ts" name="BaseSecretRoute Tests &gt; findById &gt; Delegates to ModelRoute.doFindById() and cleans data when a result is found." time="0.0001465">
+        </testcase>
+        <testcase classname="test/routes/BaseSecretRoute.test.ts" name="BaseSecretRoute Tests &gt; findById &gt; Returns null without attempting to clean data when no result is found." time="0.000187">
+        </testcase>
+        <testcase classname="test/routes/BaseSecretRoute.test.ts" name="BaseSecretRoute Tests &gt; truncate &gt; Delegates to ModelRoute.doTruncate()." time="0.0002301">
+        </testcase>
+        <testcase classname="test/routes/BaseSecretRoute.test.ts" name="BaseSecretRoute Tests &gt; create &gt; Strips data from a single FIDO2/PASSKEY/PASSWORD result." time="0.000432">
+        </testcase>
+        <testcase classname="test/routes/BaseSecretRoute.test.ts" name="BaseSecretRoute Tests &gt; create &gt; Strips data from each FIDO2/PASSKEY result in an array." time="0.0001486">
+        </testcase>
+        <testcase classname="test/routes/BaseSecretRoute.test.ts" name="BaseSecretRoute Tests &gt; create &gt; Computes and attaches a provisioning URI for a TOTP result with data." time="0.0142958">
+        </testcase>
+        <testcase classname="test/routes/BaseSecretRoute.test.ts" name="BaseSecretRoute Tests &gt; create &gt; Leaves the result untouched for a TOTP result with no data." time="0.0002179">
+        </testcase>
+        <testcase classname="test/routes/BaseSecretRoute.test.ts" name="BaseSecretRoute Tests &gt; validateCreate &gt; Hashes string data for a PASSWORD secret." time="0.0321158">
+        </testcase>
+        <testcase classname="test/routes/BaseSecretRoute.test.ts" name="BaseSecretRoute Tests &gt; validateCreate &gt; Throws for a PASSWORD secret with non-string data." time="0.0011481">
+        </testcase>
+        <testcase classname="test/routes/BaseSecretRoute.test.ts" name="BaseSecretRoute Tests &gt; validateCreate &gt; Delegates FIDO2 secrets to validateWebAuthnCreate() with fido2Config." time="0.0002183">
+        </testcase>
+        <testcase classname="test/routes/BaseSecretRoute.test.ts" name="BaseSecretRoute Tests &gt; validateCreate &gt; Delegates PASSKEY secrets to validateWebAuthnCreate() with passkeyConfig." time="0.0001635">
+        </testcase>
+        <testcase classname="test/routes/BaseSecretRoute.test.ts" name="BaseSecretRoute Tests &gt; validateCreate &gt; Delegates TOTP secrets to validateTOTPCreate()." time="0.000152">
+        </testcase>
+        <testcase classname="test/routes/BaseSecretRoute.test.ts" name="BaseSecretRoute Tests &gt; validateCreate &gt; Processes each object in an array of secrets." time="0.0536329">
+        </testcase>
+        <testcase classname="test/routes/BaseSecretRoute.test.ts" name="BaseSecretRoute Tests &gt; validateWebAuthnCreate &gt; Throws if the request has no session." time="0.0004394">
+        </testcase>
+        <testcase classname="test/routes/BaseSecretRoute.test.ts" name="BaseSecretRoute Tests &gt; validateWebAuthnCreate &gt; Throws if there is no challenge in progress for the session." time="0.0001682">
+        </testcase>
+        <testcase classname="test/routes/BaseSecretRoute.test.ts" name="BaseSecretRoute Tests &gt; validateWebAuthnCreate &gt; Throws if userUid is missing." time="0.0001761">
+        </testcase>
+        <testcase classname="test/routes/BaseSecretRoute.test.ts" name="BaseSecretRoute Tests &gt; validateWebAuthnCreate &gt; Throws if userUid is an empty string." time="0.0001766">
+        </testcase>
+        <testcase classname="test/routes/BaseSecretRoute.test.ts" name="BaseSecretRoute Tests &gt; validateWebAuthnCreate &gt; Clears the session challenge even when the request ultimately fails validation." time="0.000192">
+        </testcase>
+        <testcase classname="test/routes/BaseSecretRoute.test.ts" name="BaseSecretRoute Tests &gt; validateWebAuthnCreate &gt; Throws if the submitted data is not a valid WebAuthn registration response." time="0.0001638">
+        </testcase>
+        <testcase classname="test/routes/BaseSecretRoute.test.ts" name="BaseSecretRoute Tests &gt; validateWebAuthnCreate &gt; Throws if verification does not succeed." time="0.0002913">
+        </testcase>
+        <testcase classname="test/routes/BaseSecretRoute.test.ts" name="BaseSecretRoute Tests &gt; validateWebAuthnCreate &gt; Replaces obj.data with the resulting StoredPasskeyCredential on success." time="0.0003264">
+        </testcase>
+        <testcase classname="test/routes/BaseSecretRoute.test.ts" name="BaseSecretRoute Tests &gt; passkeyRegistrationOptions / fido2RegistrationOptions &gt; Throws 401 when no user is authenticated (passkey)." time="0.0001874">
+        </testcase>
+        <testcase classname="test/routes/BaseSecretRoute.test.ts" name="BaseSecretRoute Tests &gt; passkeyRegistrationOptions / fido2RegistrationOptions &gt; Throws 401 when no user is authenticated (fido2)." time="0.0001952">
+        </testcase>
+        <testcase classname="test/routes/BaseSecretRoute.test.ts" name="BaseSecretRoute Tests &gt; passkeyRegistrationOptions / fido2RegistrationOptions &gt; Throws if repoUtils is not set when beginning a WebAuthn registration." time="0.0002067">
+        </testcase>
+        <testcase classname="test/routes/BaseSecretRoute.test.ts" name="BaseSecretRoute Tests &gt; passkeyRegistrationOptions / fido2RegistrationOptions &gt; Excludes the user&apos;s existing credentials of the matching type from the generated options." time="0.0014202">
+        </testcase>
+    </testsuite>
+    <testsuite name="test/routes/UserUtils.test.ts" timestamp="2026-07-20T00:31:12.241Z" hostname="Jane" tests="9" failures="0" errors="0" skipped="0" time="0.0070072">
+        <testcase classname="test/routes/UserUtils.test.ts" name="UserUtils Tests &gt; Stores the given userClass and aliasClass on construction." time="0.0017018">
+        </testcase>
+        <testcase classname="test/routes/UserUtils.test.ts" name="UserUtils Tests &gt; init &gt; Throws if objectFactory was not injected." time="0.0010783">
+        </testcase>
+        <testcase classname="test/routes/UserUtils.test.ts" name="UserUtils Tests &gt; init &gt; Creates aliasRepo and userRepo using the object factory." time="0.0006855">
+        </testcase>
+        <testcase classname="test/routes/UserUtils.test.ts" name="UserUtils Tests &gt; init &gt; Does not recreate aliasRepo/userRepo if init() runs again." time="0.0001762">
+        </testcase>
+        <testcase classname="test/routes/UserUtils.test.ts" name="UserUtils Tests &gt; lookup &gt; Throws if aliasRepo is not set." time="0.0002211">
+        </testcase>
+        <testcase classname="test/routes/UserUtils.test.ts" name="UserUtils Tests &gt; lookup &gt; Throws if userRepo is not set." time="0.0001676">
+        </testcase>
+        <testcase classname="test/routes/UserUtils.test.ts" name="UserUtils Tests &gt; lookup &gt; Returns the user directly when the id matches a user&apos;s uid." time="0.0012325">
+        </testcase>
+        <testcase classname="test/routes/UserUtils.test.ts" name="UserUtils Tests &gt; lookup &gt; Falls back to alias lookup and resolves the owning user when the id is not a user&apos;s uid." time="0.0004016">
+        </testcase>
+        <testcase classname="test/routes/UserUtils.test.ts" name="UserUtils Tests &gt; lookup &gt; Returns undefined when neither a user nor an alias matches the id." time="0.0002114">
+        </testcase>
+    </testsuite>
+    <testsuite name="test/routes/mongo/AliasRoute.test.ts" timestamp="2026-07-20T00:31:12.243Z" hostname="Jane" tests="8" failures="0" errors="0" skipped="0" time="0.9337996">
+        <testcase classname="test/routes/mongo/AliasRoute.test.ts" name="Route:AliasMongo Tests &gt; Can make count request (with admin token)." time="0.0180313">
+        </testcase>
+        <testcase classname="test/routes/mongo/AliasRoute.test.ts" name="Route:AliasMongo Tests &gt; Can make create request (with admin token)." time="0.0067097">
+        </testcase>
+        <testcase classname="test/routes/mongo/AliasRoute.test.ts" name="Route:AliasMongo Tests &gt; Can make delete request (with admin token)." time="0.0067472">
+        </testcase>
+        <testcase classname="test/routes/mongo/AliasRoute.test.ts" name="Route:AliasMongo Tests &gt; Can make findAll request (with admin token)." time="0.0069739">
+        </testcase>
+        <testcase classname="test/routes/mongo/AliasRoute.test.ts" name="Route:AliasMongo Tests &gt; Can make findById request (with admin token)." time="0.0040469">
+        </testcase>
+        <testcase classname="test/routes/mongo/AliasRoute.test.ts" name="Route:AliasMongo Tests &gt; Can make truncate request (with admin token)." time="0.0070226">
+        </testcase>
+        <testcase classname="test/routes/mongo/AliasRoute.test.ts" name="Route:AliasMongo Tests &gt; Can make update request (with admin token)." time="0.0067974">
+        </testcase>
+        <testcase classname="test/routes/mongo/AliasRoute.test.ts" name="Route:AliasMongo Tests &gt; Can make update property request (with admin token)." time="0.0068968">
+        </testcase>
+    </testsuite>
+    <testsuite name="test/routes/mongo/AuthBasicRoute.test.ts" timestamp="2026-07-20T00:31:12.244Z" hostname="Jane" tests="3" failures="0" errors="0" skipped="0" time="1.2522125">
+        <testcase classname="test/routes/mongo/AuthBasicRoute.test.ts" name="Route:AuthBasicMongo Tests &gt; Can authenticate with valid user id and password." time="0.0855495">
+        </testcase>
+        <testcase classname="test/routes/mongo/AuthBasicRoute.test.ts" name="Route:AuthBasicMongo Tests &gt; Can authenticate with valid user id and password when multiple passwords exist." time="0.1615812">
+        </testcase>
+        <testcase classname="test/routes/mongo/AuthBasicRoute.test.ts" name="Route:AuthBasicMongo Tests &gt; Cannot authenticate with invalid user id and password." time="0.0776313">
             <system-out>
-2026-07-19T22:32:28.890Z [34mdebug[39m: Invalid name or password
+2026-07-20T00:30:15.296Z [34mdebug[39m: Invalid name or password
 
             </system-out>
         </testcase>
     </testsuite>
-    <testsuite name="test/routes/mongo/AuthFIDO2Route.test.ts" timestamp="2026-07-19T22:33:04.388Z" hostname="Jane" tests="5" failures="0" errors="0" skipped="0" time="1.0377643">
-        <testcase classname="test/routes/mongo/AuthFIDO2Route.test.ts" name="Route:AuthFIDO2Mongo Tests &gt; Can begin a FIDO2 ceremony and receive challenge options." time="0.0165996">
+    <testsuite name="test/routes/mongo/AuthFIDO2Route.test.ts" timestamp="2026-07-20T00:31:12.245Z" hostname="Jane" tests="5" failures="0" errors="0" skipped="0" time="0.8651284">
+        <testcase classname="test/routes/mongo/AuthFIDO2Route.test.ts" name="Route:AuthFIDO2Mongo Tests &gt; Can begin a FIDO2 ceremony and receive challenge options." time="0.0158471">
             <system-out>
-2026-07-19T22:33:03.676Z [34mdebug[39m: Authentication failed but is required to proceed.
+2026-07-20T00:30:57.728Z [34mdebug[39m: Authentication failed but is required to proceed.
 
             </system-out>
         </testcase>
-        <testcase classname="test/routes/mongo/AuthFIDO2Route.test.ts" name="Route:AuthFIDO2Mongo Tests &gt; Can complete a FIDO2 ceremony with a valid assertion and authenticate." time="0.0193483">
+        <testcase classname="test/routes/mongo/AuthFIDO2Route.test.ts" name="Route:AuthFIDO2Mongo Tests &gt; Can complete a FIDO2 ceremony with a valid assertion and authenticate." time="0.0152713">
             <system-out>
-2026-07-19T22:33:03.689Z [34mdebug[39m: Authentication failed but is required to proceed.
+2026-07-20T00:30:57.738Z [34mdebug[39m: Authentication failed but is required to proceed.
 
             </system-out>
         </testcase>
-        <testcase classname="test/routes/mongo/AuthFIDO2Route.test.ts" name="Route:AuthFIDO2Mongo Tests &gt; Cannot authenticate with an unknown credential id." time="0.0047763">
+        <testcase classname="test/routes/mongo/AuthFIDO2Route.test.ts" name="Route:AuthFIDO2Mongo Tests &gt; Cannot authenticate with an unknown credential id." time="0.0044792">
             <system-out>
-2026-07-19T22:33:03.703Z [34mdebug[39m: Authentication failed but is required to proceed.
+2026-07-20T00:30:57.750Z [34mdebug[39m: Authentication failed but is required to proceed.
 
-2026-07-19T22:33:03.705Z [34mdebug[39m: FIDO2 authentication failed.
+2026-07-20T00:30:57.753Z [34mdebug[39m: FIDO2 authentication failed.
 
             </system-out>
         </testcase>
-        <testcase classname="test/routes/mongo/AuthFIDO2Route.test.ts" name="Route:AuthFIDO2Mongo Tests &gt; Cannot authenticate when SimpleWebAuthn fails to verify the assertion." time="0.0061546">
+        <testcase classname="test/routes/mongo/AuthFIDO2Route.test.ts" name="Route:AuthFIDO2Mongo Tests &gt; Cannot authenticate when SimpleWebAuthn fails to verify the assertion." time="0.0058335">
             <system-out>
-2026-07-19T22:33:03.709Z [34mdebug[39m: Authentication failed but is required to proceed.
+2026-07-20T00:30:57.756Z [34mdebug[39m: Authentication failed but is required to proceed.
 
-2026-07-19T22:33:03.712Z [34mdebug[39m: FIDO2 authentication failed.
+2026-07-20T00:30:57.759Z [34mdebug[39m: FIDO2 authentication failed.
 
             </system-out>
         </testcase>
-        <testcase classname="test/routes/mongo/AuthFIDO2Route.test.ts" name="Route:AuthFIDO2Mongo Tests &gt; Cannot authenticate with a malformed assertion response." time="0.0031713">
+        <testcase classname="test/routes/mongo/AuthFIDO2Route.test.ts" name="Route:AuthFIDO2Mongo Tests &gt; Cannot authenticate with a malformed assertion response." time="0.0027944">
             <system-out>
-2026-07-19T22:33:03.714Z [34mdebug[39m: No FIDO2 ceremony in progress for this session.
-
-            </system-out>
-        </testcase>
-    </testsuite>
-    <testsuite name="test/routes/mongo/AuthMFARoute.test.ts" timestamp="2026-07-19T22:33:04.389Z" hostname="Jane" tests="5" failures="0" errors="0" skipped="0" time="1.2754308">
-        <testcase classname="test/routes/mongo/AuthMFARoute.test.ts" name="Route:AuthMFAMongo Tests &gt; Returns the list of available 2FA methods after a valid password check." time="0.1034306">
-            <system-out>
-2026-07-19T22:32:18.845Z [34mdebug[39m: Invalid authentication request.
-
-            </system-out>
-        </testcase>
-        <testcase classname="test/routes/mongo/AuthMFARoute.test.ts" name="Route:AuthMFAMongo Tests &gt; Cannot authenticate phase 1 with an invalid password." time="0.0802">
-            <system-out>
-2026-07-19T22:32:18.932Z [34mdebug[39m: Invalid authorization request.
-
-            </system-out>
-        </testcase>
-        <testcase classname="test/routes/mongo/AuthMFARoute.test.ts" name="Route:AuthMFAMongo Tests &gt; Can complete the full 3-phase MFA flow using an OTP contact method." time="0.0924092">
-            <system-out>
-2026-07-19T22:32:19.001Z [34mdebug[39m: Invalid authentication request.
-
-2026-07-19T22:32:19.020Z [34mdebug[39m: Authentication failed but is required to proceed.
-
-            </system-out>
-        </testcase>
-        <testcase classname="test/routes/mongo/AuthMFARoute.test.ts" name="Route:AuthMFAMongo Tests &gt; Cannot complete phase 3 with an invalid OTP token." time="0.0761817">
-            <system-out>
-2026-07-19T22:32:19.096Z [34mdebug[39m: Invalid authentication request.
-
-2026-07-19T22:32:19.100Z [34mdebug[39m: Authentication failed but is required to proceed.
-
-2026-07-19T22:32:19.101Z [34mdebug[39m: Invalid authentication request.
-
-            </system-out>
-        </testcase>
-        <testcase classname="test/routes/mongo/AuthMFARoute.test.ts" name="Route:AuthMFAMongo Tests &gt; Cannot request a challenge for an unknown method id." time="0.075804">
-            <system-out>
-2026-07-19T22:32:19.174Z [34mdebug[39m: Invalid authentication request.
-
-2026-07-19T22:32:19.177Z [34mdebug[39m: Invalid secondary authentication method.
+2026-07-20T00:30:57.761Z [34mdebug[39m: No FIDO2 ceremony in progress for this session.
 
             </system-out>
         </testcase>
     </testsuite>
-    <testsuite name="test/routes/mongo/AuthOIDCRoute.test.ts" timestamp="2026-07-19T22:33:04.390Z" hostname="Jane" tests="7" failures="0" errors="0" skipped="0" time="0.9871918">
-        <testcase classname="test/routes/mongo/AuthOIDCRoute.test.ts" name="Route:AuthOIDCMongo Tests &gt; Redirects to the provider&apos;s authorization URL with the expected parameters." time="0.0160937">
+    <testsuite name="test/routes/mongo/AuthMFARoute.test.ts" timestamp="2026-07-20T00:31:12.246Z" hostname="Jane" tests="5" failures="0" errors="0" skipped="0" time="1.2358088">
+        <testcase classname="test/routes/mongo/AuthMFARoute.test.ts" name="Route:AuthMFAMongo Tests &gt; Returns the list of available 2FA methods after a valid password check." time="0.0828569">
             <system-out>
-2026-07-19T22:32:23.943Z [34mdebug[39m: Authentication failed but is required to proceed.
+2026-07-20T00:30:20.267Z [34mdebug[39m: Invalid authentication request.
 
             </system-out>
         </testcase>
-        <testcase classname="test/routes/mongo/AuthOIDCRoute.test.ts" name="Route:AuthOIDCMongo Tests &gt; Can complete the OIDC callback and provision a new user from the provider profile." time="0.0214814">
+        <testcase classname="test/routes/mongo/AuthMFARoute.test.ts" name="Route:AuthMFAMongo Tests &gt; Cannot authenticate phase 1 with an invalid password." time="0.0725969">
             <system-out>
-2026-07-19T22:32:23.951Z [34mdebug[39m: Authentication failed but is required to proceed.
+2026-07-20T00:30:20.345Z [34mdebug[39m: Invalid authorization request.
 
             </system-out>
         </testcase>
-        <testcase classname="test/routes/mongo/AuthOIDCRoute.test.ts" name="Route:AuthOIDCMongo Tests &gt; Can complete the OIDC callback for a returning user without creating a duplicate." time="0.0187733">
+        <testcase classname="test/routes/mongo/AuthMFARoute.test.ts" name="Route:AuthMFAMongo Tests &gt; Can complete the full 3-phase MFA flow using an OTP contact method." time="0.0921396">
             <system-out>
-2026-07-19T22:32:23.972Z [34mdebug[39m: Authentication failed but is required to proceed.
+2026-07-20T00:30:20.413Z [34mdebug[39m: Invalid authentication request.
 
-2026-07-19T22:32:23.983Z [34mdebug[39m: Authentication failed but is required to proceed.
+2026-07-20T00:30:20.432Z [34mdebug[39m: Authentication failed but is required to proceed.
 
             </system-out>
         </testcase>
-        <testcase classname="test/routes/mongo/AuthOIDCRoute.test.ts" name="Route:AuthOIDCMongo Tests &gt; Can recognize a returning user by provider id alone when no verified email is returned." time="0.0184681">
+        <testcase classname="test/routes/mongo/AuthMFARoute.test.ts" name="Route:AuthMFAMongo Tests &gt; Cannot complete phase 3 with an invalid OTP token." time="0.0792758">
             <system-out>
-2026-07-19T22:32:23.991Z [34mdebug[39m: Authentication failed but is required to proceed.
+2026-07-20T00:30:20.512Z [34mdebug[39m: Invalid authentication request.
 
-2026-07-19T22:32:24.000Z [34mdebug[39m: Authentication failed but is required to proceed.
+2026-07-20T00:30:20.515Z [34mdebug[39m: Authentication failed but is required to proceed.
+
+2026-07-20T00:30:20.517Z [34mdebug[39m: Invalid authentication request.
 
             </system-out>
         </testcase>
-        <testcase classname="test/routes/mongo/AuthOIDCRoute.test.ts" name="Route:AuthOIDCMongo Tests &gt; Links the provider id alias to an existing account found via the email fallback." time="0.0104477">
+        <testcase classname="test/routes/mongo/AuthMFARoute.test.ts" name="Route:AuthMFAMongo Tests &gt; Cannot request a challenge for an unknown method id." time="0.0832824">
             <system-out>
-2026-07-19T22:32:24.009Z [34mdebug[39m: Authentication failed but is required to proceed.
+2026-07-20T00:30:20.595Z [34mdebug[39m: Invalid authentication request.
 
-            </system-out>
-        </testcase>
-        <testcase classname="test/routes/mongo/AuthOIDCRoute.test.ts" name="Route:AuthOIDCMongo Tests &gt; Rejects the callback when the state parameter does not match the session (CSRF)." time="0.0044759">
-            <system-out>
-2026-07-19T22:32:24.019Z [34mdebug[39m: Authentication failed but is required to proceed.
-
-2026-07-19T22:32:24.021Z [34mdebug[39m: Invalid or missing state parameter. Possible CSRF attempt.
-
-            </system-out>
-        </testcase>
-        <testcase classname="test/routes/mongo/AuthOIDCRoute.test.ts" name="Route:AuthOIDCMongo Tests &gt; Rejects the callback when the provider reports an error." time="0.0028429">
-            <system-out>
-2026-07-19T22:32:24.024Z [34mdebug[39m: OIDC provider returned an error: access_denied - User+declined
+2026-07-20T00:30:20.600Z [34mdebug[39m: Invalid secondary authentication method.
 
             </system-out>
         </testcase>
     </testsuite>
-    <testsuite name="test/routes/mongo/AuthOTPRoute.test.ts" timestamp="2026-07-19T22:33:04.392Z" hostname="Jane" tests="5" failures="0" errors="0" skipped="0" time="0.9819481">
-        <testcase classname="test/routes/mongo/AuthOTPRoute.test.ts" name="Route:AuthOTPMongo Tests &gt; Can request and verify an OTP challenge sent to a verified contact." time="0.0437008">
+    <testsuite name="test/routes/mongo/AuthOIDCRoute.test.ts" timestamp="2026-07-20T00:31:12.247Z" hostname="Jane" tests="7" failures="0" errors="0" skipped="0" time="0.9558029">
+        <testcase classname="test/routes/mongo/AuthOIDCRoute.test.ts" name="Route:AuthOIDCMongo Tests &gt; Redirects to the provider&apos;s authorization URL with the expected parameters." time="0.0150627">
             <system-out>
-2026-07-19T22:32:35.823Z [34mdebug[39m: Authentication failed but is required to proceed.
+2026-07-20T00:30:29.594Z [34mdebug[39m: Authentication failed but is required to proceed.
 
             </system-out>
         </testcase>
-        <testcase classname="test/routes/mongo/AuthOTPRoute.test.ts" name="Route:AuthOTPMongo Tests &gt; Cannot verify an OTP challenge with an invalid token." time="0.0060308">
+        <testcase classname="test/routes/mongo/AuthOIDCRoute.test.ts" name="Route:AuthOIDCMongo Tests &gt; Can complete the OIDC callback and provision a new user from the provider profile." time="0.01901">
             <system-out>
-2026-07-19T22:32:35.841Z [34mdebug[39m: Authentication failed but is required to proceed.
-
-2026-07-19T22:32:35.843Z [34mdebug[39m: Invalid authentication request.
+2026-07-20T00:30:29.602Z [34mdebug[39m: Authentication failed but is required to proceed.
 
             </system-out>
         </testcase>
-        <testcase classname="test/routes/mongo/AuthOTPRoute.test.ts" name="Route:AuthOTPMongo Tests &gt; Cannot verify an OTP challenge without first requesting one (no session state)." time="0.0040461">
+        <testcase classname="test/routes/mongo/AuthOIDCRoute.test.ts" name="Route:AuthOIDCMongo Tests &gt; Can complete the OIDC callback for a returning user without creating a duplicate." time="0.0158437">
             <system-out>
-2026-07-19T22:32:35.847Z [34mdebug[39m: Invalid authentication request.
+2026-07-20T00:30:29.621Z [34mdebug[39m: Authentication failed but is required to proceed.
+
+2026-07-20T00:30:29.630Z [34mdebug[39m: Authentication failed but is required to proceed.
 
             </system-out>
         </testcase>
-        <testcase classname="test/routes/mongo/AuthOTPRoute.test.ts" name="Route:AuthOTPMongo Tests &gt; Cannot request a challenge for an unknown contact id." time="0.0028652">
+        <testcase classname="test/routes/mongo/AuthOIDCRoute.test.ts" name="Route:AuthOIDCMongo Tests &gt; Can recognize a returning user by provider id alone when no verified email is returned." time="0.0161635">
             <system-out>
-2026-07-19T22:32:35.850Z [34mdebug[39m: Authentication failed but is required to proceed.
+2026-07-20T00:30:29.639Z [34mdebug[39m: Authentication failed but is required to proceed.
+
+2026-07-20T00:30:29.647Z [34mdebug[39m: Authentication failed but is required to proceed.
 
             </system-out>
         </testcase>
-        <testcase classname="test/routes/mongo/AuthOTPRoute.test.ts" name="Route:AuthOTPMongo Tests &gt; Cannot authenticate without any request data." time="0.0021081">
+        <testcase classname="test/routes/mongo/AuthOIDCRoute.test.ts" name="Route:AuthOIDCMongo Tests &gt; Links the provider id alias to an existing account found via the email fallback." time="0.0085257">
             <system-out>
-2026-07-19T22:32:35.852Z [34mdebug[39m: Cannot read properties of undefined (reading &apos;id&apos;)
+2026-07-20T00:30:29.653Z [34mdebug[39m: Authentication failed but is required to proceed.
 
             </system-out>
         </testcase>
-    </testsuite>
-    <testsuite name="test/routes/mongo/AuthPasskeyRoute.test.ts" timestamp="2026-07-19T22:33:04.393Z" hostname="Jane" tests="5" failures="0" errors="0" skipped="0" time="1.0143678">
-        <testcase classname="test/routes/mongo/AuthPasskeyRoute.test.ts" name="Route:AuthPasskeyMongo Tests &gt; Can begin a passkey ceremony and receive challenge options." time="0.0157543">
+        <testcase classname="test/routes/mongo/AuthOIDCRoute.test.ts" name="Route:AuthOIDCMongo Tests &gt; Rejects the callback when the state parameter does not match the session (CSRF)." time="0.0035185">
             <system-out>
-2026-07-19T22:32:38.188Z [34mdebug[39m: Authentication failed but is required to proceed.
+2026-07-20T00:30:29.661Z [34mdebug[39m: Authentication failed but is required to proceed.
+
+2026-07-20T00:30:29.662Z [34mdebug[39m: Invalid or missing state parameter. Possible CSRF attempt.
 
             </system-out>
         </testcase>
-        <testcase classname="test/routes/mongo/AuthPasskeyRoute.test.ts" name="Route:AuthPasskeyMongo Tests &gt; Can complete a passkey ceremony with a valid assertion and authenticate." time="0.0166998">
+        <testcase classname="test/routes/mongo/AuthOIDCRoute.test.ts" name="Route:AuthOIDCMongo Tests &gt; Rejects the callback when the provider reports an error." time="0.0022404">
             <system-out>
-2026-07-19T22:32:38.198Z [34mdebug[39m: Authentication failed but is required to proceed.
-
-            </system-out>
-        </testcase>
-        <testcase classname="test/routes/mongo/AuthPasskeyRoute.test.ts" name="Route:AuthPasskeyMongo Tests &gt; Cannot authenticate with an unknown credential id." time="0.0055377">
-            <system-out>
-2026-07-19T22:32:38.212Z [34mdebug[39m: Authentication failed but is required to proceed.
-
-2026-07-19T22:32:38.215Z [34mdebug[39m: Passkey authentication failed.
-
-            </system-out>
-        </testcase>
-        <testcase classname="test/routes/mongo/AuthPasskeyRoute.test.ts" name="Route:AuthPasskeyMongo Tests &gt; Cannot authenticate when SimpleWebAuthn fails to verify the assertion." time="0.00598">
-            <system-out>
-2026-07-19T22:32:38.219Z [34mdebug[39m: Authentication failed but is required to proceed.
-
-2026-07-19T22:32:38.221Z [34mdebug[39m: Passkey authentication failed.
-
-            </system-out>
-        </testcase>
-        <testcase classname="test/routes/mongo/AuthPasskeyRoute.test.ts" name="Route:AuthPasskeyMongo Tests &gt; Cannot authenticate with a malformed assertion response." time="0.0030302">
-            <system-out>
-2026-07-19T22:32:38.224Z [34mdebug[39m: No passkey ceremony in progress for this session.
+2026-07-20T00:30:29.664Z [34mdebug[39m: OIDC provider returned an error: access_denied - User+declined
 
             </system-out>
         </testcase>
     </testsuite>
-    <testsuite name="test/routes/mongo/AuthTOTPRoute.test.ts" timestamp="2026-07-19T22:33:04.394Z" hostname="Jane" tests="3" failures="0" errors="0" skipped="0" time="0.9835684">
-        <testcase classname="test/routes/mongo/AuthTOTPRoute.test.ts" name="Route:AuthBasicMongo Tests &gt; Can authenticate with valid user id and totp." time="0.0262097">
-        </testcase>
-        <testcase classname="test/routes/mongo/AuthTOTPRoute.test.ts" name="Route:AuthBasicMongo Tests &gt; Can authenticate with valid user id and totp when multiple totp secrets exist." time="0.0066914">
-        </testcase>
-        <testcase classname="test/routes/mongo/AuthTOTPRoute.test.ts" name="Route:AuthBasicMongo Tests &gt; Cannot authenticate with invalid user id and totp." time="0.0064536">
+    <testsuite name="test/routes/mongo/AuthOTPRoute.test.ts" timestamp="2026-07-20T00:31:12.249Z" hostname="Jane" tests="5" failures="0" errors="0" skipped="0" time="0.9692448">
+        <testcase classname="test/routes/mongo/AuthOTPRoute.test.ts" name="Route:AuthOTPMongo Tests &gt; Can request and verify an OTP challenge sent to a verified contact." time="0.0401871">
             <system-out>
-2026-07-19T22:32:31.056Z [34mdebug[39m: Cannot read properties of undefined (reading &apos;length&apos;)
+2026-07-20T00:30:49.383Z [34mdebug[39m: Authentication failed but is required to proceed.
+
+            </system-out>
+        </testcase>
+        <testcase classname="test/routes/mongo/AuthOTPRoute.test.ts" name="Route:AuthOTPMongo Tests &gt; Cannot verify an OTP challenge with an invalid token." time="0.0064793">
+            <system-out>
+2026-07-20T00:30:49.399Z [34mdebug[39m: Authentication failed but is required to proceed.
+
+2026-07-20T00:30:49.401Z [34mdebug[39m: Invalid authentication request.
+
+            </system-out>
+        </testcase>
+        <testcase classname="test/routes/mongo/AuthOTPRoute.test.ts" name="Route:AuthOTPMongo Tests &gt; Cannot verify an OTP challenge without first requesting one (no session state)." time="0.003739">
+            <system-out>
+2026-07-20T00:30:49.404Z [34mdebug[39m: Invalid authentication request.
+
+            </system-out>
+        </testcase>
+        <testcase classname="test/routes/mongo/AuthOTPRoute.test.ts" name="Route:AuthOTPMongo Tests &gt; Cannot request a challenge for an unknown contact id." time="0.0029006">
+            <system-out>
+2026-07-20T00:30:49.407Z [34mdebug[39m: Authentication failed but is required to proceed.
+
+            </system-out>
+        </testcase>
+        <testcase classname="test/routes/mongo/AuthOTPRoute.test.ts" name="Route:AuthOTPMongo Tests &gt; Cannot authenticate without any request data." time="0.0022122">
+            <system-out>
+2026-07-20T00:30:49.409Z [34mdebug[39m: Cannot read properties of undefined (reading &apos;id&apos;)
 
             </system-out>
         </testcase>
     </testsuite>
-    <testsuite name="test/routes/mongo/ProfileRoute.test.ts" timestamp="2026-07-19T22:33:04.398Z" hostname="Jane" tests="8" failures="0" errors="0" skipped="0" time="0.8862342">
-        <testcase classname="test/routes/mongo/ProfileRoute.test.ts" name="Route:ProfileMongo Tests &gt; Can make count request (with admin token)." time="0.0190102">
-        </testcase>
-        <testcase classname="test/routes/mongo/ProfileRoute.test.ts" name="Route:ProfileMongo Tests &gt; Can make create request (with admin token)." time="0.0066471">
-        </testcase>
-        <testcase classname="test/routes/mongo/ProfileRoute.test.ts" name="Route:ProfileMongo Tests &gt; Can make delete request (with admin token)." time="0.0068887">
-        </testcase>
-        <testcase classname="test/routes/mongo/ProfileRoute.test.ts" name="Route:ProfileMongo Tests &gt; Can make findAll request (with admin token)." time="0.0077723">
-        </testcase>
-        <testcase classname="test/routes/mongo/ProfileRoute.test.ts" name="Route:ProfileMongo Tests &gt; Can make findById request (with admin token)." time="0.0052631">
-        </testcase>
-        <testcase classname="test/routes/mongo/ProfileRoute.test.ts" name="Route:ProfileMongo Tests &gt; Can make truncate request (with admin token)." time="0.0080499">
-        </testcase>
-        <testcase classname="test/routes/mongo/ProfileRoute.test.ts" name="Route:ProfileMongo Tests &gt; Can make update request (with admin token)." time="0.0086602">
-        </testcase>
-        <testcase classname="test/routes/mongo/ProfileRoute.test.ts" name="Route:ProfileMongo Tests &gt; Can make update property request (with admin token)." time="0.0097642">
-        </testcase>
-    </testsuite>
-    <testsuite name="test/routes/mongo/SecretRoute.test.ts" timestamp="2026-07-19T22:33:04.399Z" hostname="Jane" tests="20" failures="0" errors="0" skipped="0" time="1.5452573">
-        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Can make count request (with admin token)." time="0.1559274">
-        </testcase>
-        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Can make create request (with admin token)." time="0.0606127">
-        </testcase>
-        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Can make delete request (with admin token)." time="0.0351132">
-        </testcase>
-        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Can make findAll request (with admin token)." time="0.1440579">
-        </testcase>
-        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Can make findById request (with admin token)." time="0.0324445">
-        </testcase>
-        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Can make truncate request (with admin token)." time="0.1453793">
-        </testcase>
-        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Cannot begin passkey registration without authentication." time="0.0056027">
+    <testsuite name="test/routes/mongo/AuthPasskeyRoute.test.ts" timestamp="2026-07-20T00:31:12.250Z" hostname="Jane" tests="5" failures="0" errors="0" skipped="0" time="0.9083039">
+        <testcase classname="test/routes/mongo/AuthPasskeyRoute.test.ts" name="Route:AuthPasskeyMongo Tests &gt; Can begin a passkey ceremony and receive challenge options." time="0.0164679">
             <system-out>
-2026-07-19T22:32:16.668Z [34mdebug[39m: Authentication is required to register a passkey.
+2026-07-20T00:30:51.485Z [34mdebug[39m: Authentication failed but is required to proceed.
 
             </system-out>
         </testcase>
-        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Can begin passkey registration and receive creation options (with admin token)." time="0.0028931">
-        </testcase>
-        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Cannot create a passkey secret without a prior registration ceremony." time="0.0029226">
+        <testcase classname="test/routes/mongo/AuthPasskeyRoute.test.ts" name="Route:AuthPasskeyMongo Tests &gt; Can complete a passkey ceremony with a valid assertion and authenticate." time="0.0162165">
             <system-out>
-2026-07-19T22:32:16.677Z [34mdebug[39m: No WebAuthn registration ceremony in progress for this session.
+2026-07-20T00:30:51.496Z [34mdebug[39m: Authentication failed but is required to proceed.
 
             </system-out>
         </testcase>
-        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Can create a passkey secret with a valid registration response (with admin token)." time="0.0066788">
-        </testcase>
-        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Cannot register the same passkey credential twice." time="0.0098319">
+        <testcase classname="test/routes/mongo/AuthPasskeyRoute.test.ts" name="Route:AuthPasskeyMongo Tests &gt; Cannot authenticate with an unknown credential id." time="0.0079143">
             <system-out>
-2026-07-19T22:32:16.692Z [34mdebug[39m: A resource with that identifier already exists.
+2026-07-20T00:30:51.509Z [34mdebug[39m: Authentication failed but is required to proceed.
+
+2026-07-20T00:30:51.514Z [34mdebug[39m: Passkey authentication failed.
 
             </system-out>
         </testcase>
-        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Cannot begin FIDO2 registration without authentication." time="0.0019366">
+        <testcase classname="test/routes/mongo/AuthPasskeyRoute.test.ts" name="Route:AuthPasskeyMongo Tests &gt; Cannot authenticate when SimpleWebAuthn fails to verify the assertion." time="0.00559">
             <system-out>
-2026-07-19T22:32:16.696Z [34mdebug[39m: Authentication is required to register a FIDO2 security key.
+2026-07-20T00:30:51.518Z [34mdebug[39m: Authentication failed but is required to proceed.
+
+2026-07-20T00:30:51.520Z [34mdebug[39m: Passkey authentication failed.
 
             </system-out>
         </testcase>
-        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Can begin FIDO2 registration and receive creation options (with admin token)." time="0.0020339">
-        </testcase>
-        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Cannot create a FIDO2 secret without a prior registration ceremony." time="0.0022357">
+        <testcase classname="test/routes/mongo/AuthPasskeyRoute.test.ts" name="Route:AuthPasskeyMongo Tests &gt; Cannot authenticate with a malformed assertion response." time="0.0043019">
             <system-out>
-2026-07-19T22:32:16.700Z [34mdebug[39m: No WebAuthn registration ceremony in progress for this session.
-
-            </system-out>
-        </testcase>
-        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Can create a FIDO2 secret with a valid registration response (with admin token)." time="0.0051911">
-        </testcase>
-        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Cannot register the same FIDO2 credential twice." time="0.0076977">
-            <system-out>
-2026-07-19T22:32:16.713Z [34mdebug[39m: A resource with that identifier already exists.
-
-            </system-out>
-        </testcase>
-        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Can create a TOTP secret with a server-generated secret (with admin token)." time="0.0039222">
-        </testcase>
-        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Can create a TOTP secret with a caller-supplied secret (with admin token)." time="0.0028706">
-        </testcase>
-        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Cannot create a TOTP secret with a secret that is too short." time="0.0018586">
-            <system-out>
-2026-07-19T22:32:16.722Z [34mdebug[39m: A secret of type &apos;totp&apos; must be a Base32-encoded string of at least 128 bits.
-
-            </system-out>
-        </testcase>
-        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Cannot create a TOTP secret with a secret that isn&apos;t valid Base32." time="0.0018014">
-            <system-out>
-2026-07-19T22:32:16.724Z [34mdebug[39m: A secret of type &apos;totp&apos; must be a Base32-encoded string of at least 128 bits.
+2026-07-20T00:30:51.524Z [34mdebug[39m: No passkey ceremony in progress for this session.
 
             </system-out>
         </testcase>
     </testsuite>
-    <testsuite name="test/routes/mongo/UserRoute.test.ts" timestamp="2026-07-19T22:33:04.401Z" hostname="Jane" tests="8" failures="0" errors="0" skipped="0" time="1.0879949">
-        <testcase classname="test/routes/mongo/UserRoute.test.ts" name="Route:UserMongo Tests &gt; Can make count request (with admin token)." time="0.0182644">
+    <testsuite name="test/routes/mongo/AuthTOTPRoute.test.ts" timestamp="2026-07-20T00:31:12.251Z" hostname="Jane" tests="3" failures="0" errors="0" skipped="0" time="0.8574703">
+        <testcase classname="test/routes/mongo/AuthTOTPRoute.test.ts" name="Route:AuthBasicMongo Tests &gt; Can authenticate with valid user id and totp." time="0.0204407">
         </testcase>
-        <testcase classname="test/routes/mongo/UserRoute.test.ts" name="Route:UserMongo Tests &gt; Can make create request (with admin token)." time="0.0059783">
+        <testcase classname="test/routes/mongo/AuthTOTPRoute.test.ts" name="Route:AuthBasicMongo Tests &gt; Can authenticate with valid user id and totp when multiple totp secrets exist." time="0.006713">
         </testcase>
-        <testcase classname="test/routes/mongo/UserRoute.test.ts" name="Route:UserMongo Tests &gt; Can make delete request (with admin token)." time="0.0074787">
-        </testcase>
-        <testcase classname="test/routes/mongo/UserRoute.test.ts" name="Route:UserMongo Tests &gt; Can make findAll request (with admin token)." time="0.0100005">
-        </testcase>
-        <testcase classname="test/routes/mongo/UserRoute.test.ts" name="Route:UserMongo Tests &gt; Can make findById request (with admin token)." time="0.0046477">
-        </testcase>
-        <testcase classname="test/routes/mongo/UserRoute.test.ts" name="Route:UserMongo Tests &gt; Can make truncate request (with admin token)." time="0.0084985">
-        </testcase>
-        <testcase classname="test/routes/mongo/UserRoute.test.ts" name="Route:UserMongo Tests &gt; Can make update request (with admin token)." time="0.0107741">
-        </testcase>
-        <testcase classname="test/routes/mongo/UserRoute.test.ts" name="Route:UserMongo Tests &gt; Can make update property request (with admin token)." time="0.0081299">
-        </testcase>
-    </testsuite>
-    <testsuite name="test/routes/sql/AliasRoute.test.ts" timestamp="2026-07-19T22:33:04.405Z" hostname="Jane" tests="8" failures="0" errors="0" skipped="0" time="1.0408684">
-        <testcase classname="test/routes/sql/AliasRoute.test.ts" name="Route:AliasSQL Tests &gt; Can make count request (with admin token)." time="0.0435126">
-        </testcase>
-        <testcase classname="test/routes/sql/AliasRoute.test.ts" name="Route:AliasSQL Tests &gt; Can make create request (with admin token)." time="0.012474">
-        </testcase>
-        <testcase classname="test/routes/sql/AliasRoute.test.ts" name="Route:AliasSQL Tests &gt; Can make delete request (with admin token)." time="0.0145195">
-        </testcase>
-        <testcase classname="test/routes/sql/AliasRoute.test.ts" name="Route:AliasSQL Tests &gt; Can make findAll request (with admin token)." time="0.0244655">
-        </testcase>
-        <testcase classname="test/routes/sql/AliasRoute.test.ts" name="Route:AliasSQL Tests &gt; Can make findById request (with admin token)." time="0.0112577">
-        </testcase>
-        <testcase classname="test/routes/sql/AliasRoute.test.ts" name="Route:AliasSQL Tests &gt; Can make truncate request (with admin token)." time="0.0329352">
-        </testcase>
-        <testcase classname="test/routes/sql/AliasRoute.test.ts" name="Route:AliasSQL Tests &gt; Can make update request (with admin token)." time="0.0164623">
-        </testcase>
-        <testcase classname="test/routes/sql/AliasRoute.test.ts" name="Route:AliasSQL Tests &gt; Can make update property request (with admin token)." time="0.018198">
-        </testcase>
-    </testsuite>
-    <testsuite name="test/routes/sql/AuthBasicRoute.test.ts" timestamp="2026-07-19T22:33:04.410Z" hostname="Jane" tests="3" failures="0" errors="0" skipped="0" time="1.2177864">
-        <testcase classname="test/routes/sql/AuthBasicRoute.test.ts" name="Route:AuthBasicSQL Tests &gt; Can authenticate with valid user id and password." time="0.1007404">
-        </testcase>
-        <testcase classname="test/routes/sql/AuthBasicRoute.test.ts" name="Route:AuthBasicSQL Tests &gt; Can authenticate with valid user id and password when multiple passwords exist." time="0.1933887">
-        </testcase>
-        <testcase classname="test/routes/sql/AuthBasicRoute.test.ts" name="Route:AuthBasicSQL Tests &gt; Cannot authenticate with invalid user id and password." time="0.0798774">
+        <testcase classname="test/routes/mongo/AuthTOTPRoute.test.ts" name="Route:AuthBasicMongo Tests &gt; Cannot authenticate with invalid user id and totp." time="0.0072917">
             <system-out>
-2026-07-19T22:32:26.486Z [34mdebug[39m: Invalid name or password
+2026-07-20T00:30:55.721Z [34mdebug[39m: Cannot read properties of undefined (reading &apos;length&apos;)
 
             </system-out>
         </testcase>
     </testsuite>
-    <testsuite name="test/routes/sql/AuthFIDO2Route.test.ts" timestamp="2026-07-19T22:33:04.411Z" hostname="Jane" tests="5" failures="0" errors="0" skipped="0" time="1.0267152">
-        <testcase classname="test/routes/sql/AuthFIDO2Route.test.ts" name="Route:AuthFIDO2SQL Tests &gt; Can begin a FIDO2 ceremony and receive challenge options." time="0.0345798">
+    <testsuite name="test/routes/mongo/ProfileRoute.test.ts" timestamp="2026-07-20T00:31:12.252Z" hostname="Jane" tests="8" failures="0" errors="0" skipped="0" time="0.9472439">
+        <testcase classname="test/routes/mongo/ProfileRoute.test.ts" name="Route:ProfileMongo Tests &gt; Can make count request (with admin token)." time="0.0202686">
+        </testcase>
+        <testcase classname="test/routes/mongo/ProfileRoute.test.ts" name="Route:ProfileMongo Tests &gt; Can make create request (with admin token)." time="0.0088171">
+        </testcase>
+        <testcase classname="test/routes/mongo/ProfileRoute.test.ts" name="Route:ProfileMongo Tests &gt; Can make delete request (with admin token)." time="0.0088047">
+        </testcase>
+        <testcase classname="test/routes/mongo/ProfileRoute.test.ts" name="Route:ProfileMongo Tests &gt; Can make findAll request (with admin token)." time="0.0087155">
+        </testcase>
+        <testcase classname="test/routes/mongo/ProfileRoute.test.ts" name="Route:ProfileMongo Tests &gt; Can make findById request (with admin token)." time="0.0056514">
+        </testcase>
+        <testcase classname="test/routes/mongo/ProfileRoute.test.ts" name="Route:ProfileMongo Tests &gt; Can make truncate request (with admin token)." time="0.0094108">
+        </testcase>
+        <testcase classname="test/routes/mongo/ProfileRoute.test.ts" name="Route:ProfileMongo Tests &gt; Can make update request (with admin token)." time="0.0082541">
+        </testcase>
+        <testcase classname="test/routes/mongo/ProfileRoute.test.ts" name="Route:ProfileMongo Tests &gt; Can make update property request (with admin token)." time="0.0082902">
+        </testcase>
+    </testsuite>
+    <testsuite name="test/routes/mongo/SecretRoute.test.ts" timestamp="2026-07-20T00:31:12.253Z" hostname="Jane" tests="20" failures="0" errors="0" skipped="0" time="1.7470337">
+        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Can make count request (with admin token)." time="0.1677435">
+        </testcase>
+        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Can make create request (with admin token)." time="0.0760168">
+        </testcase>
+        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Can make delete request (with admin token)." time="0.0418999">
+        </testcase>
+        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Can make findAll request (with admin token)." time="0.1725641">
+        </testcase>
+        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Can make findById request (with admin token)." time="0.0395766">
+        </testcase>
+        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Can make truncate request (with admin token)." time="0.160771">
+        </testcase>
+        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Cannot begin passkey registration without authentication." time="0.0062692">
             <system-out>
-2026-07-19T22:32:45.264Z [34mdebug[39m: Authentication failed but is required to proceed.
+2026-07-20T00:30:12.498Z [34mdebug[39m: Authentication is required to register a passkey.
 
             </system-out>
         </testcase>
-        <testcase classname="test/routes/sql/AuthFIDO2Route.test.ts" name="Route:AuthFIDO2SQL Tests &gt; Can complete a FIDO2 ceremony with a valid assertion and authenticate." time="0.0385612">
+        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Can begin passkey registration and receive creation options (with admin token)." time="0.0031848">
+        </testcase>
+        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Cannot create a passkey secret without a prior registration ceremony." time="0.0028456">
             <system-out>
-2026-07-19T22:32:45.295Z [34mdebug[39m: Authentication failed but is required to proceed.
+2026-07-20T00:30:12.507Z [34mdebug[39m: No WebAuthn registration ceremony in progress for this session.
 
             </system-out>
         </testcase>
-        <testcase classname="test/routes/sql/AuthFIDO2Route.test.ts" name="Route:AuthFIDO2SQL Tests &gt; Cannot authenticate with an unknown credential id." time="0.0077523">
+        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Can create a passkey secret with a valid registration response (with admin token)." time="0.0069392">
+        </testcase>
+        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Cannot register the same passkey credential twice." time="0.0125984">
             <system-out>
-2026-07-19T22:32:45.313Z [34mdebug[39m: Authentication failed but is required to proceed.
-
-2026-07-19T22:32:45.315Z [34mdebug[39m: FIDO2 authentication failed.
+2026-07-20T00:30:12.525Z [34mdebug[39m: A resource with that identifier already exists.
 
             </system-out>
         </testcase>
-        <testcase classname="test/routes/sql/AuthFIDO2Route.test.ts" name="Route:AuthFIDO2SQL Tests &gt; Cannot authenticate when SimpleWebAuthn fails to verify the assertion." time="0.0146656">
+        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Cannot begin FIDO2 registration without authentication." time="0.0022272">
             <system-out>
-2026-07-19T22:32:45.327Z [34mdebug[39m: Authentication failed but is required to proceed.
-
-2026-07-19T22:32:45.329Z [34mdebug[39m: FIDO2 authentication failed.
+2026-07-20T00:30:12.530Z [34mdebug[39m: Authentication is required to register a FIDO2 security key.
 
             </system-out>
         </testcase>
-        <testcase classname="test/routes/sql/AuthFIDO2Route.test.ts" name="Route:AuthFIDO2SQL Tests &gt; Cannot authenticate with a malformed assertion response." time="0.0062477">
+        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Can begin FIDO2 registration and receive creation options (with admin token)." time="0.0024492">
+        </testcase>
+        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Cannot create a FIDO2 secret without a prior registration ceremony." time="0.0023581">
             <system-out>
-2026-07-19T22:32:45.335Z [34mdebug[39m: No FIDO2 ceremony in progress for this session.
+2026-07-20T00:30:12.534Z [34mdebug[39m: No WebAuthn registration ceremony in progress for this session.
+
+            </system-out>
+        </testcase>
+        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Can create a FIDO2 secret with a valid registration response (with admin token)." time="0.0056369">
+        </testcase>
+        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Cannot register the same FIDO2 credential twice." time="0.0083353">
+            <system-out>
+2026-07-20T00:30:12.549Z [34mdebug[39m: A resource with that identifier already exists.
+
+            </system-out>
+        </testcase>
+        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Can create a TOTP secret with a server-generated secret (with admin token)." time="0.0043957">
+        </testcase>
+        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Can create a TOTP secret with a caller-supplied secret (with admin token)." time="0.0030559">
+        </testcase>
+        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Cannot create a TOTP secret with a secret that is too short." time="0.0020313">
+            <system-out>
+2026-07-20T00:30:12.558Z [34mdebug[39m: A secret of type &apos;totp&apos; must be a Base32-encoded string of at least 128 bits.
+
+            </system-out>
+        </testcase>
+        <testcase classname="test/routes/mongo/SecretRoute.test.ts" name="Route:SecretMongo Tests &gt; Cannot create a TOTP secret with a secret that isn&apos;t valid Base32." time="0.0018357">
+            <system-out>
+2026-07-20T00:30:12.560Z [34mdebug[39m: A secret of type &apos;totp&apos; must be a Base32-encoded string of at least 128 bits.
 
             </system-out>
         </testcase>
     </testsuite>
-    <testsuite name="test/routes/sql/AuthMFARoute.test.ts" timestamp="2026-07-19T22:33:04.412Z" hostname="Jane" tests="5" failures="0" errors="0" skipped="0" time="1.3806356">
-        <testcase classname="test/routes/sql/AuthMFARoute.test.ts" name="Route:AuthMFASQL Tests &gt; Returns the list of available 2FA methods after a valid password check." time="0.1363119">
-            <system-out>
-2026-07-19T22:32:21.380Z [34mdebug[39m: Invalid authentication request.
-
-            </system-out>
+    <testsuite name="test/routes/mongo/UserRoute.test.ts" timestamp="2026-07-20T00:31:12.256Z" hostname="Jane" tests="8" failures="0" errors="0" skipped="0" time="0.9485763">
+        <testcase classname="test/routes/mongo/UserRoute.test.ts" name="Route:UserMongo Tests &gt; Can make count request (with admin token)." time="0.0199009">
         </testcase>
-        <testcase classname="test/routes/sql/AuthMFARoute.test.ts" name="Route:AuthMFASQL Tests &gt; Cannot authenticate phase 1 with an invalid password." time="0.0859386">
-            <system-out>
-2026-07-19T22:32:21.470Z [34mdebug[39m: Invalid authorization request.
-
-            </system-out>
+        <testcase classname="test/routes/mongo/UserRoute.test.ts" name="Route:UserMongo Tests &gt; Can make create request (with admin token)." time="0.0073156">
         </testcase>
-        <testcase classname="test/routes/sql/AuthMFARoute.test.ts" name="Route:AuthMFASQL Tests &gt; Can complete the full 3-phase MFA flow using an OTP contact method." time="0.1225146">
-            <system-out>
-2026-07-19T22:32:21.571Z [34mdebug[39m: Invalid authentication request.
-
-2026-07-19T22:32:21.589Z [34mdebug[39m: Authentication failed but is required to proceed.
-
-            </system-out>
+        <testcase classname="test/routes/mongo/UserRoute.test.ts" name="Route:UserMongo Tests &gt; Can make delete request (with admin token)." time="0.0083934">
         </testcase>
-        <testcase classname="test/routes/sql/AuthMFARoute.test.ts" name="Route:AuthMFASQL Tests &gt; Cannot complete phase 3 with an invalid OTP token." time="0.09404">
-            <system-out>
-2026-07-19T22:32:21.684Z [34mdebug[39m: Invalid authentication request.
-
-2026-07-19T22:32:21.686Z [34mdebug[39m: Authentication failed but is required to proceed.
-
-2026-07-19T22:32:21.688Z [34mdebug[39m: Invalid authentication request.
-
-            </system-out>
+        <testcase classname="test/routes/mongo/UserRoute.test.ts" name="Route:UserMongo Tests &gt; Can make findAll request (with admin token)." time="0.0076551">
         </testcase>
-        <testcase classname="test/routes/sql/AuthMFARoute.test.ts" name="Route:AuthMFASQL Tests &gt; Cannot request a challenge for an unknown method id." time="0.08861">
+        <testcase classname="test/routes/mongo/UserRoute.test.ts" name="Route:UserMongo Tests &gt; Can make findById request (with admin token)." time="0.0053494">
+        </testcase>
+        <testcase classname="test/routes/mongo/UserRoute.test.ts" name="Route:UserMongo Tests &gt; Can make truncate request (with admin token)." time="0.0081927">
+        </testcase>
+        <testcase classname="test/routes/mongo/UserRoute.test.ts" name="Route:UserMongo Tests &gt; Can make update request (with admin token)." time="0.008985">
+        </testcase>
+        <testcase classname="test/routes/mongo/UserRoute.test.ts" name="Route:UserMongo Tests &gt; Can make update property request (with admin token)." time="0.0086822">
+        </testcase>
+    </testsuite>
+    <testsuite name="test/routes/sql/AliasRoute.test.ts" timestamp="2026-07-20T00:31:12.257Z" hostname="Jane" tests="8" failures="0" errors="0" skipped="0" time="1.0626056">
+        <testcase classname="test/routes/sql/AliasRoute.test.ts" name="Route:AliasSQL Tests &gt; Can make count request (with admin token)." time="0.0696948">
+        </testcase>
+        <testcase classname="test/routes/sql/AliasRoute.test.ts" name="Route:AliasSQL Tests &gt; Can make create request (with admin token)." time="0.0139499">
+        </testcase>
+        <testcase classname="test/routes/sql/AliasRoute.test.ts" name="Route:AliasSQL Tests &gt; Can make delete request (with admin token)." time="0.0178029">
+        </testcase>
+        <testcase classname="test/routes/sql/AliasRoute.test.ts" name="Route:AliasSQL Tests &gt; Can make findAll request (with admin token)." time="0.0493722">
+        </testcase>
+        <testcase classname="test/routes/sql/AliasRoute.test.ts" name="Route:AliasSQL Tests &gt; Can make findById request (with admin token)." time="0.0100803">
+        </testcase>
+        <testcase classname="test/routes/sql/AliasRoute.test.ts" name="Route:AliasSQL Tests &gt; Can make truncate request (with admin token)." time="0.0226201">
+        </testcase>
+        <testcase classname="test/routes/sql/AliasRoute.test.ts" name="Route:AliasSQL Tests &gt; Can make update request (with admin token)." time="0.0132239">
+        </testcase>
+        <testcase classname="test/routes/sql/AliasRoute.test.ts" name="Route:AliasSQL Tests &gt; Can make update property request (with admin token)." time="0.0203775">
+        </testcase>
+    </testsuite>
+    <testsuite name="test/routes/sql/AuthBasicRoute.test.ts" timestamp="2026-07-20T00:31:12.258Z" hostname="Jane" tests="3" failures="0" errors="0" skipped="0" time="1.260088">
+        <testcase classname="test/routes/sql/AuthBasicRoute.test.ts" name="Route:AuthBasicSQL Tests &gt; Can authenticate with valid user id and password." time="0.1320858">
+        </testcase>
+        <testcase classname="test/routes/sql/AuthBasicRoute.test.ts" name="Route:AuthBasicSQL Tests &gt; Can authenticate with valid user id and password when multiple passwords exist." time="0.1814471">
+        </testcase>
+        <testcase classname="test/routes/sql/AuthBasicRoute.test.ts" name="Route:AuthBasicSQL Tests &gt; Cannot authenticate with invalid user id and password." time="0.0900022">
             <system-out>
-2026-07-19T22:32:21.774Z [34mdebug[39m: Invalid authentication request.
-
-2026-07-19T22:32:21.776Z [34mdebug[39m: Invalid secondary authentication method.
+2026-07-20T00:30:23.096Z [34mdebug[39m: Invalid name or password
 
             </system-out>
         </testcase>
     </testsuite>
-    <testsuite name="test/routes/sql/AuthOIDCRoute.test.ts" timestamp="2026-07-19T22:33:04.413Z" hostname="Jane" tests="7" failures="0" errors="0" skipped="0" time="0.9982335">
-        <testcase classname="test/routes/sql/AuthOIDCRoute.test.ts" name="Route:AuthOIDCSQL Tests &gt; Redirects to the provider&apos;s authorization URL with the expected parameters." time="0.0409963">
+    <testsuite name="test/routes/sql/AuthFIDO2Route.test.ts" timestamp="2026-07-20T00:31:12.259Z" hostname="Jane" tests="5" failures="0" errors="0" skipped="0" time="0.9248805">
+        <testcase classname="test/routes/sql/AuthFIDO2Route.test.ts" name="Route:AuthFIDO2SQL Tests &gt; Can begin a FIDO2 ceremony and receive challenge options." time="0.0336271">
             <system-out>
-2026-07-19T22:32:40.305Z [34mdebug[39m: Authentication failed but is required to proceed.
+2026-07-20T00:30:44.933Z [34mdebug[39m: Authentication failed but is required to proceed.
 
             </system-out>
         </testcase>
-        <testcase classname="test/routes/sql/AuthOIDCRoute.test.ts" name="Route:AuthOIDCSQL Tests &gt; Can complete the OIDC callback and provision a new user from the provider profile." time="0.0501677">
+        <testcase classname="test/routes/sql/AuthFIDO2Route.test.ts" name="Route:AuthFIDO2SQL Tests &gt; Can complete a FIDO2 ceremony with a valid assertion and authenticate." time="0.0475016">
             <system-out>
-2026-07-19T22:32:40.325Z [34mdebug[39m: Authentication failed but is required to proceed.
+2026-07-20T00:30:44.972Z [34mdebug[39m: Authentication failed but is required to proceed.
 
             </system-out>
         </testcase>
-        <testcase classname="test/routes/sql/AuthOIDCRoute.test.ts" name="Route:AuthOIDCSQL Tests &gt; Can complete the OIDC callback for a returning user without creating a duplicate." time="0.0264846">
+        <testcase classname="test/routes/sql/AuthFIDO2Route.test.ts" name="Route:AuthFIDO2SQL Tests &gt; Cannot authenticate with an unknown credential id." time="0.0077619">
             <system-out>
-2026-07-19T22:32:40.368Z [34mdebug[39m: Authentication failed but is required to proceed.
+2026-07-20T00:30:44.991Z [34mdebug[39m: Authentication failed but is required to proceed.
 
-2026-07-19T22:32:40.383Z [34mdebug[39m: Authentication failed but is required to proceed.
+2026-07-20T00:30:44.993Z [34mdebug[39m: FIDO2 authentication failed.
 
             </system-out>
         </testcase>
-        <testcase classname="test/routes/sql/AuthOIDCRoute.test.ts" name="Route:AuthOIDCSQL Tests &gt; Can recognize a returning user by provider id alone when no verified email is returned." time="0.0338753">
+        <testcase classname="test/routes/sql/AuthFIDO2Route.test.ts" name="Route:AuthFIDO2SQL Tests &gt; Cannot authenticate when SimpleWebAuthn fails to verify the assertion." time="0.0140941">
             <system-out>
-2026-07-19T22:32:40.400Z [34mdebug[39m: Authentication failed but is required to proceed.
+2026-07-20T00:30:45.005Z [34mdebug[39m: Authentication failed but is required to proceed.
 
-2026-07-19T22:32:40.418Z [34mdebug[39m: Authentication failed but is required to proceed.
+2026-07-20T00:30:45.007Z [34mdebug[39m: FIDO2 authentication failed.
 
             </system-out>
         </testcase>
-        <testcase classname="test/routes/sql/AuthOIDCRoute.test.ts" name="Route:AuthOIDCSQL Tests &gt; Links the provider id alias to an existing account found via the email fallback." time="0.0225381">
+        <testcase classname="test/routes/sql/AuthFIDO2Route.test.ts" name="Route:AuthFIDO2SQL Tests &gt; Cannot authenticate with a malformed assertion response." time="0.0065527">
             <system-out>
-2026-07-19T22:32:40.436Z [34mdebug[39m: Authentication failed but is required to proceed.
-
-            </system-out>
-        </testcase>
-        <testcase classname="test/routes/sql/AuthOIDCRoute.test.ts" name="Route:AuthOIDCSQL Tests &gt; Rejects the callback when the state parameter does not match the session (CSRF)." time="0.0112416">
-            <system-out>
-2026-07-19T22:32:40.453Z [34mdebug[39m: Authentication failed but is required to proceed.
-
-2026-07-19T22:32:40.454Z [34mdebug[39m: Invalid or missing state parameter. Possible CSRF attempt.
-
-            </system-out>
-        </testcase>
-        <testcase classname="test/routes/sql/AuthOIDCRoute.test.ts" name="Route:AuthOIDCSQL Tests &gt; Rejects the callback when the provider reports an error." time="0.007608">
-            <system-out>
-2026-07-19T22:32:40.462Z [34mdebug[39m: OIDC provider returned an error: access_denied - User+declined
+2026-07-20T00:30:45.013Z [34mdebug[39m: No FIDO2 ceremony in progress for this session.
 
             </system-out>
         </testcase>
     </testsuite>
-    <testsuite name="test/routes/sql/AuthOTPRoute.test.ts" timestamp="2026-07-19T22:33:04.414Z" hostname="Jane" tests="5" failures="0" errors="0" skipped="0" time="0.925872">
-        <testcase classname="test/routes/sql/AuthOTPRoute.test.ts" name="Route:AuthOTPSQL Tests &gt; Can request and verify an OTP challenge sent to a verified contact." time="0.07865">
+    <testsuite name="test/routes/sql/AuthMFARoute.test.ts" timestamp="2026-07-20T00:31:12.260Z" hostname="Jane" tests="5" failures="0" errors="0" skipped="0" time="1.5036543">
+        <testcase classname="test/routes/sql/AuthMFARoute.test.ts" name="Route:AuthMFASQL Tests &gt; Returns the list of available 2FA methods after a valid password check." time="0.124881">
             <system-out>
-2026-07-19T22:32:56.728Z [34mdebug[39m: Authentication failed but is required to proceed.
+2026-07-20T00:30:17.736Z [34mdebug[39m: Invalid authentication request.
 
             </system-out>
         </testcase>
-        <testcase classname="test/routes/sql/AuthOTPRoute.test.ts" name="Route:AuthOTPSQL Tests &gt; Cannot verify an OTP challenge with an invalid token." time="0.0158618">
+        <testcase classname="test/routes/sql/AuthMFARoute.test.ts" name="Route:AuthMFASQL Tests &gt; Cannot authenticate phase 1 with an invalid password." time="0.0818083">
             <system-out>
-2026-07-19T22:32:56.753Z [34mdebug[39m: Authentication failed but is required to proceed.
-
-2026-07-19T22:32:56.755Z [34mdebug[39m: Invalid authentication request.
+2026-07-20T00:30:17.823Z [34mdebug[39m: Invalid authorization request.
 
             </system-out>
         </testcase>
-        <testcase classname="test/routes/sql/AuthOTPRoute.test.ts" name="Route:AuthOTPSQL Tests &gt; Cannot verify an OTP challenge without first requesting one (no session state)." time="0.0119659">
+        <testcase classname="test/routes/sql/AuthMFARoute.test.ts" name="Route:AuthMFASQL Tests &gt; Can complete the full 3-phase MFA flow using an OTP contact method." time="0.1138498">
             <system-out>
-2026-07-19T22:32:56.767Z [34mdebug[39m: Invalid authentication request.
+2026-07-20T00:30:17.905Z [34mdebug[39m: Invalid authentication request.
+
+2026-07-20T00:30:17.929Z [34mdebug[39m: Authentication failed but is required to proceed.
 
             </system-out>
         </testcase>
-        <testcase classname="test/routes/sql/AuthOTPRoute.test.ts" name="Route:AuthOTPSQL Tests &gt; Cannot request a challenge for an unknown contact id." time="0.006078">
+        <testcase classname="test/routes/sql/AuthMFARoute.test.ts" name="Route:AuthMFASQL Tests &gt; Cannot complete phase 3 with an invalid OTP token." time="0.0827125">
             <system-out>
-2026-07-19T22:32:56.773Z [34mdebug[39m: Authentication failed but is required to proceed.
+2026-07-20T00:30:18.016Z [34mdebug[39m: Invalid authentication request.
+
+2026-07-20T00:30:18.019Z [34mdebug[39m: Authentication failed but is required to proceed.
+
+2026-07-20T00:30:18.020Z [34mdebug[39m: Invalid authentication request.
 
             </system-out>
         </testcase>
-        <testcase classname="test/routes/sql/AuthOTPRoute.test.ts" name="Route:AuthOTPSQL Tests &gt; Cannot authenticate without any request data." time="0.0056105">
+        <testcase classname="test/routes/sql/AuthMFARoute.test.ts" name="Route:AuthMFASQL Tests &gt; Cannot request a challenge for an unknown method id." time="0.0824759">
             <system-out>
-2026-07-19T22:32:56.779Z [34mdebug[39m: Cannot read properties of undefined (reading &apos;id&apos;)
+2026-07-20T00:30:18.100Z [34mdebug[39m: Invalid authentication request.
 
-            </system-out>
-        </testcase>
-    </testsuite>
-    <testsuite name="test/routes/sql/AuthPasskeyRoute.test.ts" timestamp="2026-07-19T22:33:04.415Z" hostname="Jane" tests="5" failures="0" errors="0" skipped="0" time="1.0163727">
-        <testcase classname="test/routes/sql/AuthPasskeyRoute.test.ts" name="Route:AuthPasskeySQL Tests &gt; Can begin a passkey ceremony and receive challenge options." time="0.0392424">
-            <system-out>
-2026-07-19T22:32:58.902Z [34mdebug[39m: Authentication failed but is required to proceed.
-
-            </system-out>
-        </testcase>
-        <testcase classname="test/routes/sql/AuthPasskeyRoute.test.ts" name="Route:AuthPasskeySQL Tests &gt; Can complete a passkey ceremony with a valid assertion and authenticate." time="0.040756">
-            <system-out>
-2026-07-19T22:32:58.935Z [34mdebug[39m: Authentication failed but is required to proceed.
-
-            </system-out>
-        </testcase>
-        <testcase classname="test/routes/sql/AuthPasskeyRoute.test.ts" name="Route:AuthPasskeySQL Tests &gt; Cannot authenticate with an unknown credential id." time="0.0098322">
-            <system-out>
-2026-07-19T22:32:58.956Z [34mdebug[39m: Authentication failed but is required to proceed.
-
-2026-07-19T22:32:58.958Z [34mdebug[39m: Passkey authentication failed.
-
-            </system-out>
-        </testcase>
-        <testcase classname="test/routes/sql/AuthPasskeyRoute.test.ts" name="Route:AuthPasskeySQL Tests &gt; Cannot authenticate when SimpleWebAuthn fails to verify the assertion." time="0.0186016">
-            <system-out>
-2026-07-19T22:32:58.975Z [34mdebug[39m: Authentication failed but is required to proceed.
-
-2026-07-19T22:32:58.977Z [34mdebug[39m: Passkey authentication failed.
-
-            </system-out>
-        </testcase>
-        <testcase classname="test/routes/sql/AuthPasskeyRoute.test.ts" name="Route:AuthPasskeySQL Tests &gt; Cannot authenticate with a malformed assertion response." time="0.0084656">
-            <system-out>
-2026-07-19T22:32:58.985Z [34mdebug[39m: No passkey ceremony in progress for this session.
+2026-07-20T00:30:18.102Z [34mdebug[39m: Invalid secondary authentication method.
 
             </system-out>
         </testcase>
     </testsuite>
-    <testsuite name="test/routes/sql/AuthTOTPRoute.test.ts" timestamp="2026-07-19T22:33:04.416Z" hostname="Jane" tests="3" failures="0" errors="0" skipped="0" time="0.9057473">
-        <testcase classname="test/routes/sql/AuthTOTPRoute.test.ts" name="Route:AuthTOTPSQL Tests &gt; Can authenticate with valid user id and totp." time="0.0396596">
-        </testcase>
-        <testcase classname="test/routes/sql/AuthTOTPRoute.test.ts" name="Route:AuthTOTPSQL Tests &gt; Can authenticate with valid user id and totp when multiple totp secrets exist." time="0.0248804">
-        </testcase>
-        <testcase classname="test/routes/sql/AuthTOTPRoute.test.ts" name="Route:AuthTOTPSQL Tests &gt; Cannot authenticate with invalid user id and totp." time="0.0234536">
+    <testsuite name="test/routes/sql/AuthOIDCRoute.test.ts" timestamp="2026-07-20T00:31:12.261Z" hostname="Jane" tests="7" failures="0" errors="0" skipped="0" time="1.0030666">
+        <testcase classname="test/routes/sql/AuthOIDCRoute.test.ts" name="Route:AuthOIDCSQL Tests &gt; Redirects to the provider&apos;s authorization URL with the expected parameters." time="0.0406331">
             <system-out>
-2026-07-19T22:33:01.347Z [34mdebug[39m: Cannot read properties of undefined (reading &apos;length&apos;)
+2026-07-20T00:30:25.178Z [34mdebug[39m: Authentication failed but is required to proceed.
+
+            </system-out>
+        </testcase>
+        <testcase classname="test/routes/sql/AuthOIDCRoute.test.ts" name="Route:AuthOIDCSQL Tests &gt; Can complete the OIDC callback and provision a new user from the provider profile." time="0.0612259">
+            <system-out>
+2026-07-20T00:30:25.201Z [34mdebug[39m: Authentication failed but is required to proceed.
+
+            </system-out>
+        </testcase>
+        <testcase classname="test/routes/sql/AuthOIDCRoute.test.ts" name="Route:AuthOIDCSQL Tests &gt; Can complete the OIDC callback for a returning user without creating a duplicate." time="0.0302753">
+            <system-out>
+2026-07-20T00:30:25.252Z [34mdebug[39m: Authentication failed but is required to proceed.
+
+2026-07-20T00:30:25.271Z [34mdebug[39m: Authentication failed but is required to proceed.
+
+            </system-out>
+        </testcase>
+        <testcase classname="test/routes/sql/AuthOIDCRoute.test.ts" name="Route:AuthOIDCSQL Tests &gt; Can recognize a returning user by provider id alone when no verified email is returned." time="0.0233694">
+            <system-out>
+2026-07-20T00:30:25.281Z [34mdebug[39m: Authentication failed but is required to proceed.
+
+2026-07-20T00:30:25.295Z [34mdebug[39m: Authentication failed but is required to proceed.
+
+            </system-out>
+        </testcase>
+        <testcase classname="test/routes/sql/AuthOIDCRoute.test.ts" name="Route:AuthOIDCSQL Tests &gt; Links the provider id alias to an existing account found via the email fallback." time="0.0194495">
+            <system-out>
+2026-07-20T00:30:25.311Z [34mdebug[39m: Authentication failed but is required to proceed.
+
+            </system-out>
+        </testcase>
+        <testcase classname="test/routes/sql/AuthOIDCRoute.test.ts" name="Route:AuthOIDCSQL Tests &gt; Rejects the callback when the state parameter does not match the session (CSRF)." time="0.0109455">
+            <system-out>
+2026-07-20T00:30:25.326Z [34mdebug[39m: Authentication failed but is required to proceed.
+
+2026-07-20T00:30:25.327Z [34mdebug[39m: Invalid or missing state parameter. Possible CSRF attempt.
+
+            </system-out>
+        </testcase>
+        <testcase classname="test/routes/sql/AuthOIDCRoute.test.ts" name="Route:AuthOIDCSQL Tests &gt; Rejects the callback when the provider reports an error." time="0.0104759">
+            <system-out>
+2026-07-20T00:30:25.338Z [34mdebug[39m: OIDC provider returned an error: access_denied - User+declined
 
             </system-out>
         </testcase>
     </testsuite>
-    <testsuite name="test/routes/sql/ProfileRoute.test.ts" timestamp="2026-07-19T22:33:04.420Z" hostname="Jane" tests="8" failures="0" errors="0" skipped="0" time="1.138692">
-        <testcase classname="test/routes/sql/ProfileRoute.test.ts" name="Route:ProfileSQL Tests &gt; Can make count request (with admin token)." time="0.0689712">
-        </testcase>
-        <testcase classname="test/routes/sql/ProfileRoute.test.ts" name="Route:ProfileSQL Tests &gt; Can make create request (with admin token)." time="0.0117957">
-        </testcase>
-        <testcase classname="test/routes/sql/ProfileRoute.test.ts" name="Route:ProfileSQL Tests &gt; Can make delete request (with admin token)." time="0.0138714">
-        </testcase>
-        <testcase classname="test/routes/sql/ProfileRoute.test.ts" name="Route:ProfileSQL Tests &gt; Can make findAll request (with admin token)." time="0.0230849">
-        </testcase>
-        <testcase classname="test/routes/sql/ProfileRoute.test.ts" name="Route:ProfileSQL Tests &gt; Can make findById request (with admin token)." time="0.0098011">
-        </testcase>
-        <testcase classname="test/routes/sql/ProfileRoute.test.ts" name="Route:ProfileSQL Tests &gt; Can make truncate request (with admin token)." time="0.0303199">
-        </testcase>
-        <testcase classname="test/routes/sql/ProfileRoute.test.ts" name="Route:ProfileSQL Tests &gt; Can make update request (with admin token)." time="0.0189881">
-        </testcase>
-        <testcase classname="test/routes/sql/ProfileRoute.test.ts" name="Route:ProfileSQL Tests &gt; Can make update property request (with admin token)." time="0.0144696">
-        </testcase>
-    </testsuite>
-    <testsuite name="test/routes/sql/SecretRoute.test.ts" timestamp="2026-07-19T22:33:04.421Z" hostname="Jane" tests="20" failures="0" errors="0" skipped="0" time="1.813035">
-        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Can make count request (with admin token)." time="0.1821332">
-        </testcase>
-        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Can make create request (with admin token)." time="0.0710488">
-        </testcase>
-        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Can make delete request (with admin token)." time="0.046529">
-        </testcase>
-        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Can make findAll request (with admin token)." time="0.1629647">
-        </testcase>
-        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Can make findById request (with admin token)." time="0.0365308">
-        </testcase>
-        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Can make truncate request (with admin token)." time="0.1717129">
-        </testcase>
-        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Cannot begin passkey registration without authentication." time="0.0096912">
+    <testsuite name="test/routes/sql/AuthOTPRoute.test.ts" timestamp="2026-07-20T00:31:12.262Z" hostname="Jane" tests="5" failures="0" errors="0" skipped="0" time="0.9190798">
+        <testcase classname="test/routes/sql/AuthOTPRoute.test.ts" name="Route:AuthOTPSQL Tests &gt; Can request and verify an OTP challenge sent to a verified contact." time="0.062984">
             <system-out>
-2026-07-19T22:32:13.858Z [34mdebug[39m: Authentication is required to register a passkey.
+2026-07-20T00:30:38.479Z [34mdebug[39m: Authentication failed but is required to proceed.
 
             </system-out>
         </testcase>
-        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Can begin passkey registration and receive creation options (with admin token)." time="0.00559">
-        </testcase>
-        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Cannot create a passkey secret without a prior registration ceremony." time="0.0060614">
+        <testcase classname="test/routes/sql/AuthOTPRoute.test.ts" name="Route:AuthOTPSQL Tests &gt; Cannot verify an OTP challenge with an invalid token." time="0.0161972">
             <system-out>
-2026-07-19T22:32:13.873Z [34mdebug[39m: No WebAuthn registration ceremony in progress for this session.
+2026-07-20T00:30:38.504Z [34mdebug[39m: Authentication failed but is required to proceed.
+
+2026-07-20T00:30:38.506Z [34mdebug[39m: Invalid authentication request.
 
             </system-out>
         </testcase>
-        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Can create a passkey secret with a valid registration response (with admin token)." time="0.0126528">
-        </testcase>
-        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Cannot register the same passkey credential twice." time="0.0160821">
+        <testcase classname="test/routes/sql/AuthOTPRoute.test.ts" name="Route:AuthOTPSQL Tests &gt; Cannot verify an OTP challenge without first requesting one (no session state)." time="0.0139813">
             <system-out>
-2026-07-19T22:32:13.901Z [34mdebug[39m: A resource with that identifier already exists.
+2026-07-20T00:30:38.520Z [34mdebug[39m: Invalid authentication request.
 
             </system-out>
         </testcase>
-        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Cannot begin FIDO2 registration without authentication." time="0.0049155">
+        <testcase classname="test/routes/sql/AuthOTPRoute.test.ts" name="Route:AuthOTPSQL Tests &gt; Cannot request a challenge for an unknown contact id." time="0.0064537">
             <system-out>
-2026-07-19T22:32:13.907Z [34mdebug[39m: Authentication is required to register a FIDO2 security key.
+2026-07-20T00:30:38.526Z [34mdebug[39m: Authentication failed but is required to proceed.
 
             </system-out>
         </testcase>
-        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Can begin FIDO2 registration and receive creation options (with admin token)." time="0.0053297">
-        </testcase>
-        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Cannot create a FIDO2 secret without a prior registration ceremony." time="0.0050362">
+        <testcase classname="test/routes/sql/AuthOTPRoute.test.ts" name="Route:AuthOTPSQL Tests &gt; Cannot authenticate without any request data." time="0.0061385">
             <system-out>
-2026-07-19T22:32:13.918Z [34mdebug[39m: No WebAuthn registration ceremony in progress for this session.
-
-            </system-out>
-        </testcase>
-        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Can create a FIDO2 secret with a valid registration response (with admin token)." time="0.0101858">
-        </testcase>
-        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Cannot register the same FIDO2 credential twice." time="0.0125319">
-            <system-out>
-2026-07-19T22:32:13.941Z [34mdebug[39m: A resource with that identifier already exists.
-
-            </system-out>
-        </testcase>
-        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Can create a TOTP secret with a server-generated secret (with admin token)." time="0.0089462">
-        </testcase>
-        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Can create a TOTP secret with a caller-supplied secret (with admin token)." time="0.0078239">
-        </testcase>
-        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Cannot create a TOTP secret with a secret that is too short." time="0.0038969">
-            <system-out>
-2026-07-19T22:32:13.962Z [34mdebug[39m: A secret of type &apos;totp&apos; must be a Base32-encoded string of at least 128 bits.
-
-            </system-out>
-        </testcase>
-        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Cannot create a TOTP secret with a secret that isn&apos;t valid Base32." time="0.0037196">
-            <system-out>
-2026-07-19T22:32:13.965Z [34mdebug[39m: A secret of type &apos;totp&apos; must be a Base32-encoded string of at least 128 bits.
+2026-07-20T00:30:38.532Z [34mdebug[39m: Cannot read properties of undefined (reading &apos;id&apos;)
 
             </system-out>
         </testcase>
     </testsuite>
-    <testsuite name="test/routes/sql/UserRoute.test.ts" timestamp="2026-07-19T22:33:04.423Z" hostname="Jane" tests="8" failures="0" errors="0" skipped="0" time="1.0241576">
-        <testcase classname="test/routes/sql/UserRoute.test.ts" name="Route:UserSQL Tests &gt; Can make count request (with admin token)." time="0.0652091">
+    <testsuite name="test/routes/sql/AuthPasskeyRoute.test.ts" timestamp="2026-07-20T00:31:12.263Z" hostname="Jane" tests="5" failures="0" errors="0" skipped="0" time="0.9581664">
+        <testcase classname="test/routes/sql/AuthPasskeyRoute.test.ts" name="Route:AuthPasskeySQL Tests &gt; Can begin a passkey ceremony and receive challenge options." time="0.0363855">
+            <system-out>
+2026-07-20T00:30:40.634Z [34mdebug[39m: Authentication failed but is required to proceed.
+
+            </system-out>
         </testcase>
-        <testcase classname="test/routes/sql/UserRoute.test.ts" name="Route:UserSQL Tests &gt; Can make create request (with admin token)." time="0.0110469">
+        <testcase classname="test/routes/sql/AuthPasskeyRoute.test.ts" name="Route:AuthPasskeySQL Tests &gt; Can complete a passkey ceremony with a valid assertion and authenticate." time="0.0475332">
+            <system-out>
+2026-07-20T00:30:40.674Z [34mdebug[39m: Authentication failed but is required to proceed.
+
+            </system-out>
         </testcase>
-        <testcase classname="test/routes/sql/UserRoute.test.ts" name="Route:UserSQL Tests &gt; Can make delete request (with admin token)." time="0.0137227">
+        <testcase classname="test/routes/sql/AuthPasskeyRoute.test.ts" name="Route:AuthPasskeySQL Tests &gt; Cannot authenticate with an unknown credential id." time="0.0092725">
+            <system-out>
+2026-07-20T00:30:40.694Z [34mdebug[39m: Authentication failed but is required to proceed.
+
+2026-07-20T00:30:40.696Z [34mdebug[39m: Passkey authentication failed.
+
+            </system-out>
         </testcase>
-        <testcase classname="test/routes/sql/UserRoute.test.ts" name="Route:UserSQL Tests &gt; Can make findAll request (with admin token)." time="0.0273139">
+        <testcase classname="test/routes/sql/AuthPasskeyRoute.test.ts" name="Route:AuthPasskeySQL Tests &gt; Cannot authenticate when SimpleWebAuthn fails to verify the assertion." time="0.0221982">
+            <system-out>
+2026-07-20T00:30:40.715Z [34mdebug[39m: Authentication failed but is required to proceed.
+
+2026-07-20T00:30:40.718Z [34mdebug[39m: Passkey authentication failed.
+
+            </system-out>
         </testcase>
-        <testcase classname="test/routes/sql/UserRoute.test.ts" name="Route:UserSQL Tests &gt; Can make findById request (with admin token)." time="0.0114743">
+        <testcase classname="test/routes/sql/AuthPasskeyRoute.test.ts" name="Route:AuthPasskeySQL Tests &gt; Cannot authenticate with a malformed assertion response." time="0.0091782">
+            <system-out>
+2026-07-20T00:30:40.726Z [34mdebug[39m: No passkey ceremony in progress for this session.
+
+            </system-out>
         </testcase>
-        <testcase classname="test/routes/sql/UserRoute.test.ts" name="Route:UserSQL Tests &gt; Can make truncate request (with admin token)." time="0.0278518">
+    </testsuite>
+    <testsuite name="test/routes/sql/AuthTOTPRoute.test.ts" timestamp="2026-07-20T00:31:12.264Z" hostname="Jane" tests="3" failures="0" errors="0" skipped="0" time="0.9295755">
+        <testcase classname="test/routes/sql/AuthTOTPRoute.test.ts" name="Route:AuthTOTPSQL Tests &gt; Can authenticate with valid user id and totp." time="0.0656452">
         </testcase>
-        <testcase classname="test/routes/sql/UserRoute.test.ts" name="Route:UserSQL Tests &gt; Can make update request (with admin token)." time="0.0136802">
+        <testcase classname="test/routes/sql/AuthTOTPRoute.test.ts" name="Route:AuthTOTPSQL Tests &gt; Can authenticate with valid user id and totp when multiple totp secrets exist." time="0.0213963">
         </testcase>
-        <testcase classname="test/routes/sql/UserRoute.test.ts" name="Route:UserSQL Tests &gt; Can make update property request (with admin token)." time="0.0121851">
+        <testcase classname="test/routes/sql/AuthTOTPRoute.test.ts" name="Route:AuthTOTPSQL Tests &gt; Cannot authenticate with invalid user id and totp." time="0.0150925">
+            <system-out>
+2026-07-20T00:30:53.667Z [34mdebug[39m: Cannot read properties of undefined (reading &apos;length&apos;)
+
+            </system-out>
+        </testcase>
+    </testsuite>
+    <testsuite name="test/routes/sql/ProfileRoute.test.ts" timestamp="2026-07-20T00:31:12.265Z" hostname="Jane" tests="8" failures="0" errors="0" skipped="0" time="1.0180749">
+        <testcase classname="test/routes/sql/ProfileRoute.test.ts" name="Route:ProfileSQL Tests &gt; Can make count request (with admin token)." time="0.0675657">
+        </testcase>
+        <testcase classname="test/routes/sql/ProfileRoute.test.ts" name="Route:ProfileSQL Tests &gt; Can make create request (with admin token)." time="0.0135507">
+        </testcase>
+        <testcase classname="test/routes/sql/ProfileRoute.test.ts" name="Route:ProfileSQL Tests &gt; Can make delete request (with admin token)." time="0.0184892">
+        </testcase>
+        <testcase classname="test/routes/sql/ProfileRoute.test.ts" name="Route:ProfileSQL Tests &gt; Can make findAll request (with admin token)." time="0.0322878">
+        </testcase>
+        <testcase classname="test/routes/sql/ProfileRoute.test.ts" name="Route:ProfileSQL Tests &gt; Can make findById request (with admin token)." time="0.011797">
+        </testcase>
+        <testcase classname="test/routes/sql/ProfileRoute.test.ts" name="Route:ProfileSQL Tests &gt; Can make truncate request (with admin token)." time="0.024621">
+        </testcase>
+        <testcase classname="test/routes/sql/ProfileRoute.test.ts" name="Route:ProfileSQL Tests &gt; Can make update request (with admin token)." time="0.0168597">
+        </testcase>
+        <testcase classname="test/routes/sql/ProfileRoute.test.ts" name="Route:ProfileSQL Tests &gt; Can make update property request (with admin token)." time="0.0131713">
+        </testcase>
+    </testsuite>
+    <testsuite name="test/routes/sql/SecretRoute.test.ts" timestamp="2026-07-20T00:31:12.266Z" hostname="Jane" tests="20" failures="0" errors="0" skipped="0" time="1.9039208">
+        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Can make count request (with admin token)." time="0.218366">
+        </testcase>
+        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Can make create request (with admin token)." time="0.0824143">
+        </testcase>
+        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Can make delete request (with admin token)." time="0.0519705">
+        </testcase>
+        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Can make findAll request (with admin token)." time="0.1704441">
+        </testcase>
+        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Can make findById request (with admin token)." time="0.0383038">
+        </testcase>
+        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Can make truncate request (with admin token)." time="0.1832403">
+        </testcase>
+        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Cannot begin passkey registration without authentication." time="0.0077931">
+            <system-out>
+2026-07-20T00:30:09.451Z [34mdebug[39m: Authentication is required to register a passkey.
+
+            </system-out>
+        </testcase>
+        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Can begin passkey registration and receive creation options (with admin token)." time="0.0046897">
+        </testcase>
+        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Cannot create a passkey secret without a prior registration ceremony." time="0.0045486">
+            <system-out>
+2026-07-20T00:30:09.463Z [34mdebug[39m: No WebAuthn registration ceremony in progress for this session.
+
+            </system-out>
+        </testcase>
+        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Can create a passkey secret with a valid registration response (with admin token)." time="0.0105746">
+        </testcase>
+        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Cannot register the same passkey credential twice." time="0.0140676">
+            <system-out>
+2026-07-20T00:30:09.487Z [34mdebug[39m: A resource with that identifier already exists.
+
+            </system-out>
+        </testcase>
+        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Cannot begin FIDO2 registration without authentication." time="0.005071">
+            <system-out>
+2026-07-20T00:30:09.493Z [34mdebug[39m: Authentication is required to register a FIDO2 security key.
+
+            </system-out>
+        </testcase>
+        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Can begin FIDO2 registration and receive creation options (with admin token)." time="0.0046346">
+        </testcase>
+        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Cannot create a FIDO2 secret without a prior registration ceremony." time="0.0045504">
+            <system-out>
+2026-07-20T00:30:09.502Z [34mdebug[39m: No WebAuthn registration ceremony in progress for this session.
+
+            </system-out>
+        </testcase>
+        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Can create a FIDO2 secret with a valid registration response (with admin token)." time="0.0095045">
+        </testcase>
+        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Cannot register the same FIDO2 credential twice." time="0.0115032">
+            <system-out>
+2026-07-20T00:30:09.524Z [34mdebug[39m: A resource with that identifier already exists.
+
+            </system-out>
+        </testcase>
+        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Can create a TOTP secret with a server-generated secret (with admin token)." time="0.0102967">
+        </testcase>
+        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Can create a TOTP secret with a caller-supplied secret (with admin token)." time="0.0067794">
+        </testcase>
+        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Cannot create a TOTP secret with a secret that is too short." time="0.0037713">
+            <system-out>
+2026-07-20T00:30:09.545Z [34mdebug[39m: A secret of type &apos;totp&apos; must be a Base32-encoded string of at least 128 bits.
+
+            </system-out>
+        </testcase>
+        <testcase classname="test/routes/sql/SecretRoute.test.ts" name="Route:SecretSQL Tests &gt; Cannot create a TOTP secret with a secret that isn&apos;t valid Base32." time="0.0035454">
+            <system-out>
+2026-07-20T00:30:09.548Z [34mdebug[39m: A secret of type &apos;totp&apos; must be a Base32-encoded string of at least 128 bits.
+
+            </system-out>
+        </testcase>
+    </testsuite>
+    <testsuite name="test/routes/sql/UserRoute.test.ts" timestamp="2026-07-20T00:31:12.268Z" hostname="Jane" tests="8" failures="0" errors="0" skipped="0" time="1.0074617">
+        <testcase classname="test/routes/sql/UserRoute.test.ts" name="Route:UserSQL Tests &gt; Can make count request (with admin token)." time="0.0683538">
+        </testcase>
+        <testcase classname="test/routes/sql/UserRoute.test.ts" name="Route:UserSQL Tests &gt; Can make create request (with admin token)." time="0.0159834">
+        </testcase>
+        <testcase classname="test/routes/sql/UserRoute.test.ts" name="Route:UserSQL Tests &gt; Can make delete request (with admin token)." time="0.0183605">
+        </testcase>
+        <testcase classname="test/routes/sql/UserRoute.test.ts" name="Route:UserSQL Tests &gt; Can make findAll request (with admin token)." time="0.0248048">
+        </testcase>
+        <testcase classname="test/routes/sql/UserRoute.test.ts" name="Route:UserSQL Tests &gt; Can make findById request (with admin token)." time="0.0098639">
+        </testcase>
+        <testcase classname="test/routes/sql/UserRoute.test.ts" name="Route:UserSQL Tests &gt; Can make truncate request (with admin token)." time="0.0297639">
+        </testcase>
+        <testcase classname="test/routes/sql/UserRoute.test.ts" name="Route:UserSQL Tests &gt; Can make update request (with admin token)." time="0.0151211">
+        </testcase>
+        <testcase classname="test/routes/sql/UserRoute.test.ts" name="Route:UserSQL Tests &gt; Can make update property request (with admin token)." time="0.0126877">
         </testcase>
     </testsuite>
 </testsuites>

@@ -1,0 +1,119 @@
+///////////////////////////////////////////////////////////////////////////////
+// Copyright (C) 2026 Jean-Philippe Steinmetz
+///////////////////////////////////////////////////////////////////////////////
+// Isolated unit tests for BaseAuthTOTPRoute — no HTTP server, no database.
+import { RepoUtils } from "@rapidrest/service-core";
+import { TOTPStrategy } from "../../src/auth/TOTPStrategy.js";
+import { BaseAuthTOTPRoute } from "../../src/routes/BaseAuthTOTPRoute.js";
+import { UserUtils } from "../../src/routes/UserUtils.js";
+import { SecretType } from "../../src/models/types.js";
+
+class FakeSecretClass {
+    static readonly name = "FakeSecret";
+}
+class FakeUserClass {
+    static readonly name = "FakeUser";
+}
+class FakeAliasClass {
+    static readonly name = "FakeAlias";
+}
+
+class TestAuthTOTPRoute extends BaseAuthTOTPRoute<any, any, any> {
+    protected aliasClass: any = FakeAliasClass;
+    protected secretClass: any = FakeSecretClass;
+    protected userClass: any = FakeUserClass;
+}
+
+function makeMockObjectFactory(secretRepo: any, userUtils: any) {
+    const newInstance = vi.fn(async (type: any, opts: any) => {
+        if (type === RepoUtils) {
+            return secretRepo;
+        }
+        if (type === UserUtils) {
+            return userUtils;
+        }
+        if (type === TOTPStrategy) {
+            return new TOTPStrategy(opts.args[0]);
+        }
+        return undefined;
+    });
+    return { newInstance };
+}
+
+describe("BaseAuthTOTPRoute Tests", () => {
+    it("Throws during initialize() if authMiddleware was not injected.", async () => {
+        const route = new TestAuthTOTPRoute();
+        (route as any).objectFactory = makeMockObjectFactory({}, {});
+
+        await expect((route as any).initialize()).rejects.toThrow(/authMiddleware is not set/);
+    });
+
+    it("Throws during initialize() if objectFactory was not injected.", async () => {
+        const route = new TestAuthTOTPRoute();
+        (route as any).authMiddleware = { register: vi.fn() };
+
+        await expect((route as any).initialize()).rejects.toThrow(/objectFactory is not set/);
+    });
+
+    it("Does not recreate secretRepo/userUtils if initialize() runs again.", async () => {
+        const route = new TestAuthTOTPRoute();
+        (route as any).authMiddleware = { register: vi.fn() };
+        (route as any).objectFactory = makeMockObjectFactory({}, {});
+        const existingSecretRepo = { find: vi.fn() };
+        const existingUserUtils = { lookup: vi.fn() };
+        (route as any).secretRepo = existingSecretRepo;
+        (route as any).userUtils = existingUserUtils;
+
+        await (route as any).initialize();
+
+        expect((route as any).secretRepo).toBe(existingSecretRepo);
+        expect((route as any).userUtils).toBe(existingUserUtils);
+    });
+
+    it("Registers a TOTPStrategy under its name once initialized.", async () => {
+        const register = vi.fn();
+        const route = new TestAuthTOTPRoute();
+        (route as any).authMiddleware = { register };
+        (route as any).objectFactory = makeMockObjectFactory({}, {});
+
+        await (route as any).initialize();
+
+        expect(register).toHaveBeenCalledWith("totp", expect.any(TOTPStrategy));
+    });
+
+    describe("getSecrets", () => {
+        it("Throws if secretRepo is not set.", async () => {
+            const route = new TestAuthTOTPRoute();
+            await expect((route as any).getSecrets("user-1")).rejects.toThrow(/secretRepo is not set/);
+        });
+
+        it("Returns the .data of each matching secret.", async () => {
+            const route = new TestAuthTOTPRoute();
+            const find = vi.fn().mockResolvedValue([{ data: { secret: "AAAA" } }, { data: { secret: "BBBB" } }]);
+            (route as any).secretRepo = { find };
+
+            const result = await (route as any).getSecrets("user-1");
+
+            expect(find).toHaveBeenCalledWith({ type: SecretType.TOTP, userUid: "user-1" }, { ignoreACL: true });
+            expect(result).toEqual([{ secret: "AAAA" }, { secret: "BBBB" }]);
+        });
+    });
+
+    describe("getUser", () => {
+        it("Throws if userUtils is not set.", async () => {
+            const route = new TestAuthTOTPRoute();
+            await expect((route as any).getUser("user-1")).rejects.toThrow(/userUtils is not set/);
+        });
+
+        it("Delegates to userUtils.lookup().", async () => {
+            const route = new TestAuthTOTPRoute();
+            const lookup = vi.fn().mockResolvedValue({ uid: "user-1" });
+            (route as any).userUtils = { lookup };
+
+            const result = await (route as any).getUser("user-1");
+
+            expect(lookup).toHaveBeenCalledWith("user-1");
+            expect(result).toEqual({ uid: "user-1" });
+        });
+    });
+});

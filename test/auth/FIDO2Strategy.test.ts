@@ -328,4 +328,39 @@ describe("FIDO2Strategy Tests", () => {
         const res = makeRes();
         expect(() => strategy.authenticateSync(req, res)).toThrow(/Not supported/);
     });
+
+    it("Dispatches to verify() when the body has a response but no id.", async () => {
+        const req = makeReq({ body: { response: {} }, session: { challenge: "stored-challenge" } });
+
+        await expect(strategy.authenticate(req, undefined as any)).rejects.toThrow(/Malformed/);
+        expect(options.getCredentialById).not.toHaveBeenCalled();
+    });
+
+    describe("Default FIDO2StrategyOptions", () => {
+        const defaultOptions = new FIDO2StrategyOptions(makeConfig());
+
+        it("getCredentialById throws if the consumer forgot to override it.", async () => {
+            await expect(defaultOptions.getCredentialById("cred-id-1")).rejects.toThrow(
+                /Did you forget to override FIDO2StrategyOptions.getCredentialById/,
+            );
+        });
+
+        it("getCredentials throws if the consumer forgot to override it.", async () => {
+            await expect(defaultOptions.getCredentials("user-uid-1")).rejects.toThrow(
+                /Did you forget to override FIDO2StrategyOptions.getCredentials/,
+            );
+        });
+
+        it("updateCredentialCounter throws if the consumer forgot to override it.", async () => {
+            await expect(defaultOptions.updateCredentialCounter("cred-id-1", 1)).rejects.toThrow(
+                /Did you forget to override FIDO2StrategyOptions.updateCredentialCounter/,
+            );
+        });
+
+        it("getUser throws if the consumer forgot to override it.", () => {
+            expect(() => defaultOptions.getUser("user-uid-1")).toThrow(
+                /Did you forget to override FIDO2StrategyOptions.getUser/,
+            );
+        });
+    });
 });

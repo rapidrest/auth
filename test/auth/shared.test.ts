@@ -1,0 +1,612 @@
+///////////////////////////////////////////////////////////////////////////////
+// Copyright (C) 2026 Jean-Philippe Steinmetz
+///////////////////////////////////////////////////////////////////////////////
+// Isolated unit tests for the shared.ts auth helpers. otplib is real (it's already exercised this
+// way throughout the auth test suites); @simplewebauthn/server is mocked since its own cryptographic
+// correctness is that library's tested responsibility, not ours.
+vi.mock("@simplewebauthn/server", () => ({
+    generateAuthenticationOptions: vi.fn(),
+    verifyAuthenticationResponse: vi.fn(),
+    generateRegistrationOptions: vi.fn(),
+    verifyRegistrationResponse: vi.fn(),
+}));
+
+import type { HttpRequest } from "@rapidrest/service-core";
+import * as otplib from "otplib";
+import {
+    generateAuthenticationOptions,
+    verifyAuthenticationResponse,
+    generateRegistrationOptions,
+    verifyRegistrationResponse,
+} from "@simplewebauthn/server";
+import {
+    generateOTP,
+    generatePasskeyChallenge,
+    generatePasskeyRegistrationOptions,
+    generateTOTP,
+    generateTOTPURI,
+    getBasicData,
+    getRequestData,
+    isOTPResponse,
+    isPasskeyRegistrationResponse,
+    isPasskeyResponse,
+    isValidTOTPSecret,
+    obfuscateContact,
+    verifyOTP,
+    verifyPasskeyChallenge,
+    verifyPasskeyRegistrationResponse,
+    verifyTOTP,
+} from "../../src/auth/shared.js";
+import {
+    OTPContactType,
+    PasskeyConfig,
+    StoredPasskeyCredential,
+    TOTPConfig,
+    TOTPSecret,
+} from "../../src/auth/types.js";
+
+const mockGenerateAuthenticationOptions = generateAuthenticationOptions as unknown as ReturnType<typeof vi.fn>;
+const mockVerifyAuthenticationResponse = verifyAuthenticationResponse as unknown as ReturnType<typeof vi.fn>;
+const mockGenerateRegistrationOptions = generateRegistrationOptions as unknown as ReturnType<typeof vi.fn>;
+const mockVerifyRegistrationResponse = verifyRegistrationResponse as unknown as ReturnType<typeof vi.fn>;
+
+function makeReq(overrides: Partial<HttpRequest> = {}): HttpRequest {
+    return {
+        method: "GET",
+        path: "/auth",
+        url: "/auth",
+        headers: {},
+        params: {},
+        query: {},
+        body: undefined,
+        cookies: {},
+        signedCookies: {},
+        session: {},
+        socket: {},
+        ...overrides,
+    };
+}
+
+function makePasskeyConfig(overrides: Partial<PasskeyConfig> = {}): PasskeyConfig {
+    return {
+        rpName: "Test RP",
+        rpID: "example.com",
+        origin: "https://example.com",
+        ...overrides,
+    };
+}
+
+beforeEach(() => {
+    mockGenerateAuthenticationOptions.mockReset();
+    mockVerifyAuthenticationResponse.mockReset();
+    mockGenerateRegistrationOptions.mockReset();
+    mockVerifyRegistrationResponse.mockReset();
+});
+
+describe("getBasicData", () => {
+    it("Returns undefined when the header key is not present.", () => {
+        const req = makeReq({ headers: {} });
+        expect(getBasicData(req)).toBeUndefined();
+    });
+
+    it("Returns undefined when the header key is present but its value is nullish.", () => {
+        const req = makeReq({ headers: { authorization: undefined } });
+        expect(getBasicData(req)).toBeUndefined();
+    });
+
+    it("Parses a single matching header into {id, password}.", () => {
+        const req = makeReq({ headers: { authorization: `basic ${Buffer.from("user1:pass1").toString("base64")}` } });
+        expect(getBasicData(req)).toEqual({ id: "user1", password: "pass1" });
+    });
+
+    it("Finds the matching header among an array of header values.", () => {
+        const req = makeReq({
+            headers: {
+                authorization: [
+                    `bearer ${Buffer.from("irrelevant").toString("base64")}`,
+                    `basic ${Buffer.from("user1:pass1").toString("base64")}`,
+                ],
+            },
+        });
+        expect(getBasicData(req)).toEqual({ id: "user1", password: "pass1" });
+    });
+
+    it("Skips a malformed header value (not exactly scheme + credentials).", () => {
+        const req = makeReq({ headers: { authorization: "malformed-no-space-here" } });
+        expect(getBasicData(req)).toBeUndefined();
+    });
+
+    it("Skips a header whose scheme does not match.", () => {
+        const req = makeReq({ headers: { authorization: `bearer ${Buffer.from("user1:pass1").toString("base64")}` } });
+        expect(getBasicData(req)).toBeUndefined();
+    });
+
+    it("Supports a custom headerKey/headerScheme.", () => {
+        const req = makeReq({ headers: { "x-auth": `custom ${Buffer.from("user1:pass1").toString("base64")}` } });
+        expect(getBasicData(req, "x-auth", "custom")).toEqual({ id: "user1", password: "pass1" });
+    });
+});
+
+describe("getRequestData", () => {
+    it("Uses the request body directly when it is an object.", () => {
+        const req = makeReq({ body: { id: "user1", password: "pass1" } });
+        const { data, payload } = getRequestData(req);
+        expect(data).toEqual({ id: "user1", password: "pass1" });
+        expect(payload).toEqual({ id: "user1", password: "pass1" });
+    });
+
+    it("Parses a JSON string body.", () => {
+        const req = makeReq({ body: JSON.stringify({ id: "user1", token: "123456" }) });
+        const { payload } = getRequestData(req);
+        expect(payload).toEqual({ id: "user1", token: "123456" });
+    });
+
+    it("Falls back to form-data parsing when the body is a non-JSON string.", () => {
+        const req = makeReq({ body: "id=user1&token=123456" });
+        const { payload } = getRequestData(req);
+        expect(payload).toEqual({ id: "user1", token: "123456" });
+    });
+
+    it("Falls back to colon parsing when the non-JSON string body has no '&'.", () => {
+        const req = makeReq({ body: "user1:pass1" });
+        const { payload } = getRequestData(req);
+        expect(payload).toEqual({ id: "user1", password: "pass1" });
+    });
+
+    it("Returns an empty payload object for a non-JSON string body with neither '&' nor ':'.", () => {
+        const req = makeReq({ body: "justastring" });
+        const { payload } = getRequestData(req);
+        expect(payload).toEqual({});
+    });
+
+    it("Reads from the header when there is no body.", () => {
+        const req = makeReq({ headers: { authorization: `basic ${Buffer.from("user1:pass1").toString("base64")}` } });
+        const { payload } = getRequestData(req);
+        expect(payload).toEqual({ id: "user1", password: "pass1" });
+    });
+
+    it("Finds the matching header among an array of header values.", () => {
+        const req = makeReq({
+            headers: {
+                authorization: [
+                    `bearer ${Buffer.from("irrelevant").toString("base64")}`,
+                    `basic ${Buffer.from("id=user1&token=123456").toString("base64")}`,
+                ],
+            },
+        });
+        const { payload } = getRequestData(req);
+        expect(payload).toEqual({ id: "user1", token: "123456" });
+    });
+
+    it("Skips a malformed header value.", () => {
+        const req = makeReq({ headers: { authorization: "malformed-no-space" } });
+        const { payload } = getRequestData(req);
+        expect(payload).toBeUndefined();
+    });
+
+    it("Finds no data when the header key is present but its value is nullish.", () => {
+        const req = makeReq({ headers: { authorization: undefined } });
+        const { data, payload } = getRequestData(req);
+        expect(data).toBeUndefined();
+        expect(payload).toBeUndefined();
+    });
+
+    it("Treats a form-data key with no '=value' part as undefined.", () => {
+        const req = makeReq({ body: "flag&id=user1" });
+        const { payload } = getRequestData(req);
+        expect(payload).toEqual({ flag: undefined, id: "user1" });
+    });
+
+    it("Skips a header whose scheme does not match.", () => {
+        const req = makeReq({ headers: { authorization: `bearer ${Buffer.from("user1:pass1").toString("base64")}` } });
+        const { payload } = getRequestData(req);
+        expect(payload).toBeUndefined();
+    });
+
+    it("Skips the header search entirely when headerKey is an empty string.", () => {
+        const req = makeReq({ headers: { authorization: `basic ${Buffer.from("user1:pass1").toString("base64")}` } });
+        const { data, payload } = getRequestData(req, "");
+        expect(data).toBeUndefined();
+        expect(payload).toBeUndefined();
+    });
+
+    it("Compiles and caches the scheme regex on first use of a not-yet-seen headerScheme.", () => {
+        // Uses a scheme unique to this test so the module-level regex cache is genuinely empty for
+        // it, regardless of what earlier tests in this file (or getBasicData's own copy of the same
+        // cache) have already warmed up.
+        const req = makeReq({
+            headers: { authorization: `never-before-seen-scheme ${Buffer.from("user1:pass1").toString("base64")}` },
+        });
+        const { payload } = getRequestData(req, "authorization", "never-before-seen-scheme");
+        expect(payload).toEqual({ id: "user1", password: "pass1" });
+    });
+});
+
+describe("isOTPResponse", () => {
+    it("Returns true when both id and token are present.", () => {
+        expect(isOTPResponse({ id: "user1", token: "123456" })).toBeTruthy();
+    });
+
+    it("Returns false when token is missing.", () => {
+        expect(isOTPResponse({ id: "user1" })).toBeFalsy();
+    });
+});
+
+describe("isPasskeyResponse", () => {
+    function makeAssertionBody(overrides: any = {}) {
+        return {
+            id: "cred-id-1",
+            rawId: "cred-id-1",
+            response: {
+                clientDataJSON: "clientDataJSON-base64",
+                authenticatorData: "authenticatorData-base64",
+                signature: "signature-base64",
+            },
+            type: "public-key",
+            clientExtensionResults: {},
+            ...overrides,
+        };
+    }
+
+    it("Returns true for a well-formed assertion response.", () => {
+        expect(isPasskeyResponse(makeAssertionBody())).toBe(true);
+    });
+
+    it("Returns false when id is not a string.", () => {
+        expect(isPasskeyResponse(makeAssertionBody({ id: 123 }))).toBe(false);
+    });
+
+    it("Returns false when clientDataJSON is missing.", () => {
+        expect(isPasskeyResponse(makeAssertionBody({ response: { authenticatorData: "x", signature: "y" } }))).toBe(
+            false,
+        );
+    });
+
+    it("Returns false when authenticatorData is missing.", () => {
+        expect(isPasskeyResponse(makeAssertionBody({ response: { clientDataJSON: "x", signature: "y" } }))).toBe(false);
+    });
+
+    it("Returns false when signature is missing.", () => {
+        expect(
+            isPasskeyResponse(makeAssertionBody({ response: { clientDataJSON: "x", authenticatorData: "y" } })),
+        ).toBe(false);
+    });
+});
+
+describe("isPasskeyRegistrationResponse", () => {
+    function makeRegistrationBody(overrides: any = {}) {
+        return {
+            id: "cred-id-1",
+            rawId: "cred-id-1",
+            response: {
+                clientDataJSON: "clientDataJSON-base64",
+                attestationObject: "attestationObject-base64",
+            },
+            type: "public-key",
+            clientExtensionResults: {},
+            ...overrides,
+        };
+    }
+
+    it("Returns true for a well-formed registration response.", () => {
+        expect(isPasskeyRegistrationResponse(makeRegistrationBody())).toBe(true);
+    });
+
+    it("Returns false when the response is nullish.", () => {
+        expect(isPasskeyRegistrationResponse(undefined)).toBe(false);
+    });
+
+    it("Returns false when id is not a string.", () => {
+        expect(isPasskeyRegistrationResponse(makeRegistrationBody({ id: 123 }))).toBe(false);
+    });
+
+    it("Returns false when clientDataJSON is missing.", () => {
+        expect(isPasskeyRegistrationResponse(makeRegistrationBody({ response: { attestationObject: "x" } }))).toBe(
+            false,
+        );
+    });
+
+    it("Returns false when attestationObject is missing.", () => {
+        expect(isPasskeyRegistrationResponse(makeRegistrationBody({ response: { clientDataJSON: "x" } }))).toBe(false);
+    });
+});
+
+describe("obfuscateContact", () => {
+    it("Obfuscates an email address.", () => {
+        expect(obfuscateContact("john.smith@gmail.com", OTPContactType.EMAIL)).toBe("j***th@gmail.com");
+    });
+
+    it("Obfuscates a phone number.", () => {
+        expect(obfuscateContact("8188675309", OTPContactType.SMS)).toBe("******5309");
+    });
+
+    it("Returns the contact unchanged for an unrecognized type.", () => {
+        expect(obfuscateContact("some-value", "bogus" as OTPContactType)).toBe("some-value");
+    });
+});
+
+describe("OTP helpers", () => {
+    describe("generateOTP", () => {
+        it("Throws if req.session is missing.", async () => {
+            const req = makeReq({ session: undefined });
+            await expect(generateOTP(req)).rejects.toThrow(/session support/);
+        });
+
+        it("Derives requestData from the request itself when not provided.", async () => {
+            const req = makeReq({ body: { id: "contact-1" } });
+            await generateOTP(req);
+            expect((req.session as any).id).toBe("contact-1");
+        });
+
+        it("Stores the generated secret/token/id in the session.", async () => {
+            const req = makeReq();
+            const token = await generateOTP(req, { id: "contact-1" });
+            expect(token).toBeDefined();
+            expect((req.session as any).id).toBe("contact-1");
+            expect((req.session as any).secret).toBeDefined();
+            expect((req.session as any).token).toBe(token);
+        });
+    });
+
+    describe("verifyOTP", () => {
+        it("Throws if req.session is missing.", async () => {
+            const req = makeReq({ session: undefined });
+            await expect(verifyOTP(req, { id: "c", token: "123456" })).rejects.toThrow(/session support/);
+        });
+
+        it("Derives payload from the request itself when not provided.", async () => {
+            const req = makeReq({
+                session: { id: "c", secret: otplib.generateSecret() },
+                body: { id: "c", token: "000000" },
+            });
+            const result = await verifyOTP(req);
+            expect(result).toBe(false);
+        });
+
+        it("Throws when the payload is not a valid OTP response shape.", async () => {
+            const req = makeReq({ session: {} });
+            await expect(verifyOTP(req, { id: "c" })).rejects.toThrow(/Invalid authentication request/);
+        });
+
+        it("Throws when the session id does not match the payload id.", async () => {
+            const req = makeReq({ session: { id: "other" } });
+            await expect(verifyOTP(req, { id: "c", token: "123456" })).rejects.toThrow(
+                /Invalid authentication request/,
+            );
+        });
+
+        it("Returns true for a valid token.", async () => {
+            const secret = otplib.generateSecret();
+            const token = await otplib.generate({ secret });
+            const req = makeReq({ session: { id: "c", secret } });
+            const result = await verifyOTP(req, { id: "c", token });
+            expect(result).toBe(true);
+        });
+
+        it("Returns false for an invalid token.", async () => {
+            const req = makeReq({ session: { id: "c", secret: otplib.generateSecret() } });
+            const result = await verifyOTP(req, { id: "c", token: "000000" });
+            expect(result).toBe(false);
+        });
+    });
+});
+
+describe("Passkey helpers", () => {
+    describe("generatePasskeyChallenge", () => {
+        it("Throws if req.session is missing.", async () => {
+            const req = makeReq({ session: undefined });
+            await expect(generatePasskeyChallenge(makePasskeyConfig(), req)).rejects.toThrow(/session support/);
+        });
+
+        it("Stores the returned challenge in the session.", async () => {
+            mockGenerateAuthenticationOptions.mockResolvedValue({ challenge: "chal-123" });
+            const req = makeReq();
+            const result = await generatePasskeyChallenge(makePasskeyConfig(), req);
+            expect(result).toEqual({ challenge: "chal-123" });
+            expect((req.session as any).challenge).toBe("chal-123");
+        });
+    });
+
+    describe("verifyPasskeyChallenge", () => {
+        const credential: StoredPasskeyCredential = {
+            id: "cred-1",
+            uid: "user-1",
+            publicKey: new Uint8Array([1, 2, 3]),
+            counter: 5,
+            transports: ["usb"],
+        };
+
+        it("Throws when the stored counter is not finite.", async () => {
+            await expect(
+                verifyPasskeyChallenge({ ...credential, counter: NaN }, makePasskeyConfig(), "chal", {}),
+            ).rejects.toThrow(/invalid counter/);
+            expect(mockVerifyAuthenticationResponse).not.toHaveBeenCalled();
+        });
+
+        it("Delegates to verifyAuthenticationResponse with the expected shape.", async () => {
+            mockVerifyAuthenticationResponse.mockResolvedValue({ verified: true });
+            const payload = { id: "cred-1" };
+            const result = await verifyPasskeyChallenge(credential, makePasskeyConfig(), "chal", payload);
+            expect(result).toEqual({ verified: true });
+            expect(mockVerifyAuthenticationResponse).toHaveBeenCalledWith({
+                response: payload,
+                expectedChallenge: "chal",
+                expectedOrigin: "https://example.com",
+                expectedRPID: "example.com",
+                credential: { id: "cred-1", counter: 5, publicKey: credential.publicKey, transports: ["usb"] },
+                requireUserVerification: true,
+            });
+        });
+    });
+
+    describe("generatePasskeyRegistrationOptions", () => {
+        it("Throws if req.session is missing.", async () => {
+            const req = makeReq({ session: undefined });
+            await expect(
+                generatePasskeyRegistrationOptions(makePasskeyConfig(), req, { id: "user-1", name: "test" }),
+            ).rejects.toThrow(/session support/);
+        });
+
+        it("Stores the returned challenge in the session.", async () => {
+            mockGenerateRegistrationOptions.mockResolvedValue({ challenge: "reg-chal-1" });
+            const req = makeReq();
+            const result = await generatePasskeyRegistrationOptions(makePasskeyConfig(), req, {
+                id: "user-1",
+                name: "test",
+            });
+            expect(result).toEqual({ challenge: "reg-chal-1" });
+            expect((req.session as any).challenge).toBe("reg-chal-1");
+        });
+    });
+
+    describe("verifyPasskeyRegistrationResponse", () => {
+        it("Delegates to verifyRegistrationResponse with the expected shape.", async () => {
+            mockVerifyRegistrationResponse.mockResolvedValue({ verified: true });
+            const payload = { id: "cred-1" };
+            const result = await verifyPasskeyRegistrationResponse(makePasskeyConfig(), "reg-chal-1", payload);
+            expect(result).toEqual({ verified: true });
+            expect(mockVerifyRegistrationResponse).toHaveBeenCalledWith({
+                response: payload,
+                expectedChallenge: "reg-chal-1",
+                expectedOrigin: "https://example.com",
+                expectedRPID: "example.com",
+                requireUserVerification: true,
+            });
+        });
+    });
+});
+
+describe("TOTP helpers", () => {
+    describe("generateTOTP", () => {
+        it("Throws if req.session is missing.", async () => {
+            const req = makeReq({ session: undefined });
+            await expect(generateTOTP(req)).rejects.toThrow(/session support/);
+        });
+
+        it("Derives requestData from the request itself when not provided.", async () => {
+            const req = makeReq({ body: { id: "user-1" } });
+            const token = await generateTOTP(req);
+            expect(token).toBeDefined();
+            expect((req.session as any).id).toBe("user-1");
+        });
+
+        it("Stores the generated secret/token/id in the session.", async () => {
+            const req = makeReq();
+            const token = await generateTOTP(req, { id: "user-1" });
+            expect(token).toBeDefined();
+            expect((req.session as any).id).toBe("user-1");
+            expect((req.session as any).secret).toBeDefined();
+            expect((req.session as any).token).toBe(token);
+        });
+    });
+
+    describe("verifyTOTP", () => {
+        it("Returns the verification result for a single valid secret.", async () => {
+            const secret: TOTPSecret = { secret: otplib.generateSecret() };
+            const token = await otplib.generate(secret);
+            const result = await verifyTOTP(token, secret);
+            expect(result?.valid).toBe(true);
+        });
+
+        it("Checks each secret in an array until one is valid.", async () => {
+            const badSecret: TOTPSecret = { secret: otplib.generateSecret() };
+            const goodSecret: TOTPSecret = { secret: otplib.generateSecret() };
+            const token = await otplib.generate(goodSecret);
+            const result = await verifyTOTP(token, [badSecret, goodSecret]);
+            expect(result?.valid).toBe(true);
+        });
+
+        it("Returns undefined when no secret validates the token.", async () => {
+            const secret: TOTPSecret = { secret: otplib.generateSecret() };
+            const result = await verifyTOTP("000000", secret);
+            expect(result).toBeUndefined();
+        });
+    });
+
+    describe("isValidTOTPSecret", () => {
+        it("Returns false for a non-string value.", async () => {
+            expect(await isValidTOTPSecret(12345)).toBe(false);
+        });
+
+        it("Returns false for an empty string.", async () => {
+            expect(await isValidTOTPSecret("")).toBe(false);
+        });
+
+        it("Returns false for a string that isn't valid Base32.", async () => {
+            expect(await isValidTOTPSecret("not-valid-base32!!!")).toBe(false);
+        });
+
+        it("Returns false for a Base32 string decoding to fewer than 128 bits.", async () => {
+            expect(await isValidTOTPSecret("AAAAAAAA")).toBe(false);
+        });
+
+        it("Returns true for a Base32 string decoding to at least 128 bits.", async () => {
+            expect(await isValidTOTPSecret(otplib.generateSecret())).toBe(true);
+        });
+    });
+
+    describe("generateTOTPURI", () => {
+        const config: TOTPConfig = { issuer: "rapidrest", digits: 6, period: 30, algorithm: "sha1" };
+
+        it("Uses the issuer config defaults when the secret has no per-secret overrides.", async () => {
+            const secret: TOTPSecret = { secret: otplib.generateSecret() };
+            const uri = await generateTOTPURI(config, "user1", secret);
+            expect(uri).toContain("otpauth://totp/");
+            expect(uri).toContain("issuer=rapidrest");
+        });
+
+        it("Prefers the secret's own algorithm/digits/period over the issuer config's.", async () => {
+            const secret: TOTPSecret = {
+                secret: otplib.generateSecret(),
+                algorithm: "sha256",
+                digits: 8,
+                period: 60,
+            };
+            const uri = await generateTOTPURI(config, "user1", secret);
+            expect(uri).toContain("algorithm=SHA256");
+            expect(uri).toContain("digits=8");
+            expect(uri).toContain("period=60");
+        });
+    });
+});
+
+describe("Library imports", () => {
+    it("importArgon2 throws a helpful error when argon2 cannot be imported.", async () => {
+        vi.doMock("argon2", () => {
+            throw new Error("Cannot find module 'argon2'");
+        });
+        vi.resetModules();
+        const { importArgon2: freshImportArgon2 } = await import("../../src/auth/shared.js");
+
+        await expect(freshImportArgon2()).rejects.toThrow(/optional peer dependency 'argon2'/);
+
+        vi.doUnmock("argon2");
+        vi.resetModules();
+    });
+
+    it("importOTPLib throws a helpful error when otplib cannot be imported.", async () => {
+        vi.doMock("otplib", () => {
+            throw new Error("Cannot find module 'otplib'");
+        });
+        vi.resetModules();
+        const { importOTPLib: freshImportOTPLib } = await import("../../src/auth/shared.js");
+
+        await expect(freshImportOTPLib()).rejects.toThrow(/optional peer dependency 'otplib'/);
+
+        vi.doUnmock("otplib");
+        vi.resetModules();
+    });
+
+    it("importSimpleWebAuthn throws a helpful error when @simplewebauthn/server cannot be imported.", async () => {
+        vi.doMock("@simplewebauthn/server", () => {
+            throw new Error("Cannot find module '@simplewebauthn/server'");
+        });
+        vi.resetModules();
+        const { importSimpleWebAuthn: freshImportSimpleWebAuthn } = await import("../../src/auth/shared.js");
+
+        await expect(freshImportSimpleWebAuthn()).rejects.toThrow(/optional peer dependency '@simplewebauthn\/server'/);
+
+        vi.doUnmock("@simplewebauthn/server");
+        vi.resetModules();
+    });
+});

@@ -323,9 +323,6 @@ export abstract class BaseAuthMFARoute<U extends User, S extends Secret, A exten
                 ignoreACL: true,
             },
         );
-        if (!user) {
-            throw new Error("Invalid authorization request.");
-        }
 
         // Try all known passwords until at least one succeeds
         let success: boolean = false;

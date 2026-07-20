@@ -18,8 +18,9 @@ const headerSchemeRegExps: Map<string, RegExp> = new Map();
  * (e.g. `Authorization: basic base64("<id>:<password>")).
  *
  * @param req The request to return auth request data for.
- * @param headerKey The name of a header to look for request data in. Set to `undefined` to skip a header search.
- * Default is 'Authorization'.
+ * @param headerKey The name of a header to look for request data in. Set to an empty string to skip
+ * the header search entirely — passing `undefined` has no effect, since that just triggers the
+ * default value. Default is 'Authorization'.
  * @param headerScheme The header scheme to look for. Default is 'basic'.
  * @returns An object with format `{id: <username>, password: <password> }, otherwise `undefined`.
  */
@@ -74,8 +75,9 @@ export const getBasicData = function (
  * regular object.
  *
  * @param req The request to return auth request data for.
- * @param headerKey The name of a header to look for request data in. Set to `undefined` to skip a header search.
- * Default is 'Authorization'.
+ * @param headerKey The name of a header to look for request data in. Set to an empty string to skip
+ * the header search entirely — passing `undefined` has no effect, since that just triggers the
+ * default value. Default is 'Authorization'.
  * @param headerScheme The header scheme to look for. Default is 'basic'.
  * @returns The found request data and its decoded payload object.
  */
@@ -127,7 +129,9 @@ export const getRequestData = function (
         }
     }
 
-    if (typeof data === "string") {
+    // A string body that already parsed as JSON above has a real payload object — don't clobber it
+    // by re-parsing the same raw string as form-data/colon-delimited below.
+    if (typeof data === "string" && typeof payload !== "object") {
         const obj: any = {};
 
         // The string value may be ':' delimited (e.g. Basic auth) or form-data encoded.
@@ -225,7 +229,7 @@ export const generateOTP = async function (req: HttpRequest, requestData?: any):
         );
     }
 
-    requestData = requestData ?? getRequestData(req);
+    requestData = requestData ?? getRequestData(req).payload;
 
     const otplib = await importOTPLib();
     const secret = otplib.generateSecret();
@@ -416,11 +420,11 @@ export const generateTOTP = async function (req: HttpRequest, requestData?: any)
         );
     }
 
-    requestData = requestData ?? getRequestData(req);
+    requestData = requestData ?? getRequestData(req).payload;
 
     const otplib = await importOTPLib();
     const secret = otplib.generateSecret();
-    const token: string = otplib.generate({ secret });
+    const token: string = await otplib.generate({ secret });
 
     // Store the OTP data in the session for later verification
     req.session.id = requestData.id;

@@ -68,6 +68,7 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
         digits: 6,
         period: 30,
         algorithm: "sha1",
+        epochTolerance: [5, 0],
     };
 
     /**
@@ -237,6 +238,7 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
             digits: this.totpConfig.digits,
             period: this.totpConfig.period,
             algorithm: this.totpConfig.algorithm,
+            epochTolerance: this.totpConfig.epochTolerance,
         };
         obj.data = totpSecret;
     }

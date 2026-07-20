@@ -85,9 +85,6 @@ export abstract class BaseAuthBasicRoute<U extends User, S extends Secret, A ext
                     ignoreACL: true,
                 },
             );
-            if (!user) {
-                throw new Error("Invalid name or password");
-            }
 
             // Try all known passwords until at least one succeeds
             let success: boolean = false;

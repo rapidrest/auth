@@ -171,7 +171,7 @@ export abstract class BaseAuthOIDCRoute<U extends User, A extends Alias, P exten
                         verified: profile.phone_verified ?? false,
                     });
                 }
-                if (profile.phone && profile.phone) {
+                if (profile.phone && profile.phone_verified) {
                     const newAlias: Alias = {
                         alias: profile.phone,
                         type: AliasType.PHONE,

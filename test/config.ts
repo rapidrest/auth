@@ -79,6 +79,7 @@ conf.defaults({
             digits: 6,
             period: 30,
             algorithm: "sha1",
+            epochTolerance: [5, 0],
         },
     },
     oauth_provider: {

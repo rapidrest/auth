@@ -108,6 +108,12 @@ export interface TOTPConfig {
      * universally supported by authenticator apps despite RFC 6238 permitting SHA-256/SHA-512.
      */
     algorithm?: TOTPAlgorithm;
+    /**
+     * Specifies a tolerance window around the current time. It does not represent a strict duration in seconds
+     * (e.g., "±N seconds"), but rather dictates which periods overlap with the tolerance window `[currentTime -
+     * tolerance, currentTime + tolerance]`. Default value is `[5, 0]`.
+     */
+    epochTolerance?: number | number[];
 }
 
 /**
@@ -123,4 +129,10 @@ export interface TOTPSecret {
     period?: number;
     /** The HMAC hash algorithm used to generate the associated token, if it differs from the library default. */
     algorithm?: TOTPAlgorithm;
+    /**
+     * Specifies a tolerance window around the current time. It does not represent a strict duration in seconds
+     * (e.g., "±N seconds"), but rather dictates which periods overlap with the tolerance window `[currentTime -
+     * tolerance, currentTime + tolerance]`. Default value is `[5, 0]`.
+     */
+    epochTolerance?: number | number[];
 }

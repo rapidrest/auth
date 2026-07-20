@@ -505,6 +505,9 @@ export class OIDCStrategy implements AuthStrategy {
         let client = this.jwksClients.get(jwksURI);
         if (!client) {
             const mod: any = await this.importOptionalDependency("jwks-rsa");
+            /* v8 ignore next -- `jwks-rsa`'s CJS export always gets a synthetic `.default` under
+               Node's ESM dynamic-import interop; this only guards atypical bundler/interop setups
+               where it doesn't. */
             const buildClient = mod.default ?? mod;
             client = buildClient({ jwksUri: jwksURI });
             this.jwksClients.set(jwksURI, client);
