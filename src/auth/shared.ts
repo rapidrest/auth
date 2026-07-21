@@ -258,17 +258,25 @@ export const verifyOTP = async function (req: HttpRequest, payload?: any): Promi
 
     payload = payload ?? getRequestData(req).payload;
 
+    // The challenge is single-use regardless of outcome — cleared as soon as it's read, before
+    // verification is even attempted, so a captured/replayed token can never be verified twice.
+    const sessionId: any = req.session.id;
+    const sessionSecret: any = req.session.secret;
+    delete req.session.id;
+    delete req.session.secret;
+    delete req.session.token;
+
     if (!isOTPResponse(payload)) {
         throw new Error("Invalid authentication request.");
     }
 
-    if (req.session.id !== payload.id) {
+    if (sessionId !== payload.id) {
         throw new Error("Invalid authentication request.");
     }
 
     const otplib = await importOTPLib();
     const result = await otplib.verify({
-        secret: req.session.secret,
+        secret: sessionSecret,
         token: payload.token,
     });
     return result.valid;
@@ -521,6 +529,26 @@ export const importArgon2 = async function (): Promise<any> {
             "This feature requires the optional peer dependency 'argon2'. Install it with: yarn add argon2",
         );
     }
+};
+
+/**
+ * A precomputed Argon2id hash of a fixed, non-secret placeholder value. Never derived from any real
+ * credential — used only to burn an equivalent amount of CPU time as a real password verification via
+ * `verifyDummyPassword()`.
+ */
+export const DUMMY_ARGON2_HASH: string =
+    "$argon2id$v=19$m=65536,t=3,p=4$VhOypn3oSSxvFgmOrlj1qA$sM5afO0NyaRoZ+0tTdE8EOt7XRG8hSGlLOX+035fQFI";
+
+/**
+ * Performs an Argon2 verification against a fixed dummy hash, discarding the result. Used to equalize the
+ * response time of a "user not found" path with a "user found, password checked" path so that an attacker
+ * can't enumerate valid usernames/emails by measuring response latency (a nonexistent user would otherwise
+ * short-circuit before ever running the deliberately-slow Argon2 verify).
+ * @param password The value to verify against the dummy hash. Never actually a real password of anyone.
+ */
+export const verifyDummyPassword = async function (password: string): Promise<void> {
+    const argon = await importArgon2();
+    await argon.verify(DUMMY_ARGON2_HASH, password);
 };
 
 /**

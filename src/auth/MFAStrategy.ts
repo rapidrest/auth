@@ -56,11 +56,20 @@ export class MFAStrategyOptions {
      */
     public require2FA: boolean = true;
     /**
-     * Retrieves the user's secondary authentication method for a given id.
+     * Optional hook invoked with the claimed identifier before password/OTP verification. Implementations
+     * should throw to reject the request once a caller-defined attempt threshold has been exceeded (see
+     * `RateLimiter`). A no-op when not provided.
+     */
+    public checkRateLimit?(identifier: string, req: HttpRequest): Promise<void>;
+    /**
+     * Retrieves the user's secondary authentication method for a given id. Implementations must only return a
+     * method that actually belongs to `uid` — this is the authorization boundary that prevents one user's 2FA
+     * challenge from being triggered/consumed using another user's authentication method.
      * NOTE: You must override this function when using this strategy.
      * @param id The unique id of the secondary auth method to retrieve.
+     * @param uid The unique id of the user the method must belong to.
      */
-    public getMethod(id: string): Promise<MFAMethod | undefined> {
+    public getMethod(id: string, uid: string): Promise<MFAMethod | undefined> {
         throw new Error("Did you forget to override MFAStrategyOptions.getContact?");
     }
     /**
@@ -192,13 +201,18 @@ export class MFAStrategy implements AuthStrategy {
             );
         }
 
-        const method: MFAMethod | undefined = await this.options.getMethod(payload.methodId);
+        // Phase 2 may only be invoked immediately following a successful phase-1 (password) verification
+        // for the same claimed identity — otherwise an attacker could trigger/consume a 2FA challenge for
+        // any account by supplying an arbitrary `id` and a `methodId` they control (e.g. their own verified
+        // contact), without ever needing that account's password.
+        if (!req.session.userUid || req.session.userUid !== payload.id) {
+            throw new Error("Invalid authentication request.");
+        }
+
+        const method: MFAMethod | undefined = await this.options.getMethod(payload.methodId, req.session.userUid);
         if (!method) {
             throw new Error("Invalid secondary authentication method.");
         }
-
-        // Store the method ID used in the session
-        req.session.methodId = method.id;
 
         switch (method.type) {
             case MFAMethodType.FIDO2:
@@ -231,9 +245,19 @@ export class MFAStrategy implements AuthStrategy {
             throw new Error("Invalid user id or password.");
         }
 
+        if (this.options.checkRateLimit) {
+            await this.options.checkRateLimit(requestData.id, req);
+        }
+
         // Verify the id and password
         const user: JWTUser | undefined = await this.options.verify(requestData.id, requestData.password);
         if (user) {
+            // Bind subsequent phases to this verified identity so phase 2/3 can't be invoked cold, or for a
+            // different identity than the one that just passed password verification.
+            if (req.session) {
+                req.session.userUid = user.uid;
+            }
+
             // Now retrieve the user's list of available 2FA methods
             const methods: MFAMethod[] = await this.options.getMethods(user.uid);
             if (methods.length > 0) {
@@ -256,10 +280,22 @@ export class MFAStrategy implements AuthStrategy {
     }
 
     protected async verifyOTP(payload: any, req: HttpRequest, res: HttpResponse): Promise<JWTUser | undefined> {
-        if (!(await verifyOTP(req, payload))) {
+        if (this.options.checkRateLimit) {
+            await this.options.checkRateLimit(payload.id, req);
+        }
+
+        const valid: boolean = await verifyOTP(req, payload);
+
+        // The phase-1-verified identity is single-use — cleared once phase 3 completes, regardless of outcome.
+        const userUid: string | undefined = req.session?.userUid;
+        delete req.session?.userUid;
+
+        if (!valid || !userUid) {
             return undefined;
         }
-        return await this.options.getUser(payload.id);
+        // Resolve the user from the session-bound identity established in verifyBasic(), not from the
+        // client-supplied `payload.id`, which must never be trusted to select which account gets authenticated.
+        return await this.options.getUser(userUid);
     }
 
     protected async verifyTOTP(payload: any, req: HttpRequest, res: HttpResponse): Promise<JWTUser | undefined> {

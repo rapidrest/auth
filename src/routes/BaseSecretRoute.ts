@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Jean-Philippe Steinmetz. All rights reserved.
 ///////////////////////////////////////////////////////////////////////////////
 import {
+    ApiErrorMessages,
     ApiErrors,
     DocDecorators,
     HttpRequest,
@@ -11,7 +12,7 @@ import {
     RouteDecorators,
 } from "@rapidrest/service-core";
 import { Secret, SecretType } from "../models/types.js";
-import { ApiError, JWTUser, ObjectDecorators } from "@rapidrest/core";
+import { ApiError, JWTUser, ObjectDecorators, UserUtils } from "@rapidrest/core";
 import {
     generatePasskeyRegistrationOptions,
     generateTOTPURI,
@@ -21,17 +22,22 @@ import {
     isValidTOTPSecret,
     verifyPasskeyRegistrationResponse,
 } from "../auth/shared.js";
-import { PasskeyConfig, StoredPasskeyCredential, TOTPConfig, TOTPSecret } from "../auth/types.js";
+import { PasskeyConfig, PasswordConfig, StoredPasskeyCredential, TOTPConfig, TOTPSecret } from "../auth/types.js";
 
-const { Config } = ObjectDecorators;
+const { Config, Init } = ObjectDecorators;
 const { Description, Returns, Summary } = DocDecorators;
 const { Delete, Get, Head, Param, Post, Query, Request, Response, User, Validate } = RouteDecorators;
+
+const REGEX_LOWERCASE = new RegExp("^.*[a-z]+.*$");
+const REGEX_NUMERAL = new RegExp("^.*[0-9]+.*$");
+const REGEX_UPPERCASE = new RegExp("^.*[A-Z]+.*$");
 
 /**
  * @author Jean-Philippe Steinmetz
  */
 export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
     protected readonly repoUtilsClass: any = RepoUtils;
+    protected regexSpecialChars: RegExp = new RegExp("^.*[" + new PasswordConfig().special_chars + "]+.*$");
 
     /**
      * The relying party configuration used for validating and generating passkey (WebAuthn) registration data.
@@ -68,8 +74,44 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
         digits: 6,
         period: 30,
         algorithm: "sha1",
-        epochTolerance: [5, 0],
+        epochTolerance: [1, 1],
     };
+
+    /**
+     * The minimum required length for a new `password` secret's plaintext value.
+     */
+    @Config("auth:password", new PasswordConfig())
+    protected passwordConfig: PasswordConfig = new PasswordConfig();
+
+    /**
+     * The set of roles that are trusted to create a Secret on behalf of another user (i.e. specify a
+     * `userUid` that differs from their own). Matches the `trusted_roles` convention used elsewhere in the
+     * framework (see `@rapidrest/service-core`'s `ACLUtils`/`ModelRoute`/`RepoUtils`).
+     */
+    @Config("trusted_roles", ["admin"])
+    protected trustedRoles: string[] = ["admin"];
+
+    @Init
+    private init() {
+        this.regexSpecialChars = new RegExp("^.*[" + this.passwordConfig.special_chars + "]+.*$");
+    }
+
+    /**
+     * Ensures the `userUid` of a secret being created belongs to the authenticated caller, defaulting it to
+     * their own uid when unset. Prevents any authenticated user from self-service registering a password,
+     * passkey, FIDO2 key, or TOTP secret on another user's account. Callers with one of `trustedRoles` (e.g.
+     * an administrator provisioning an account) are exempt.
+     */
+    protected enforceOwnership(obj: Partial<T>, user?: JWTUser): void {
+        if (!user) {
+            return;
+        }
+        if (!obj.userUid) {
+            obj.userUid = user.uid;
+        } else if (obj.userUid !== user.uid && !UserUtils.hasRoles(user, this.trustedRoles)) {
+            throw new ApiError(ApiErrors.AUTH_PERMISSION_FAILURE, 403, ApiErrorMessages.AUTH_PERMISSION_FAILURE);
+        }
+    }
 
     /**
      * Removes the `data` property from the secret(s) to protect sensitive information.
@@ -104,6 +146,8 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
     ): Promise<void> {
         const objs: Partial<T>[] = Array.isArray(obj) ? obj : [obj];
         for (const obj of objs) {
+            this.enforceOwnership(obj, user);
+
             switch (obj.type) {
                 case SecretType.FIDO2:
                     await this.validateWebAuthnCreate(obj, req, this.fido2Config);
@@ -114,6 +158,7 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
                 case SecretType.PASSWORD:
                     {
                         if (typeof obj.data === "string") {
+                            this.validatePassword(obj.data);
                             const argon = await importArgon2();
                             obj.data = await argon.hash(obj.data);
                         } else {
@@ -129,6 +174,44 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
                     await this.validateTOTPCreate(obj);
                     break;
             }
+        }
+    }
+
+    private validatePassword(password: string) {
+        if (password.length < this.passwordConfig.min_length) {
+            throw new ApiError(
+                ApiErrorMessages.INVALID_REQUEST,
+                400,
+                `Password must have a minimum length of: ${this.passwordConfig.min_length}`,
+            );
+        }
+
+        if (this.passwordConfig.require_lowercase && !password.match(REGEX_LOWERCASE)) {
+            throw new ApiError(
+                ApiErrorMessages.INVALID_REQUEST,
+                400,
+                `Password must have at least one lowercase letter`,
+            );
+        }
+
+        if (this.passwordConfig.require_uppercase && !password.match(REGEX_UPPERCASE)) {
+            throw new ApiError(
+                ApiErrorMessages.INVALID_REQUEST,
+                400,
+                `Password must have at least one uppercase letter`,
+            );
+        }
+
+        if (this.passwordConfig.require_numeral && !password.match(REGEX_NUMERAL)) {
+            throw new ApiError(ApiErrorMessages.INVALID_REQUEST, 400, `Password must have at least one number`);
+        }
+
+        if (this.passwordConfig.require_special && !password.match(this.regexSpecialChars)) {
+            throw new ApiError(
+                ApiErrorMessages.INVALID_REQUEST,
+                400,
+                `Password must have at least one special character: ${this.passwordConfig.special_chars}`,
+            );
         }
     }
 

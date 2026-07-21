@@ -120,6 +120,34 @@ describe("OTPStrategy Tests", () => {
 
             expect(res.json).toHaveBeenCalledWith([]);
         });
+
+        it("Invokes checkRateLimit with the queried id before listing contacts.", async () => {
+            (options.getContacts as any).mockResolvedValue([]);
+            options.checkRateLimit = vi.fn().mockResolvedValue(undefined);
+            const req = makeReq({ body: {}, query: { id: "user-uid-1" } });
+
+            await strategy.authenticate(req, makeRes(), false);
+
+            expect(options.checkRateLimit).toHaveBeenCalledWith("user-uid-1", req);
+        });
+
+        it("Does not invoke checkRateLimit when no id query param is given.", async () => {
+            (options.getContacts as any).mockResolvedValue([]);
+            options.checkRateLimit = vi.fn();
+            const req = makeReq({ body: {}, query: {} });
+
+            await strategy.authenticate(req, makeRes(), false);
+
+            expect(options.checkRateLimit).not.toHaveBeenCalled();
+        });
+
+        it("Aborts before listing contacts when checkRateLimit throws.", async () => {
+            options.checkRateLimit = vi.fn().mockRejectedValue(new Error("Too many attempts."));
+            const req = makeReq({ body: {}, query: { id: "user-uid-1" } });
+
+            await expect(strategy.authenticate(req, makeRes())).rejects.toThrow(/Too many attempts/);
+            expect(options.getContacts).not.toHaveBeenCalled();
+        });
     });
 
     describe("challenge (phase 2)", () => {
@@ -151,6 +179,27 @@ describe("OTPStrategy Tests", () => {
             expect(res.status).toHaveBeenCalledWith(200);
             expect(res.json).toHaveBeenCalledWith({});
             expect((req.session as any).id).toBe("contact-1");
+        });
+
+        it("Invokes checkRateLimit before generating/sending a new OTP.", async () => {
+            const contact = { contact: "test@example.com", type: OTPContactType.EMAIL, verified: true };
+            (options.getContact as any).mockResolvedValue(contact);
+            options.checkRateLimit = vi.fn().mockResolvedValue(undefined);
+            const req = makeReq({ body: { id: "contact-1" } });
+
+            await strategy.authenticate(req, makeRes());
+
+            expect(options.checkRateLimit).toHaveBeenCalledWith("contact-1", req);
+        });
+
+        it("Aborts before sending a new OTP when checkRateLimit throws.", async () => {
+            const contact = { contact: "test@example.com", type: OTPContactType.EMAIL, verified: true };
+            (options.getContact as any).mockResolvedValue(contact);
+            options.checkRateLimit = vi.fn().mockRejectedValue(new Error("Too many attempts."));
+            const req = makeReq({ body: { id: "contact-1" } });
+
+            await expect(strategy.authenticate(req, makeRes())).rejects.toThrow(/Too many attempts/);
+            expect(options.notifyContact).not.toHaveBeenCalled();
         });
     });
 
@@ -185,6 +234,19 @@ describe("OTPStrategy Tests", () => {
 
             expect(options.getUser).not.toHaveBeenCalled();
             expect(result).toBeUndefined();
+        });
+
+        it("Aborts before verifying the token when checkRateLimit throws.", async () => {
+            const secret = otplib.generateSecret();
+            const token = await otplib.generate({ secret });
+            const req = makeReq({
+                body: { id: "contact-1", token },
+                session: { id: "contact-1", secret },
+            });
+            options.checkRateLimit = vi.fn().mockRejectedValue(new Error("Too many attempts."));
+
+            await expect(strategy.authenticate(req, makeRes())).rejects.toThrow(/Too many attempts/);
+            expect(options.getUser).not.toHaveBeenCalled();
         });
     });
 

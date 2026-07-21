@@ -5,7 +5,8 @@ import { JWTUser, JWTUtils, ObjectDecorators } from "@rapidrest/core";
 import { RouteDecorators, DocDecorators, RepoUtils, AuthMiddleware, ObjectFactory } from "@rapidrest/service-core";
 import { Alias, AuthResult, Secret, SecretType, User } from "../models/types.js";
 import { BasicStrategy, BasicStrategyOptions } from "../auth/BasicStrategy.js";
-import { importArgon2 } from "../auth/shared.js";
+import { RateLimiter } from "../auth/RateLimiter.js";
+import { importArgon2, verifyDummyPassword } from "../auth/shared.js";
 import { UserUtils } from "./UserUtils.js";
 
 const { Config, Init, Inject } = ObjectDecorators;
@@ -31,6 +32,9 @@ export abstract class BaseAuthBasicRoute<U extends User, S extends Secret, A ext
 
     @Inject(ObjectFactory)
     protected objectFactory?: ObjectFactory;
+
+    @Inject(RateLimiter)
+    protected rateLimiter?: RateLimiter;
 
     protected secretRepo?: RepoUtils<S>;
 
@@ -63,6 +67,7 @@ export abstract class BaseAuthBasicRoute<U extends User, S extends Secret, A ext
         }
 
         const options: BasicStrategyOptions = new BasicStrategyOptions();
+        options.checkRateLimit = (identifier: string) => this.rateLimiter!.checkAndIncrement(identifier);
         options.verify = async (name: string, password: string): Promise<JWTUser | undefined> => {
             if (!this.secretRepo) {
                 throw new Error("Secret repository not set.");
@@ -73,6 +78,9 @@ export abstract class BaseAuthBasicRoute<U extends User, S extends Secret, A ext
 
             const user: User | undefined = await this.userUtils.lookup(name);
             if (!user) {
+                // Burn an equivalent amount of time to the real verification path below so a nonexistent
+                // user can't be distinguished from a wrong password via response timing.
+                await verifyDummyPassword(password);
                 throw new Error("Invalid name or password");
             }
 

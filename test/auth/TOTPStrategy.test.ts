@@ -132,6 +132,48 @@ describe("TOTPStrategy Tests", () => {
         await expect(strategy.authenticate(req, makeRes(), true)).rejects.toThrow(/Invalid authentiation request/);
     });
 
+    it("Invokes checkRateLimit with the claimed identifier before resolving the user.", async () => {
+        const secret: TOTPSecret = { secret: otplib.generateSecret() };
+        const token = await otplib.generate(secret);
+        (options.getUser as any).mockResolvedValue(jwtUser);
+        (options.getSecrets as any).mockResolvedValue([secret]);
+        options.checkRateLimit = vi.fn().mockResolvedValue(undefined);
+        const req = makeReq({ body: { id: "user-uid-1", token } });
+
+        await strategy.authenticate(req, makeRes());
+
+        expect(options.checkRateLimit).toHaveBeenCalledWith("user-uid-1", req);
+    });
+
+    it("Invokes checkRateLimit even when the claimed id does not resolve to a real user (no enumeration bypass).", async () => {
+        (options.getUser as any).mockResolvedValue(undefined);
+        options.checkRateLimit = vi.fn().mockResolvedValue(undefined);
+        const req = makeReq({ body: { id: "unknown-user", token: "123456" } });
+
+        const result = await strategy.authenticate(req, makeRes(), false);
+
+        expect(options.checkRateLimit).toHaveBeenCalledWith("unknown-user", req);
+        expect(result).toBeUndefined();
+    });
+
+    it("Aborts before resolving the user when checkRateLimit throws.", async () => {
+        options.checkRateLimit = vi.fn().mockRejectedValue(new Error("Too many attempts."));
+        const req = makeReq({ body: { id: "user-uid-1", token: "123456" } });
+
+        await expect(strategy.authenticate(req, makeRes())).rejects.toThrow(/Too many attempts/);
+        expect(options.getUser).not.toHaveBeenCalled();
+        expect(options.getSecrets).not.toHaveBeenCalled();
+    });
+
+    it("Does not invoke checkRateLimit when the request has no id.", async () => {
+        options.checkRateLimit = vi.fn();
+        const req = makeReq({ body: { token: "123456" } });
+
+        await strategy.authenticate(req, makeRes(), false);
+
+        expect(options.checkRateLimit).not.toHaveBeenCalled();
+    });
+
     describe("Default TOTPStrategyOptions", () => {
         const defaultOptions = new TOTPStrategyOptions();
 

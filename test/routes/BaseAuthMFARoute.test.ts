@@ -196,26 +196,38 @@ describe("BaseAuthMFARoute Tests", () => {
         it("Throws if aliasRepo is not set.", async () => {
             const route = new TestAuthMFARoute();
             (route as any).secretRepo = { findOne: vi.fn() };
-            await expect((route as any).getMethod("id-1")).rejects.toThrow(/aliasRepo is not set/);
+            await expect((route as any).getMethod("id-1", "user-1")).rejects.toThrow(/aliasRepo is not set/);
         });
 
         it("Throws if secretRepo is not set.", async () => {
             const route = new TestAuthMFARoute();
             (route as any).aliasRepo = { findOne: vi.fn() };
-            await expect((route as any).getMethod("id-1")).rejects.toThrow(/secretRepo is not set/);
+            await expect((route as any).getMethod("id-1", "user-1")).rejects.toThrow(/secretRepo is not set/);
         });
 
-        it("Returns the method for a matching secret.", async () => {
+        it("Returns the method for a matching secret owned by the given uid.", async () => {
             const route = new TestAuthMFARoute();
             (route as any).secretRepo = {
-                findOne: vi.fn().mockResolvedValue({ uid: "secret-1", type: SecretType.TOTP, data: {} }),
+                findOne: vi.fn().mockResolvedValue({ uid: "secret-1", userUid: "user-1", type: SecretType.TOTP, data: {} }),
             };
             (route as any).aliasRepo = { findOne: vi.fn() };
 
-            const result = await (route as any).getMethod("secret-1");
+            const result = await (route as any).getMethod("secret-1", "user-1");
 
             expect(result).toEqual({ id: "secret-1", data: {}, type: MFAMethodType.TOTP });
             expect((route as any).aliasRepo.findOne).not.toHaveBeenCalled();
+        });
+
+        it("Returns undefined when the matching secret belongs to a different user.", async () => {
+            const route = new TestAuthMFARoute();
+            (route as any).secretRepo = {
+                findOne: vi.fn().mockResolvedValue({ uid: "secret-1", userUid: "attacker-1", type: SecretType.TOTP, data: {} }),
+            };
+            (route as any).aliasRepo = { findOne: vi.fn() };
+
+            const result = await (route as any).getMethod("secret-1", "victim-1");
+
+            expect(result).toBeUndefined();
         });
 
         it("Falls back to alias lookup when no secret matches.", async () => {
@@ -224,13 +236,14 @@ describe("BaseAuthMFARoute Tests", () => {
             (route as any).aliasRepo = {
                 findOne: vi.fn().mockResolvedValue({
                     uid: "alias-1",
+                    userUid: "user-1",
                     alias: "user@example.com",
                     type: AliasType.EMAIL,
                     verified: true,
                 }),
             };
 
-            const result = await (route as any).getMethod("alias-1");
+            const result = await (route as any).getMethod("alias-1", "user-1");
 
             expect(result).toEqual({
                 id: "alias-1",
@@ -239,14 +252,46 @@ describe("BaseAuthMFARoute Tests", () => {
             });
         });
 
+        it("Returns undefined when the matching alias belongs to a different user.", async () => {
+            const route = new TestAuthMFARoute();
+            (route as any).secretRepo = { findOne: vi.fn().mockResolvedValue(undefined) };
+            (route as any).aliasRepo = {
+                findOne: vi.fn().mockResolvedValue({
+                    uid: "alias-1",
+                    userUid: "attacker-1",
+                    alias: "attacker@example.com",
+                    type: AliasType.EMAIL,
+                    verified: true,
+                }),
+            };
+
+            const result = await (route as any).getMethod("alias-1", "victim-1");
+
+            expect(result).toBeUndefined();
+        });
+
         it("Returns undefined when neither a secret nor an alias matches.", async () => {
             const route = new TestAuthMFARoute();
             (route as any).secretRepo = { findOne: vi.fn().mockResolvedValue(undefined) };
             (route as any).aliasRepo = { findOne: vi.fn().mockResolvedValue(undefined) };
 
-            const result = await (route as any).getMethod("unknown");
+            const result = await (route as any).getMethod("unknown", "user-1");
 
             expect(result).toBeUndefined();
+        });
+
+        it("Returns undefined without querying the repos when id or uid is not a string.", async () => {
+            const route = new TestAuthMFARoute();
+            const secretFindOne = vi.fn();
+            const aliasFindOne = vi.fn();
+            (route as any).secretRepo = { findOne: secretFindOne };
+            (route as any).aliasRepo = { findOne: aliasFindOne };
+
+            const result = await (route as any).getMethod({ $ne: null }, "user-1");
+
+            expect(result).toBeUndefined();
+            expect(secretFindOne).not.toHaveBeenCalled();
+            expect(aliasFindOne).not.toHaveBeenCalled();
         });
     });
 
@@ -399,6 +444,20 @@ describe("BaseAuthMFARoute Tests", () => {
             await expect((route as any).verify("unknown-user", "pass1")).rejects.toThrow(
                 /Invalid authorization request/,
             );
+        });
+
+        it("Performs a dummy Argon2 verification when the user cannot be found, to equalize response timing.", async () => {
+            const route = new TestAuthMFARoute();
+            (route as any).secretRepo = { find: vi.fn() };
+            (route as any).userUtils = { lookup: vi.fn().mockResolvedValue(undefined) };
+            const shared = await import("../../src/auth/shared.js");
+            const verifyDummySpy = vi.spyOn(shared, "verifyDummyPassword");
+
+            await expect((route as any).verify("unknown-user", "pass1")).rejects.toThrow(
+                /Invalid authorization request/,
+            );
+
+            expect(verifyDummySpy).toHaveBeenCalledWith("pass1");
         });
 
         it("Throws when none of the user's stored passwords match.", async () => {

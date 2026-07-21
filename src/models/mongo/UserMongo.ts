@@ -23,11 +23,11 @@ const { Column, Entity } = PersistenceDecorators;
 @Entity()
 @Description("Defines a record for a single user account in the system.")
 @Protect({
-    uid: "UserMongo",
+    uid: "User",
     records: [
         {
             userOrRoleId: "anonymous",
-            actions: [],
+            actions: [ACLAction.CREATE],
         },
         {
             userOrRoleId: ".*",

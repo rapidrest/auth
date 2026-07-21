@@ -25,6 +25,12 @@ export class TOTPStrategyOptions {
      */
     public allowQueryParam: boolean = false;
     /**
+     * Optional hook invoked with the claimed identifier before the TOTP token is verified. Implementations
+     * should throw to reject the request once a caller-defined attempt threshold has been exceeded (see
+     * `RateLimiter`). A no-op when not provided.
+     */
+    public checkRateLimit?(identifier: string, req: HttpRequest): Promise<void>;
+    /**
      * Retrieves the stored TOTP secrets for the user with the given unique identifier.
      * NOTE: You must override this function when using this strategy.
      * @param id The unique identifier of the user.
@@ -64,7 +70,11 @@ export class TOTPStrategy implements AuthStrategy {
     ): Promise<AuthResult | undefined> {
         const { data, payload } = getRequestData(req, this.options.headerKey, this.options.headerScheme);
 
-        const user: JWTUser | undefined = await this.verify(payload);
+        if (payload.id && this.options.checkRateLimit) {
+            await this.options.checkRateLimit(payload.id, req);
+        }
+
+        const user: JWTUser | undefined = await this.verify(payload, req);
         if (user) {
             return {
                 data,
@@ -85,7 +95,7 @@ export class TOTPStrategy implements AuthStrategy {
         throw new Error("Not supported. This auth strategy must be used asynchronously.");
     }
 
-    protected async verify(payload: any): Promise<JWTUser | undefined> {
+    protected async verify(payload: any, req?: HttpRequest): Promise<JWTUser | undefined> {
         const user: JWTUser | undefined = await this.options.getUser(payload.id);
 
         if (user) {

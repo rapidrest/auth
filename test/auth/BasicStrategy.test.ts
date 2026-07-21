@@ -100,6 +100,33 @@ describe("BasicStrategy Tests", () => {
                 /Did you forget to override BasicStrategyOptions.verify/,
             );
         });
+
+        it("Invokes checkRateLimit with the claimed identifier when configured.", async () => {
+            const req = makeReq({ body: { id: "user-uid-1", password: "secret" } });
+            options.checkRateLimit = vi.fn().mockResolvedValue(undefined);
+            (options.verify as any).mockResolvedValue(jwtUser);
+
+            await strategy.authenticate(req, makeRes());
+
+            expect(options.checkRateLimit).toHaveBeenCalledWith("user-uid-1", req);
+        });
+
+        it("Aborts before verify() when checkRateLimit throws.", async () => {
+            const req = makeReq({ body: { id: "user-uid-1", password: "secret" } });
+            options.checkRateLimit = vi.fn().mockRejectedValue(new Error("Too many attempts."));
+
+            await expect(strategy.authenticate(req, makeRes())).rejects.toThrow(/Too many attempts/);
+            expect(options.verify).not.toHaveBeenCalled();
+        });
+
+        it("Behaves exactly as before when checkRateLimit is not configured.", async () => {
+            const req = makeReq({ body: { id: "user-uid-1", password: "secret" } });
+            (options.verify as any).mockResolvedValue(jwtUser);
+
+            const result = await strategy.authenticate(req, makeRes());
+
+            expect(result?.user).toEqual(jwtUser);
+        });
     });
 
     describe("authenticateSync", () => {

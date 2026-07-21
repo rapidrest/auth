@@ -23,6 +23,13 @@ export class OTPStrategyOptions {
     /** The authorization scheme type when using header based authentication. Default value is `otp`. */
     public headerScheme: string = "otp";
     /**
+     * Optional hook invoked with the claimed identifier before a new OTP is generated/sent (phase 2), and
+     * again before the submitted token is verified (phase 3). Implementations should throw to reject the
+     * request once a caller-defined attempt threshold has been exceeded (see `RateLimiter`). A no-op when not
+     * provided.
+     */
+    public checkRateLimit?(identifier: string, req: HttpRequest): Promise<void>;
+    /**
      * Retrieves the user's contact information for a given id.
      * NOTE: You must override this function when using this strategy.
      * @param id The unique id of the contact to retrieve.
@@ -135,6 +142,10 @@ export class OTPStrategy implements AuthStrategy {
 
     protected async discovery(req: HttpRequest, res: HttpResponse): Promise<any> {
         const id: string | undefined = (req.query?.id as string) ?? undefined;
+        if (id && this.options.checkRateLimit) {
+            await this.options.checkRateLimit(id, req);
+        }
+
         let contacts: OTPContact[] = (await this.options.getContacts(id)) ?? [];
         contacts = contacts.map((c) => ({ contact: obfuscateContact(c.contact, c.type), type: c.type }));
         res.status(200);
@@ -155,6 +166,10 @@ export class OTPStrategy implements AuthStrategy {
             return undefined;
         }
 
+        if (this.options.checkRateLimit) {
+            await this.options.checkRateLimit(payload.id, req);
+        }
+
         const token: string = await generateOTP(req, payload);
         await this.options.notifyContact(contact, token);
 
@@ -164,6 +179,9 @@ export class OTPStrategy implements AuthStrategy {
     }
 
     protected async verify(payload: any, req: HttpRequest, res: HttpResponse): Promise<JWTUser | undefined> {
+        if (this.options.checkRateLimit) {
+            await this.options.checkRateLimit(payload.id, req);
+        }
         if (!(await verifyOTP(req, payload))) {
             return undefined;
         }

@@ -70,6 +70,27 @@ export interface PasskeyConfig {
 export type PasskeyTransport = "ble" | "cable" | "hybrid" | "internal" | "nfc" | "smart-card" | "usb";
 
 /**
+ * Configuration for enforcing password strength.
+ */
+export class PasswordConfig {
+    // The minimum length that a password must be
+    public readonly min_length: number = 8;
+    // The recommended length that a password should be
+    public readonly recommended_length: number = 32;
+    // Set to true to require at least one lowercase letter
+    public readonly require_lowercase: boolean = true;
+    // Set to true to require at least one uppercase letter
+    public readonly require_uppercase: boolean = true;
+    // Set to true to require at least one number
+    public readonly require_numeral: boolean = true;
+    // Set to true to require at least one special character. If set to true, specialChars must be defined.
+    public readonly require_special: boolean = true;
+    // The set of special characters that will be used to validate passwords. Kept with `-` last so it's
+    // safe to interpolate directly into a regex character class (`[...]`) without being misread as a range.
+    public readonly special_chars: string = "!@#$%^&*_+?-";
+}
+
+/**
  * A previously-registered WebAuthn credential as persisted by the consuming application.
  */
 export interface StoredPasskeyCredential {
@@ -111,7 +132,7 @@ export interface TOTPConfig {
     /**
      * Specifies a tolerance window around the current time. It does not represent a strict duration in seconds
      * (e.g., "±N seconds"), but rather dictates which periods overlap with the tolerance window `[currentTime -
-     * tolerance, currentTime + tolerance]`. Default value is `[5, 0]`.
+     * tolerance, currentTime + tolerance]`. Default value is `[1, 0]`.
      */
     epochTolerance?: number | number[];
 }
@@ -132,7 +153,7 @@ export interface TOTPSecret {
     /**
      * Specifies a tolerance window around the current time. It does not represent a strict duration in seconds
      * (e.g., "±N seconds"), but rather dictates which periods overlap with the tolerance window `[currentTime -
-     * tolerance, currentTime + tolerance]`. Default value is `[5, 0]`.
+     * tolerance, currentTime + tolerance]`. Default value is `[1, 0]`.
      */
     epochTolerance?: number | number[];
 }

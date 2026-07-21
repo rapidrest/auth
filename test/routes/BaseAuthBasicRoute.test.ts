@@ -123,6 +123,17 @@ describe("BaseAuthBasicRoute Tests", () => {
             await expect(verify("unknown-user", "pass1")).rejects.toThrow(/Invalid name or password/);
         });
 
+        it("Performs a dummy Argon2 verification when the user cannot be found, to equalize response timing.", async () => {
+            const { userUtils, verify } = await setupRoute();
+            userUtils.lookup.mockResolvedValue(undefined);
+            const shared = await import("../../src/auth/shared.js");
+            const verifyDummySpy = vi.spyOn(shared, "verifyDummyPassword");
+
+            await expect(verify("unknown-user", "pass1")).rejects.toThrow(/Invalid name or password/);
+
+            expect(verifyDummySpy).toHaveBeenCalledWith("pass1");
+        });
+
         it("Throws when none of the user's stored passwords match.", async () => {
             const { userUtils, secretRepo, verify } = await setupRoute();
             userUtils.lookup.mockResolvedValue({ uid: "user-uid-1" });

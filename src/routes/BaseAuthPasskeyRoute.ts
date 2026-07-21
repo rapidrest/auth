@@ -125,6 +125,9 @@ export abstract class BaseAuthPasskeyRoute<U extends User, A extends Alias, S ex
         if (!this.secretRepo) {
             throw new Error("secretRepo is not set.");
         }
+        if (typeof credentialId !== "string") {
+            return undefined;
+        }
         const secret: Secret | undefined = await this.secretRepo.findOne(credentialId, { ignoreACL: true });
         return secret?.data;
     }

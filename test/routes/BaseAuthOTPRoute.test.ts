@@ -135,6 +135,17 @@ describe("BaseAuthOTPRoute Tests", () => {
 
             expect(result).toEqual({ contact: "user@example.com", type: OTPContactType.EMAIL, verified: true });
         });
+
+        it("Returns undefined without querying the repo when id is not a string (NoSQL operator injection guard).", async () => {
+            const route = new TestAuthOTPRoute();
+            const findOne = vi.fn();
+            (route as any).aliasRepo = { findOne };
+
+            const result = await (route as any).getContact({ $ne: null });
+
+            expect(result).toBeUndefined();
+            expect(findOne).not.toHaveBeenCalled();
+        });
     });
 
     describe("getContacts", () => {

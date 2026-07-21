@@ -91,7 +91,7 @@ describe("MFAStrategy Tests", () => {
             const token = await otplib.generate({ secret });
             const req = makeReq({
                 body: { id: "user-uid-1", token },
-                session: { id: "user-uid-1", secret },
+                session: { id: "user-uid-1", secret, userUid: "user-uid-1" },
             });
             (options.getUser as any).mockResolvedValue(jwtUser);
 
@@ -199,7 +199,7 @@ describe("MFAStrategy Tests", () => {
         it("Routes an id+methodId payload to challenge() and returns undefined.", async () => {
             const req = makeReq({
                 body: { id: "user-uid-1", methodId: "method-1" },
-                session: {},
+                session: { userUid: "user-uid-1" },
             });
             (options.getMethod as any).mockResolvedValue({
                 id: "method-1",
@@ -210,6 +210,7 @@ describe("MFAStrategy Tests", () => {
             const result = await strategy.authenticate(req, makeRes());
 
             expect(result).toBeUndefined();
+            expect(options.getMethod).toHaveBeenCalledWith("method-1", "user-uid-1");
             expect(options.notifyContact).toHaveBeenCalled();
         });
 
@@ -235,8 +236,28 @@ describe("MFAStrategy Tests", () => {
             await expect(strategy.authenticate(req, makeRes())).rejects.toThrow(/session support/);
         });
 
+        it("Throws when there is no session-bound phase-1-verified identity (cold request).", async () => {
+            const req = makeReq({ body: { id: "user-uid-1", methodId: "method-1" }, session: {} });
+
+            await expect(strategy.authenticate(req, makeRes())).rejects.toThrow(/Invalid authentication request/);
+            expect(options.getMethod).not.toHaveBeenCalled();
+        });
+
+        it("Throws when the session-bound identity does not match the claimed payload id.", async () => {
+            const req = makeReq({
+                body: { id: "victim-uid", methodId: "method-1" },
+                session: { userUid: "attacker-uid" },
+            });
+
+            await expect(strategy.authenticate(req, makeRes())).rejects.toThrow(/Invalid authentication request/);
+            expect(options.getMethod).not.toHaveBeenCalled();
+        });
+
         it("Throws when the selected method id does not resolve.", async () => {
-            const req = makeReq({ body: { id: "user-uid-1", methodId: "bogus" }, session: {} });
+            const req = makeReq({
+                body: { id: "user-uid-1", methodId: "bogus" },
+                session: { userUid: "user-uid-1" },
+            });
             (options.getMethod as any).mockResolvedValue(undefined);
 
             await expect(strategy.authenticate(req, makeRes())).rejects.toThrow(
@@ -245,7 +266,10 @@ describe("MFAStrategy Tests", () => {
         });
 
         it("Throws for a FIDO2 method when no fidoConfig is configured.", async () => {
-            const req = makeReq({ body: { id: "user-uid-1", methodId: "method-1" }, session: {} });
+            const req = makeReq({
+                body: { id: "user-uid-1", methodId: "method-1" },
+                session: { userUid: "user-uid-1" },
+            });
             (options.getMethod as any).mockResolvedValue({ id: "method-1", type: MFAMethodType.FIDO2, data: {} });
 
             await expect(strategy.authenticate(req, makeRes())).rejects.toThrow(
@@ -255,7 +279,10 @@ describe("MFAStrategy Tests", () => {
 
         it("Generates a FIDO2 challenge and writes it to the response when fidoConfig is configured.", async () => {
             options.fidoConfig = makeFidoConfig();
-            const req = makeReq({ body: { id: "user-uid-1", methodId: "method-1" }, session: {} });
+            const req = makeReq({
+                body: { id: "user-uid-1", methodId: "method-1" },
+                session: { userUid: "user-uid-1" },
+            });
             (options.getMethod as any).mockResolvedValue({ id: "method-1", type: MFAMethodType.FIDO2, data: {} });
             mockGenerateAuthenticationOptions.mockResolvedValue({ challenge: "chal-123" });
             const res = makeRes();
@@ -263,13 +290,15 @@ describe("MFAStrategy Tests", () => {
             const result = await strategy.authenticate(req, res);
 
             expect(result).toBeUndefined();
-            expect((req.session as any).methodId).toBe("method-1");
             expect(res.status).toHaveBeenCalledWith(200);
             expect(res.json).toHaveBeenCalledWith({ challenge: "chal-123" });
         });
 
         it("Throws for an unsupported method type.", async () => {
-            const req = makeReq({ body: { id: "user-uid-1", methodId: "method-1" }, session: {} });
+            const req = makeReq({
+                body: { id: "user-uid-1", methodId: "method-1" },
+                session: { userUid: "user-uid-1" },
+            });
             (options.getMethod as any).mockResolvedValue({ id: "method-1", type: MFAMethodType.TOTP, data: {} });
 
             await expect(strategy.authenticate(req, makeRes())).rejects.toThrow(/Unsupported MFA method: totp/);
@@ -311,6 +340,34 @@ describe("MFAStrategy Tests", () => {
             expect(res.json).toHaveBeenCalledWith(methods);
         });
 
+        it("Does not throw when req.session is missing on successful password verification.", async () => {
+            const req = makeReq({
+                headers: { authorization: basicHeader("user-uid-1", "password") },
+                body: { id: "user-uid-1", password: "password" },
+                session: undefined,
+            });
+            options.require2FA = false;
+            (options.verify as any).mockResolvedValue(jwtUser);
+            (options.getMethods as any).mockResolvedValue([]);
+
+            const result = await strategy.authenticate(req, makeRes());
+
+            expect(result?.user).toEqual(jwtUser);
+        });
+
+        it("Binds the session to the verified identity on successful password verification.", async () => {
+            const req = makeReq({
+                headers: { authorization: basicHeader("user-uid-1", "password") },
+                body: { id: "user-uid-1", password: "password" },
+            });
+            (options.verify as any).mockResolvedValue(jwtUser);
+            (options.getMethods as any).mockResolvedValue([{ id: "method-1", type: MFAMethodType.OTP, data: {} }]);
+
+            await strategy.authenticate(req, makeRes());
+
+            expect((req.session as any).userUid).toBe("user-uid-1");
+        });
+
         it("Throws when there are no 2FA methods and require2FA is true (the default).", async () => {
             const req = makeReq({
                 headers: { authorization: basicHeader("user-uid-1", "password") },
@@ -323,6 +380,77 @@ describe("MFAStrategy Tests", () => {
                 /No secondary authentication methods available/,
             );
         });
+
+        it("Invokes checkRateLimit with the claimed identifier before verify().", async () => {
+            const req = makeReq({
+                headers: { authorization: basicHeader("user-uid-1", "password") },
+                body: { id: "user-uid-1", password: "password" },
+            });
+            options.checkRateLimit = vi.fn().mockResolvedValue(undefined);
+            (options.verify as any).mockResolvedValue(jwtUser);
+            (options.getMethods as any).mockResolvedValue([]);
+            options.require2FA = false;
+
+            await strategy.authenticate(req, makeRes());
+
+            expect(options.checkRateLimit).toHaveBeenCalledWith("user-uid-1", req);
+        });
+
+        it("Aborts before verify() when checkRateLimit throws.", async () => {
+            const req = makeReq({
+                headers: { authorization: basicHeader("user-uid-1", "password") },
+                body: { id: "user-uid-1", password: "password" },
+            });
+            options.checkRateLimit = vi.fn().mockRejectedValue(new Error("Too many attempts."));
+
+            await expect(strategy.authenticate(req, makeRes())).rejects.toThrow(/Too many attempts/);
+            expect(options.verify).not.toHaveBeenCalled();
+        });
+    });
+
+    describe("verifyOTP (phase 3)", () => {
+        it("Resolves the user via the session-bound identity, not the client-supplied payload id, and clears it after.", async () => {
+            const secret = otplib.generateSecret();
+            const token = await otplib.generate({ secret });
+            // The attacker claims `payload.id` is the victim, but only controls a challenge that was
+            // actually bound (via session.userUid, set in verifyBasic) to their own identity.
+            const req = makeReq({
+                body: { id: "victim-uid", token },
+                session: { id: "victim-uid", secret, userUid: "attacker-uid" },
+            });
+            (options.getUser as any).mockResolvedValue({ uid: "attacker-uid", name: "attacker", roles: [] });
+
+            await strategy.authenticate(req, makeRes());
+
+            expect(options.getUser).toHaveBeenCalledWith("attacker-uid");
+            expect(options.getUser).not.toHaveBeenCalledWith("victim-uid");
+            expect((req.session as any).userUid).toBeUndefined();
+        });
+
+        it("Clears the session-bound identity even when the OTP token is invalid.", async () => {
+            const req = makeReq({
+                body: { id: "user-uid-1", token: "000000" },
+                session: { id: "user-uid-1", secret: otplib.generateSecret(), userUid: "user-uid-1" },
+            });
+
+            await strategy.authenticate(req, makeRes(), false);
+
+            expect(options.getUser).not.toHaveBeenCalled();
+            expect((req.session as any).userUid).toBeUndefined();
+        });
+
+        it("Aborts before verifying the OTP token when checkRateLimit throws.", async () => {
+            const secret = otplib.generateSecret();
+            const token = await otplib.generate({ secret });
+            const req = makeReq({
+                body: { id: "user-uid-1", token },
+                session: { id: "user-uid-1", secret, userUid: "user-uid-1" },
+            });
+            options.checkRateLimit = vi.fn().mockRejectedValue(new Error("Too many attempts."));
+
+            await expect(strategy.authenticate(req, makeRes())).rejects.toThrow(/Too many attempts/);
+            expect(options.getUser).not.toHaveBeenCalled();
+        });
     });
 
     it("verifyTOTP is not yet implemented.", async () => {
@@ -334,7 +462,7 @@ describe("MFAStrategy Tests", () => {
         const defaultOptions = new MFAStrategyOptions();
 
         it("getMethod throws if the consumer forgot to override it.", () => {
-            expect(() => defaultOptions.getMethod("method-1")).toThrow(
+            expect(() => defaultOptions.getMethod("method-1", "user-uid-1")).toThrow(
                 /Did you forget to override MFAStrategyOptions.getContact/,
             );
         });

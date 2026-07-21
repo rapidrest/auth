@@ -13,10 +13,15 @@ vi.mock("@simplewebauthn/server", () => ({
 import { ModelRoute } from "@rapidrest/service-core";
 import { generateRegistrationOptions, verifyRegistrationResponse } from "@simplewebauthn/server";
 import { BaseSecretRoute } from "../../src/routes/BaseSecretRoute.js";
+import { PasswordConfig } from "../../src/auth/types.js";
 import { SecretType } from "../../src/models/types.js";
 
 const mockGenerateRegistrationOptions = generateRegistrationOptions as unknown as ReturnType<typeof vi.fn>;
 const mockVerifyRegistrationResponse = verifyRegistrationResponse as unknown as ReturnType<typeof vi.fn>;
+
+// Satisfies every default PasswordConfig rule: length >= 8, lowercase, UPPERCASE, a numeral, and a
+// special character from the default `special_chars` set.
+const VALID_PASSWORD = "Str0ngP@ss";
 
 class TestSecretRoute extends BaseSecretRoute<any> {}
 
@@ -199,11 +204,11 @@ describe("BaseSecretRoute Tests", () => {
     describe("validateCreate", () => {
         it("Hashes string data for a PASSWORD secret.", async () => {
             const route = new TestSecretRoute();
-            const obj: any = { type: SecretType.PASSWORD, data: "my-password" };
+            const obj: any = { type: SecretType.PASSWORD, data: VALID_PASSWORD };
 
             await (route as any).validateCreate(obj, {} as any);
 
-            expect(obj.data).not.toBe("my-password");
+            expect(obj.data).not.toBe(VALID_PASSWORD);
             expect(typeof obj.data).toBe("string");
         });
 
@@ -249,14 +254,168 @@ describe("BaseSecretRoute Tests", () => {
         it("Processes each object in an array of secrets.", async () => {
             const route = new TestSecretRoute();
             const objs: any = [
-                { type: SecretType.PASSWORD, data: "pw1" },
-                { type: SecretType.PASSWORD, data: "pw2" },
+                { type: SecretType.PASSWORD, data: VALID_PASSWORD + "-1" },
+                { type: SecretType.PASSWORD, data: VALID_PASSWORD + "-2" },
             ];
 
             await (route as any).validateCreate(objs, {} as any);
 
-            expect(objs[0].data).not.toBe("pw1");
-            expect(objs[1].data).not.toBe("pw2");
+            expect(objs[0].data).not.toBe(VALID_PASSWORD + "-1");
+            expect(objs[1].data).not.toBe(VALID_PASSWORD + "-2");
+        });
+
+        it("Throws for a PASSWORD secret shorter than the configured minimum length.", async () => {
+            const route = new TestSecretRoute();
+            const obj: any = { type: SecretType.PASSWORD, data: "Ab1!" };
+
+            await expect((route as any).validateCreate(obj, {} as any)).rejects.toThrow(
+                /minimum length of: 8/,
+            );
+        });
+
+        it("Defaults obj.userUid to the authenticated caller's uid when unset.", async () => {
+            const route = new TestSecretRoute();
+            const obj: any = { type: SecretType.PASSWORD, data: VALID_PASSWORD };
+
+            await (route as any).validateCreate(obj, {}, { uid: "user-1" });
+
+            expect(obj.userUid).toBe("user-1");
+        });
+
+        it("Allows a caller to explicitly create a secret for their own uid.", async () => {
+            const route = new TestSecretRoute();
+            const obj: any = { type: SecretType.PASSWORD, data: VALID_PASSWORD, userUid: "user-1" };
+
+            await expect(
+                (route as any).validateCreate(obj, {}, { uid: "user-1" }),
+            ).resolves.toBeUndefined();
+        });
+
+        it("Rejects creating a secret for another user's uid without a trusted role.", async () => {
+            const route = new TestSecretRoute();
+            const obj: any = { type: SecretType.PASSWORD, data: VALID_PASSWORD, userUid: "victim-uid" };
+
+            await expect(
+                (route as any).validateCreate(obj, {}, { uid: "attacker-uid", roles: [] }),
+            ).rejects.toThrow(/does not have permission/);
+        });
+
+        it("Allows a trusted (admin) caller to create a secret for another user's uid.", async () => {
+            const route = new TestSecretRoute();
+            const obj: any = { type: SecretType.PASSWORD, data: VALID_PASSWORD, userUid: "victim-uid" };
+
+            await (route as any).validateCreate(obj, {}, { uid: "admin-uid", roles: ["admin"] });
+
+            expect(obj.userUid).toBe("victim-uid");
+        });
+
+        it("Does not enforce ownership when there is no authenticated user (unauthenticated create).", async () => {
+            const route = new TestSecretRoute();
+            const obj: any = { type: SecretType.PASSWORD, data: VALID_PASSWORD, userUid: "someone-else" };
+
+            await (route as any).validateCreate(obj, {}, undefined);
+
+            expect(obj.userUid).toBe("someone-else");
+        });
+    });
+
+    describe("validatePassword", () => {
+        it("Defaults passwordConfig to the PasswordConfig defaults.", () => {
+            const route = new TestSecretRoute();
+
+            expect((route as any).passwordConfig).toEqual(new PasswordConfig());
+        });
+
+        it("Throws when the password is shorter than min_length.", () => {
+            const route = new TestSecretRoute();
+
+            expect(() => (route as any).validatePassword("Ab1!")).toThrow(/minimum length of: 8/);
+        });
+
+        it("Throws when the password has no lowercase letter and require_lowercase is set.", () => {
+            const route = new TestSecretRoute();
+
+            expect(() => (route as any).validatePassword("STR0NG!PASS")).toThrow(/lowercase letter/);
+        });
+
+        it("Throws when the password has no uppercase letter and require_uppercase is set.", () => {
+            const route = new TestSecretRoute();
+
+            expect(() => (route as any).validatePassword("str0ng!pass")).toThrow(/uppercase letter/);
+        });
+
+        it("Throws when the password has no numeral and require_numeral is set.", () => {
+            const route = new TestSecretRoute();
+
+            expect(() => (route as any).validatePassword("Strong!Pass")).toThrow(/at least one number/);
+        });
+
+        it("Throws when the password has no special character and require_special is set.", () => {
+            const route = new TestSecretRoute();
+
+            expect(() => (route as any).validatePassword("Str0ngPass")).toThrow(/special character/);
+        });
+
+        it("Accepts a password that satisfies every default rule.", () => {
+            const route = new TestSecretRoute();
+
+            expect(() => (route as any).validatePassword(VALID_PASSWORD)).not.toThrow();
+        });
+
+        it("Skips the lowercase check when require_lowercase is disabled.", () => {
+            const route = new TestSecretRoute();
+            (route as any).passwordConfig = { ...new PasswordConfig(), require_lowercase: false };
+
+            expect(() => (route as any).validatePassword("STR0NG!PASS")).not.toThrow();
+        });
+
+        it("Skips the uppercase check when require_uppercase is disabled.", () => {
+            const route = new TestSecretRoute();
+            (route as any).passwordConfig = { ...new PasswordConfig(), require_uppercase: false };
+
+            expect(() => (route as any).validatePassword("str0ng!pass")).not.toThrow();
+        });
+
+        it("Skips the numeral check when require_numeral is disabled.", () => {
+            const route = new TestSecretRoute();
+            (route as any).passwordConfig = { ...new PasswordConfig(), require_numeral: false };
+
+            expect(() => (route as any).validatePassword("Strong!Pass")).not.toThrow();
+        });
+
+        it("Skips the special-character check when require_special is disabled.", () => {
+            const route = new TestSecretRoute();
+            (route as any).passwordConfig = { ...new PasswordConfig(), require_special: false };
+
+            expect(() => (route as any).validatePassword("Str0ngPass")).not.toThrow();
+        });
+
+        it("Honors a configured minimum password length.", () => {
+            const route = new TestSecretRoute();
+            (route as any).passwordConfig = { ...new PasswordConfig(), min_length: 12 };
+
+            expect(() => (route as any).validatePassword(VALID_PASSWORD)).toThrow(/minimum length of: 12/);
+        });
+
+        it("Honors a configured custom special_chars set, using it to rebuild regexSpecialChars.", () => {
+            const route = new TestSecretRoute();
+            (route as any).passwordConfig = { ...new PasswordConfig(), special_chars: "~" };
+            (route as any).init();
+
+            expect(() => (route as any).validatePassword("Str0ngPass~")).not.toThrow();
+            expect(() => (route as any).validatePassword(VALID_PASSWORD)).toThrow(/special character/);
+        });
+    });
+
+    describe("init", () => {
+        it("Rebuilds regexSpecialChars from the configured passwordConfig.special_chars.", () => {
+            const route = new TestSecretRoute();
+            (route as any).passwordConfig = { ...new PasswordConfig(), special_chars: "~" };
+
+            (route as any).init();
+
+            expect((route as any).regexSpecialChars.test("~")).toBe(true);
+            expect((route as any).regexSpecialChars.test("!")).toBe(false);
         });
     });
 
@@ -359,6 +518,23 @@ describe("BaseSecretRoute Tests", () => {
                 counter: 0,
                 transports: ["internal"],
             });
+        });
+    });
+
+    describe("validateTOTPCreate", () => {
+        it("Defaults epochTolerance to [1, 1].", () => {
+            const route = new TestSecretRoute();
+
+            expect((route as any).totpConfig.epochTolerance).toEqual([1, 1]);
+        });
+
+        it("Captures the configured epochTolerance onto the generated TOTPSecret.", async () => {
+            const route = new TestSecretRoute();
+            const obj: any = { type: SecretType.TOTP };
+
+            await (route as any).validateTOTPCreate(obj);
+
+            expect(obj.data.epochTolerance).toEqual([1, 1]);
         });
     });
 

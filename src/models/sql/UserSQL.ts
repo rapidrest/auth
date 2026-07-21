@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Jean-Philippe Steinmetz. All rights reserved.
 ///////////////////////////////////////////////////////////////////////////////
 import { ObjectDecorators, ValidationUtils } from "@rapidrest/core";
-import { BaseEntity, DocDecorators, ModelDecorators, PersistenceDecorators } from "@rapidrest/service-core";
+import { ACLAction, BaseEntity, DocDecorators, ModelDecorators, PersistenceDecorators } from "@rapidrest/service-core";
 import { User } from "../types.js";
 const { Description } = DocDecorators;
 const { DataStore, Protect } = ModelDecorators;
@@ -18,11 +18,11 @@ const { Column, Entity } = PersistenceDecorators;
 @Entity()
 @Description("Defines a record for a single user account in the system.")
 @Protect({
-    uid: "UserMongo",
+    uid: "User",
     records: [
         {
             userOrRoleId: "anonymous",
-            actions: [],
+            actions: [ACLAction.CREATE],
         },
         {
             userOrRoleId: ".*",

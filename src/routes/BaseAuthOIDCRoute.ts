@@ -112,9 +112,18 @@ export abstract class BaseAuthOIDCRoute<U extends User, A extends Alias, P exten
 
             // Fall back to the (verified) email alias — this recognizes an account that either
             // registered before this provider-id lookup existed, or was created via another method
-            // (e.g. password) and is now authenticating with this provider for the first time.
+            // (e.g. password) and is now authenticating with this provider for the first time. Only
+            // trust the provider's email claim for this when it's actually asserted as verified —
+            // otherwise any provider that lets a user set an arbitrary, unverified email would let an
+            // attacker log into the account owning that email.
+            if (!user && profile.email && profile.email_verified) {
+                user = await this.userUtils.lookup(profile.email);
+            }
+
+            // Fall back to the provider-scoped profile id, which is safe to trust regardless of email
+            // verification since it's not attacker-choosable.
             if (!user) {
-                user = await this.userUtils.lookup(profile.email ?? profile.id);
+                user = await this.userUtils.lookup(profile.id);
             }
 
             if (!user) {

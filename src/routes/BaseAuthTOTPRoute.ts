@@ -3,8 +3,9 @@
 ///////////////////////////////////////////////////////////////////////////////
 import { JWTUser, JWTUtils, MessagingUtils, ObjectDecorators } from "@rapidrest/core";
 import { RouteDecorators, DocDecorators, RepoUtils, AuthMiddleware, ObjectFactory } from "@rapidrest/service-core";
-import { Alias, AliasType, AuthResult, Secret, SecretType, User } from "../models/types.js";
+import { Alias, AuthResult, Secret, SecretType, User } from "../models/types.js";
 import { TOTPStrategy, TOTPStrategyOptions } from "../auth/TOTPStrategy.js";
+import { RateLimiter } from "../auth/RateLimiter.js";
 import { TOTPSecret } from "../auth/types.js";
 import { UserUtils } from "./UserUtils.js";
 
@@ -34,6 +35,9 @@ export abstract class BaseAuthTOTPRoute<U extends User, A extends Alias, S exten
 
     @Inject(MessagingUtils)
     protected messagingUtils?: MessagingUtils;
+
+    @Inject(RateLimiter)
+    protected rateLimiter?: RateLimiter;
 
     protected secretRepo?: RepoUtils<S>;
 
@@ -69,6 +73,7 @@ export abstract class BaseAuthTOTPRoute<U extends User, A extends Alias, S exten
         }
 
         const options: TOTPStrategyOptions = new TOTPStrategyOptions();
+        options.checkRateLimit = (identifier: string) => this.rateLimiter!.checkAndIncrement(identifier);
         options.getSecrets = this.getSecrets.bind(this);
         options.getUser = this.getUser.bind(this);
         const strategy: TOTPStrategy = await this.objectFactory.newInstance(TOTPStrategy, {

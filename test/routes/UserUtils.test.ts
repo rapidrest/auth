@@ -121,5 +121,19 @@ describe("UserUtils Tests", () => {
 
             expect(result).toBeUndefined();
         });
+
+        it("Returns undefined without querying either repo when id is not a string (NoSQL operator injection guard).", async () => {
+            const userUtils = new UserUtils(FakeUserClass, FakeAliasClass);
+            const userFindOne = vi.fn();
+            const aliasFindOne = vi.fn();
+            (userUtils as any).userRepo = { findOne: userFindOne };
+            (userUtils as any).aliasRepo = { findOne: aliasFindOne };
+
+            const result = await userUtils.lookup({ $ne: null } as any);
+
+            expect(result).toBeUndefined();
+            expect(userFindOne).not.toHaveBeenCalled();
+            expect(aliasFindOne).not.toHaveBeenCalled();
+        });
     });
 });

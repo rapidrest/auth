@@ -20,6 +20,7 @@ import {
     verifyRegistrationResponse,
 } from "@simplewebauthn/server";
 import {
+    DUMMY_ARGON2_HASH,
     generateOTP,
     generatePasskeyChallenge,
     generatePasskeyRegistrationOptions,
@@ -32,6 +33,7 @@ import {
     isPasskeyResponse,
     isValidTOTPSecret,
     obfuscateContact,
+    verifyDummyPassword,
     verifyOTP,
     verifyPasskeyChallenge,
     verifyPasskeyRegistrationResponse,
@@ -388,6 +390,42 @@ describe("OTP helpers", () => {
             const result = await verifyOTP(req, { id: "c", token: "000000" });
             expect(result).toBe(false);
         });
+
+        it("Clears the session id/secret/token after a successful verification.", async () => {
+            const secret = otplib.generateSecret();
+            const token = await otplib.generate({ secret });
+            const req = makeReq({ session: { id: "c", secret, token } });
+
+            await verifyOTP(req, { id: "c", token });
+
+            expect((req.session as any).id).toBeUndefined();
+            expect((req.session as any).secret).toBeUndefined();
+            expect((req.session as any).token).toBeUndefined();
+        });
+
+        it("Clears the session id/secret/token even when verification fails.", async () => {
+            const secret = otplib.generateSecret();
+            const req = makeReq({ session: { id: "c", secret, token: "some-token" } });
+
+            await verifyOTP(req, { id: "c", token: "000000" });
+
+            expect((req.session as any).id).toBeUndefined();
+            expect((req.session as any).secret).toBeUndefined();
+            expect((req.session as any).token).toBeUndefined();
+        });
+
+        it("Rejects replaying the same valid token a second time (single-use).", async () => {
+            const secret = otplib.generateSecret();
+            const token = await otplib.generate({ secret });
+            const req = makeReq({ session: { id: "c", secret } });
+
+            const first = await verifyOTP(req, { id: "c", token });
+            expect(first).toBe(true);
+
+            // The session was cleared by the first call, so the second (replayed) attempt no longer
+            // has a matching session id and must be rejected rather than re-verified.
+            await expect(verifyOTP(req, { id: "c", token })).rejects.toThrow(/Invalid authentication request/);
+        });
     });
 });
 
@@ -567,6 +605,20 @@ describe("TOTP helpers", () => {
             expect(uri).toContain("digits=8");
             expect(uri).toContain("period=60");
         });
+    });
+});
+
+describe("verifyDummyPassword", () => {
+    it("Resolves without throwing regardless of the input, since the hash is never a real credential.", async () => {
+        await expect(verifyDummyPassword("anything")).resolves.toBeUndefined();
+        await expect(verifyDummyPassword("")).resolves.toBeUndefined();
+    });
+
+    it("DUMMY_ARGON2_HASH is a real, valid Argon2id hash (not a placeholder string).", async () => {
+        const argon2 = await import("argon2");
+
+        expect(DUMMY_ARGON2_HASH).toMatch(/^\$argon2id\$/);
+        await expect(argon2.verify(DUMMY_ARGON2_HASH, "definitely-the-wrong-password")).resolves.toBe(false);
     });
 });
 

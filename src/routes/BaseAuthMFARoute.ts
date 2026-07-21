@@ -6,7 +6,8 @@ import { RouteDecorators, DocDecorators, RepoUtils, AuthMiddleware, ObjectFactor
 import { Alias, AliasType, AuthResult, Secret, SecretType, User } from "../models/types.js";
 import { MFAMethod, MFAMethodType, MFAStrategy, MFAStrategyOptions } from "../auth/MFAStrategy.js";
 import { OTPContact, OTPContactType } from "../auth/types.js";
-import { importArgon2 } from "../auth/shared.js";
+import { RateLimiter } from "../auth/RateLimiter.js";
+import { importArgon2, verifyDummyPassword } from "../auth/shared.js";
 import { UserUtils } from "./UserUtils.js";
 
 const { Config, Init, Inject } = ObjectDecorators;
@@ -37,6 +38,9 @@ export abstract class BaseAuthMFARoute<U extends User, S extends Secret, A exten
 
     @Inject(MessagingUtils)
     protected messagingUtils?: MessagingUtils;
+
+    @Inject(RateLimiter)
+    protected rateLimiter?: RateLimiter;
 
     protected secretRepo?: RepoUtils<S>;
 
@@ -88,6 +92,7 @@ export abstract class BaseAuthMFARoute<U extends User, S extends Secret, A exten
         }
 
         const options: MFAStrategyOptions = new MFAStrategyOptions();
+        options.checkRateLimit = (identifier: string) => this.rateLimiter!.checkAndIncrement(identifier);
         options.getMethod = this.getMethod.bind(this);
         options.getMethods = this.getMethods.bind(this);
         options.getUser = this.getUser.bind(this);
@@ -166,28 +171,34 @@ export abstract class BaseAuthMFARoute<U extends User, S extends Secret, A exten
     }
 
     /**
-     * Retrieves the user's secondary authentication method for a given id.
+     * Retrieves the user's secondary authentication method for a given id. Only returns a method that actually
+     * belongs to `uid` — this is what stops one user's 2FA challenge from being triggered/consumed using
+     * another user's authentication method.
      * @param id The unique id of the secondary auth method to retrieve.
+     * @param userUid The unique id of the user the method must belong to.
      */
-    protected async getMethod(id: string): Promise<MFAMethod | undefined> {
+    protected async getMethod(id: string, userUid: string): Promise<MFAMethod | undefined> {
         if (!this.aliasRepo) {
             throw new Error("aliasRepo is not set.");
         }
         if (!this.secretRepo) {
             throw new Error("secretRepo is not set.");
         }
+        if (typeof id !== "string" || typeof userUid !== "string") {
+            return undefined;
+        }
 
         // The 2fa auth method may be a secret or an alias (OTP). First look for a secret
         // with the matching id. If not found, look for an alias.
         const secret: S | undefined = await this.secretRepo.findOne(id, { ignoreACL: true });
         if (secret) {
-            return this.convertSecretToMethod(secret);
+            return secret.userUid === userUid ? this.convertSecretToMethod(secret) : undefined;
         }
 
         // It's not a secret, let's try alias
         const alias: A | undefined = await this.aliasRepo.findOne(id, { ignoreACL: true });
         if (alias) {
-            return this.convertAliasToMethod(alias);
+            return alias.userUid === userUid ? this.convertAliasToMethod(alias) : undefined;
         }
 
         return undefined;
@@ -311,6 +322,9 @@ export abstract class BaseAuthMFARoute<U extends User, S extends Secret, A exten
 
         const user: U | undefined = await this.userUtils.lookup(name);
         if (!user) {
+            // Burn an equivalent amount of time to the real verification path below so a nonexistent
+            // user can't be distinguished from a wrong password via response timing.
+            await verifyDummyPassword(password);
             throw new Error("Invalid authorization request.");
         }
 

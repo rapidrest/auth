@@ -57,6 +57,9 @@ export class UserUtils<U extends User, A extends Alias> {
         if (!this.userRepo) {
             throw new Error("userRepo is not set.");
         }
+        if (typeof id !== "string") {
+            return undefined;
+        }
 
         // First let's try the id as the User `uid`.
         let user: U | undefined = await this.userRepo.findOne(id, { ignoreACL: true });

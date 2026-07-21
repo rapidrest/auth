@@ -107,6 +107,17 @@ describe("BaseAuthPasskeyRoute Tests", () => {
             expect(result).toBeUndefined();
         });
 
+        it("Returns undefined without querying the repo when credentialId is not a string (NoSQL operator injection guard).", async () => {
+            const route = new TestAuthPasskeyRoute();
+            const findOne = vi.fn();
+            (route as any).secretRepo = { findOne };
+
+            const result = await (route as any).getCredentialById({ $ne: null });
+
+            expect(result).toBeUndefined();
+            expect(findOne).not.toHaveBeenCalled();
+        });
+
         it("Returns the .data of the matching secret.", async () => {
             const route = new TestAuthPasskeyRoute();
             const findOne = vi.fn().mockResolvedValue({ data: { id: "cred-1" } });

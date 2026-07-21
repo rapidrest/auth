@@ -170,7 +170,7 @@ describe("BaseAuthOIDCRoute Tests", () => {
                 { create: vi.fn() },
                 { lookup },
             );
-            const profile: OIDCProfile = { ...baseProfile, email: "user@example.com" };
+            const profile: OIDCProfile = { ...baseProfile, email: "user@example.com", email_verified: true };
 
             const user = await getUser("token", profile);
 
@@ -181,6 +181,25 @@ describe("BaseAuthOIDCRoute Tests", () => {
                 expect.objectContaining({ alias: "test-provider:provider-user-1", type: AliasType.OAUTH }),
                 { ignoreACL: true },
             );
+        });
+
+        it("Does not link to an existing account via an unverified email claim.", async () => {
+            // Neither the oauth-alias lookup nor the profile.id fallback find anyone, and the email
+            // lookup must never be attempted since the provider didn't assert it as verified — an
+            // attacker asserting a victim's email with an unverified provider must not be able to log
+            // into the victim's account.
+            const lookup = vi.fn().mockResolvedValue(undefined);
+            const userRepo = { create: vi.fn().mockResolvedValue({ uid: "new-user" }) };
+            const profileRepo = { create: vi.fn() };
+            const aliasRepo = { create: vi.fn() };
+            const { getUser } = await setupRoute(aliasRepo, profileRepo, userRepo, { lookup });
+            const profile: OIDCProfile = { ...baseProfile, email: "victim@example.com", email_verified: false };
+
+            const user = await getUser("token", profile);
+
+            expect(lookup).not.toHaveBeenCalledWith("victim@example.com");
+            expect(user).toEqual({ uid: "new-user" });
+            expect(userRepo.create).toHaveBeenCalled();
         });
 
         it("Falls back to profile.id when no email is present on the fallback lookup.", async () => {

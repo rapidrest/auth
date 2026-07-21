@@ -23,6 +23,12 @@ export class BasicStrategyOptions {
      * Referer headers, which permanently exposes credentials outside the application.
      */
     public allowQueryParam: boolean = false;
+    /**
+     * Optional hook invoked with the claimed identifier before credentials are verified. Implementations should
+     * throw to reject the request once a caller-defined attempt threshold has been exceeded (see `RateLimiter`).
+     * A no-op when not provided.
+     */
+    public checkRateLimit?(identifier: string, req: HttpRequest): Promise<void>;
     /** Override this function to handle asynchronous (non-blocking) verification of the login info. */
     public verify(uid: string, secret: string): JWTUser | Promise<JWTUser | undefined> | undefined {
         throw new Error("Did you forget to override BasicStrategyOptions.verify?");
@@ -57,6 +63,9 @@ export class BasicStrategy implements AuthStrategy {
 
         // If the login info has been found, verify it.
         if (payload.id && payload.password) {
+            if (this.options.checkRateLimit) {
+                await this.options.checkRateLimit(payload.id, req);
+            }
             const user: JWTUser | undefined = await this.options.verify(payload.id, payload.password);
             if (user) {
                 return {

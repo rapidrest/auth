@@ -5,6 +5,7 @@ import { JWTUser, JWTUtils, MessagingUtils, ObjectDecorators } from "@rapidrest/
 import { RouteDecorators, DocDecorators, RepoUtils, AuthMiddleware, ObjectFactory } from "@rapidrest/service-core";
 import { Alias, AliasType, AuthResult, Secret, User } from "../models/types.js";
 import { OTPStrategy, OTPStrategyOptions } from "../auth/OTPStrategy.js";
+import { RateLimiter } from "../auth/RateLimiter.js";
 import { OTPContact, OTPContactType } from "../auth/types.js";
 import { UserUtils } from "./UserUtils.js";
 
@@ -36,6 +37,9 @@ export abstract class BaseAuthOTPRoute<U extends User, A extends Alias, S extend
 
     @Inject(MessagingUtils)
     protected messagingUtils?: MessagingUtils;
+
+    @Inject(RateLimiter)
+    protected rateLimiter?: RateLimiter;
 
     protected secretRepo?: RepoUtils<S>;
 
@@ -87,6 +91,7 @@ export abstract class BaseAuthOTPRoute<U extends User, A extends Alias, S extend
         }
 
         const options: OTPStrategyOptions = new OTPStrategyOptions();
+        options.checkRateLimit = (identifier: string) => this.rateLimiter!.checkAndIncrement(identifier);
         options.getContact = this.getContact.bind(this);
         options.getContacts = this.getContacts.bind(this);
         options.getUser = this.getUser.bind(this);
@@ -136,6 +141,9 @@ export abstract class BaseAuthOTPRoute<U extends User, A extends Alias, S extend
     protected async getContact(id: string): Promise<OTPContact | undefined> {
         if (!this.aliasRepo) {
             throw new Error("aliasRepo is not set.");
+        }
+        if (typeof id !== "string") {
+            return undefined;
         }
         const alias: Alias | undefined = await this.aliasRepo.findOne(id, { ignoreACL: true });
 
