@@ -1,7 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 // Copyright (C) 2026 Jean-Philippe Steinmetz
 ////////////////////////////////////////////////////////////////////////////////
-import { ApiError, ObjectDecorators } from "@rapidrest/core";
+import { ApiError, MemoryStore, ObjectDecorators } from "@rapidrest/core";
 import { ApiErrors, ConnectionManager } from "@rapidrest/service-core";
 import type { Redis } from "ioredis";
 
@@ -40,7 +40,8 @@ export class RateLimiter {
     private connMgr?: ConnectionManager;
 
     /** In-memory fallback store, used only when no `cache` connection is configured. */
-    private readonly memoryStore: Map<string, { count: number; resetAt: number }> = new Map();
+    @Inject(MemoryStore)
+    private readonly memoryStore: MemoryStore = new MemoryStore(); // Map<string, { count: number; resetAt: number }> = new Map();
 
     private get cacheClient(): Redis | undefined {
         return this.connMgr?.connections.get("cache") as Redis | undefined;
@@ -60,7 +61,7 @@ export class RateLimiter {
 
         const maxAttempts: number = this.config.maxAttempts ?? 5;
         const windowSeconds: number = this.config.windowSeconds ?? 300;
-        const key = `${CACHE_KEY_PREFIX}:${identifier}`;
+        const key = `${CACHE_KEY_PREFIX}:${identifier.toLowerCase()}`;
 
         const count: number = this.cacheClient
             ? await this.incrementRedis(this.cacheClient, key, windowSeconds)
@@ -72,18 +73,15 @@ export class RateLimiter {
     }
 
     private async incrementRedis(client: Redis, key: string, windowSeconds: number): Promise<number> {
-        const count: number = await client.incr(key);
-        if (count === 1) {
-            await client.expire(key, windowSeconds);
-        }
-        return count;
+        const [value] = await client.increx(key, "EX", windowSeconds, "ENX");
+        return Number(value);
     }
 
     private incrementMemory(key: string, windowSeconds: number): number {
         const now: number = Date.now();
-        const entry = this.memoryStore.get(key);
+        const entry = this.memoryStore.load(key);
         if (!entry || entry.resetAt <= now) {
-            this.memoryStore.set(key, { count: 1, resetAt: now + windowSeconds * 1000 });
+            this.memoryStore.save(key, { count: 1 }, windowSeconds);
             return 1;
         }
         entry.count += 1;

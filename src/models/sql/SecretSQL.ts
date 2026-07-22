@@ -19,9 +19,7 @@ const { Column, Entity } = PersistenceDecorators;
 @Entity()
 @Description("Defines a record for a single user alias in the system.")
 @Protect({
-    // Note: We are intentionally using the `User` uid here so that permissions are shared across all user
-    // related documents with a single set of access rules
-    uid: "User",
+    uid: "Secret",
     records: [
         {
             userOrRoleId: "anonymous",

@@ -73,14 +73,29 @@ describe("RateLimiter Tests", () => {
                 await expect(limiter.checkAndIncrement("user-1")).resolves.toBeUndefined();
             }
         });
+
+        it("Treats identifiers as case-insensitive so varying case can't be used to dodge the limit.", async () => {
+            const limiter = new RateLimiter();
+            (limiter as any).config = { enabled: true, maxAttempts: 1, windowSeconds: 300 };
+
+            await limiter.checkAndIncrement("User@Example.com");
+            await expect(limiter.checkAndIncrement("user@example.com")).rejects.toThrow(/Too many attempts/);
+            await expect(limiter.checkAndIncrement("USER@EXAMPLE.COM")).rejects.toThrow(/Too many attempts/);
+        });
     });
 
     describe("Redis backend", () => {
+        // INCREX (Redis >= 8.8) atomically increments the counter and applies the expiry (via `ENX`,
+        // "set expiry only if the key has none") in a single round trip, so there's no window between an
+        // increment and its expiry being set where a crash/network blip could leave the key stuck forever
+        // with no TTL, unlike the old two-step INCR-then-EXPIRE approach.
         function makeRedisClient(startingCount: number = 0) {
             let count = startingCount;
             return {
-                incr: vi.fn(async () => ++count),
-                expire: vi.fn(async () => 1),
+                increx: vi.fn(async () => {
+                    count += 1;
+                    return [count, 1];
+                }),
             };
         }
 
@@ -94,11 +109,10 @@ describe("RateLimiter Tests", () => {
             await limiter.checkAndIncrement("user-1");
             await expect(limiter.checkAndIncrement("user-1")).rejects.toThrow(/Too many attempts/);
 
-            expect(redisClient.incr).toHaveBeenCalledWith("auth:ratelimit:user-1");
-            expect(redisClient.expire).toHaveBeenCalledWith("auth:ratelimit:user-1", 60);
+            expect(redisClient.increx).toHaveBeenCalledWith("auth:ratelimit:user-1", "EX", 60, "ENX");
         });
 
-        it("Only sets the expiry on the first increment.", async () => {
+        it("Atomically increments and applies the expiry-if-absent flag on every call, not just the first.", async () => {
             const limiter = new RateLimiter();
             const redisClient = makeRedisClient();
             (limiter as any).config = { enabled: true, maxAttempts: 5, windowSeconds: 60 };
@@ -107,7 +121,9 @@ describe("RateLimiter Tests", () => {
             await limiter.checkAndIncrement("user-1");
             await limiter.checkAndIncrement("user-1");
 
-            expect(redisClient.expire).toHaveBeenCalledTimes(1);
+            expect(redisClient.increx).toHaveBeenCalledTimes(2);
+            expect(redisClient.increx).toHaveBeenNthCalledWith(1, "auth:ratelimit:user-1", "EX", 60, "ENX");
+            expect(redisClient.increx).toHaveBeenNthCalledWith(2, "auth:ratelimit:user-1", "EX", 60, "ENX");
         });
 
         it("Falls back to the in-memory store when no cache connection is configured.", async () => {

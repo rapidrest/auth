@@ -810,8 +810,8 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@rapidrest/auth@workspace:."
   dependencies:
-    "@rapidrest/core": "npm:^1.9.0"
-    "@rapidrest/service-core": "npm:1.0.0-rc.25"
+    "@rapidrest/core": "npm:^1.11.0"
+    "@rapidrest/service-core": "npm:1.0.0-rc.28"
     "@simplewebauthn/server": "npm:^13.3.2"
     "@swc/core": "npm:^1.15.41"
     "@types/cross-spawn": "npm:^6.0.6"
@@ -882,9 +882,9 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@rapidrest/core@npm:^1.9.0":
-  version: 1.9.0
-  resolution: "@rapidrest/core@npm:1.9.0"
+"@rapidrest/core@npm:^1.11.0":
+  version: 1.11.0
+  resolution: "@rapidrest/core@npm:1.11.0"
   dependencies:
     form-data: "npm:^4.0.5"
     handlebars: "npm:^4.7.9"
@@ -900,13 +900,13 @@ __metadata:
     reflect-metadata: 0.2.x
     winston: 3.x
     winston-transport: 4.x
-  checksum: 10c0/3f79d9c27dd3c4db635f0b243065876459734ae2939c7932dff1048a412b594f1d273ded87b71570c9a0ce238dd16cf79b584cc92bf431b08b67a944401b09fa
+  checksum: 10c0/211d488ace6b21f38701874975b3e5a94459e0d636d0e97170d0493efcb494369817f7cc29dcb67d052ddcf3a94ace82bef2457c66dd6238573348f2d430c228
   languageName: node
   linkType: hard
 
-"@rapidrest/service-core@npm:1.0.0-rc.25":
-  version: 1.0.0-rc.25
-  resolution: "@rapidrest/service-core@npm:1.0.0-rc.25"
+"@rapidrest/service-core@npm:1.0.0-rc.28":
+  version: 1.0.0-rc.28
+  resolution: "@rapidrest/service-core@npm:1.0.0-rc.28"
   dependencies:
     axios: "npm:^1.17.0"
     dayjs: "npm:^1.11.21"
@@ -938,7 +938,7 @@ __metadata:
       optional: true
     uWebSockets.js:
       optional: true
-  checksum: 10c0/02b8c47cde582e742dc5f880bfa287ff055fd24f26e9c83e9e5526334d4d2ebd69a0354187953b0fca367ee407607d37f0b1fdca6c631a70d717c92f56e31466
+  checksum: 10c0/d77fea2fd929ff9d5bfc234b37d9485da859d12201db6bee4577d620779669c9d595f4bceab5f5ce534106ffae95a995cb9cefee2bb5531aa76ef9d5018cc33d
   languageName: node
   linkType: hard
 

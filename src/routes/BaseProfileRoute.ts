@@ -41,7 +41,9 @@ export abstract class BaseProfileRoute<T extends Profile> extends CRUDRoute<T> {
             throw new ApiError(ApiErrors.AUTH_REQUIRED, 401, ApiErrorMessages.AUTH_REQUIRED);
         }
 
-        if (obj.uid !== user.uid && !UserUtils.hasRoles(user, this.trustedRoles)) {
+        await super.validateUpdate(id, obj, user);
+
+        if ("uid" in obj && obj.uid !== user.uid && !UserUtils.hasRoles(user, this.trustedRoles)) {
             throw new ApiError(ApiErrors.AUTH_PERMISSION_FAILURE, 403, ApiErrorMessages.AUTH_PERMISSION_FAILURE);
         }
     }

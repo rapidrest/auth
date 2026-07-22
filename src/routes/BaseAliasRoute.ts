@@ -41,6 +41,8 @@ export abstract class BaseAliasRoute<T extends Alias> extends CRUDRoute<T> {
             throw new ApiError(ApiErrors.AUTH_REQUIRED, 401, ApiErrorMessages.AUTH_REQUIRED);
         }
 
+        await super.validateUpdate(id, obj, user);
+
         if ("userUid" in obj && obj.userUid !== user.uid && !UserUtils.hasRoles(user, this.trustedRoles)) {
             throw new ApiError(ApiErrors.AUTH_PERMISSION_FAILURE, 403, ApiErrorMessages.AUTH_PERMISSION_FAILURE);
         }

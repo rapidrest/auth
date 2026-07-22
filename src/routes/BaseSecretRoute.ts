@@ -144,6 +144,8 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
         @Request req: HttpRequest,
         @User user?: JWTUser,
     ): Promise<void> {
+        await super.validate(obj, { user });
+
         const objs: Partial<T>[] = Array.isArray(obj) ? obj : [obj];
         for (const obj of objs) {
             this.enforceOwnership(obj, user);

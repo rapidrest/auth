@@ -19,9 +19,7 @@ const { Column, Entity } = PersistenceDecorators;
 @Entity()
 @Description("")
 @Protect({
-    // Note: We are intentionally using the `User` uid here so that permissions are shared across all user
-    // related documents with a single set of access rules
-    uid: "User",
+    uid: "Profile",
     records: [
         {
             userOrRoleId: "anonymous",

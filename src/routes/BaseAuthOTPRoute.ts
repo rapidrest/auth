@@ -168,6 +168,9 @@ export abstract class BaseAuthOTPRoute<U extends User, A extends Alias, S extend
         if (!this.userRepo) {
             throw new Error("userRepo is not set.");
         }
+        if (typeof id !== "string") {
+            return [];
+        }
 
         // The provided id may be the user's uid or an alias itself. First attempt to retrieve a user
         // and if found use that id. Otherwise, try looking up the alias itself. Once at least one alias

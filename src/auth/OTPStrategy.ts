@@ -161,13 +161,13 @@ export class OTPStrategy implements AuthStrategy {
             );
         }
 
+        if (this.options.checkRateLimit) {
+            await this.options.checkRateLimit(payload.id, req);
+        }
+
         const contact: OTPContact | undefined = await this.options.getContact(payload.id);
         if (!contact) {
             return undefined;
-        }
-
-        if (this.options.checkRateLimit) {
-            await this.options.checkRateLimit(payload.id, req);
         }
 
         const token: string = await generateOTP(req, payload);
