@@ -47,7 +47,7 @@ jobs:
         run: corepack enable
 
       - name: Install system dependencies
-        run: apt-get update && apt-get install -y --no-install-recommends libcurl4 curl
+        run: apt-get update && apt-get install -y --no-install-recommends ca-certificates libcurl4 curl
 
       - name: Restore node_modules cache
         uses: actions/cache@v4
