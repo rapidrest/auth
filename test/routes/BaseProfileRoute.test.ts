@@ -119,5 +119,53 @@ describe("BaseProfileRoute Tests", () => {
                 (route as any).validateUpdate("victim-uid", obj, { uid: "admin-uid", roles: ["admin"] }),
             ).resolves.toBeUndefined();
         });
+
+        it("Allows a caller to update their own profile when the payload omits uid.", async () => {
+            const route = new TestProfileRoute();
+            const obj: any = { givenName: "John" };
+
+            await expect(
+                (route as any).validateUpdate("user-1", obj, { uid: "user-1" }),
+            ).resolves.toBeUndefined();
+        });
+
+        // Regression test: checking `obj.uid` only fired when `uid` was present in the payload, so a caller
+        // could edit any *other* field of a profile they don't own just by leaving `uid` out of the body
+        // (e.g. via PUT /profile/:id/:property, which never includes it). The check now compares against the
+        // `id` path param - the record actually being targeted - regardless of what the payload contains.
+        it("Rejects modifying another user's profile without a trusted role, even when the payload omits uid.", async () => {
+            const route = new TestProfileRoute();
+            const obj: any = { givenName: "Hijacked" };
+
+            await expect(
+                (route as any).validateUpdate("victim-uid", obj, { uid: "attacker-uid", roles: [] }),
+            ).rejects.toThrow(/does not have permission/);
+        });
+
+        it("Treats the 'me' keyword as the authenticated caller's own uid.", async () => {
+            const route = new TestProfileRoute();
+            const obj: any = { givenName: "John" };
+
+            await expect(
+                (route as any).validateUpdate("me", obj, { uid: "user-1" }),
+            ).resolves.toBeUndefined();
+        });
+    });
+
+    describe("updateProperty", () => {
+        // Regression test for a framework-level gap: CRUDRoute.updateProperty (PUT /:id/:property) used to
+        // call repoUtils.update() directly with no validation hook at all, bypassing validateUpdate's
+        // ownership check entirely. Fixed upstream in @rapidrest/service-core@1.0.0-rc.28 by having
+        // updateProperty invoke this.validateUpdate() first.
+        it("Rejects hijacking uid via the single-property update route without a trusted role.", async () => {
+            const route = new TestProfileRoute();
+
+            await expect(
+                (route as any).updateProperty("victim-uid", "uid", "third-party-uid", {
+                    uid: "attacker-uid",
+                    roles: [],
+                }),
+            ).rejects.toThrow(/does not have permission/);
+        });
     });
 });

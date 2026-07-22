@@ -129,5 +129,64 @@ describe("BaseAliasRoute Tests", () => {
                 (route as any).validateUpdate("alias-1", obj, { uid: "admin-uid", roles: ["admin"] }),
             ).resolves.toBeUndefined();
         });
+
+        // Regression tests: checking `userUid` only when it's present in the payload used to mean a caller
+        // could edit any *other* field of an alias they don't own, as long as they left `userUid` out of the
+        // body. These verify the existing-record lookup that closes that gap.
+        it("Rejects modifying a field on an alias owned by someone else, even without touching userUid.", async () => {
+            const route = new TestAliasRoute();
+            (route as any).repoUtils = {
+                findOne: vi.fn().mockResolvedValue({ userUid: "victim-uid" }),
+                validate: vi.fn().mockResolvedValue(undefined),
+            };
+            const obj: any = { alias: "attacker-controlled@evil.com" };
+
+            await expect(
+                (route as any).validateUpdate("alias-1", obj, { uid: "attacker-uid", roles: [] }),
+            ).rejects.toThrow(/does not have permission/);
+        });
+
+        it("Allows modifying a field on an alias the caller owns, without touching userUid.", async () => {
+            const route = new TestAliasRoute();
+            (route as any).repoUtils = {
+                findOne: vi.fn().mockResolvedValue({ userUid: "user-1" }),
+                validate: vi.fn().mockResolvedValue(undefined),
+            };
+            const obj: any = { alias: "new-value@example.com" };
+
+            await expect(
+                (route as any).validateUpdate("alias-1", obj, { uid: "user-1" }),
+            ).resolves.toBeUndefined();
+        });
+
+        it("Skips the ownership lookup entirely for a trusted (admin) caller.", async () => {
+            const route = new TestAliasRoute();
+            const findOne = vi.fn().mockResolvedValue({ userUid: "victim-uid" });
+            (route as any).repoUtils = { findOne, validate: vi.fn().mockResolvedValue(undefined) };
+            const obj: any = { alias: "new-value@example.com" };
+
+            await expect(
+                (route as any).validateUpdate("alias-1", obj, { uid: "admin-uid", roles: ["admin"] }),
+            ).resolves.toBeUndefined();
+            expect(findOne).not.toHaveBeenCalled();
+        });
+    });
+
+    describe("updateProperty", () => {
+        // Regression test for a framework-level gap: CRUDRoute.updateProperty (PUT /:id/:property) used to
+        // call repoUtils.update() directly with no validation hook at all, letting a caller hijack an
+        // alias's userUid (and thus the account it resolves to for OTP/MFA) without ever going through
+        // validateUpdate's ownership check. Fixed upstream in @rapidrest/service-core@1.0.0-rc.28 by having
+        // updateProperty invoke this.validateUpdate() first.
+        it("Rejects hijacking userUid via the single-property update route without a trusted role.", async () => {
+            const route = new TestAliasRoute();
+
+            await expect(
+                (route as any).updateProperty("alias-1", "userUid", "victim-uid", {
+                    uid: "attacker-uid",
+                    roles: [],
+                }),
+            ).rejects.toThrow(/does not have permission/);
+        });
     });
 });

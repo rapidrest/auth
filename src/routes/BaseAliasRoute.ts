@@ -43,7 +43,20 @@ export abstract class BaseAliasRoute<T extends Alias> extends CRUDRoute<T> {
 
         await super.validateUpdate(id, obj, user);
 
-        if ("userUid" in obj && obj.userUid !== user.uid && !UserUtils.hasRoles(user, this.trustedRoles)) {
+        if (UserUtils.hasRoles(user, this.trustedRoles)) {
+            return;
+        }
+
+        // Unlike Profile, an alias's `id` (its own identifier) isn't the owning user's uid, so we can't tell
+        // who owns it from `id`/`obj` alone. Look up the existing record so a caller can't dodge the
+        // ownership check simply by leaving `userUid` out of the update payload (e.g. via
+        // `PUT /alias/:id/:property`, which updates a single field without ever including it).
+        const existing: Partial<T> | undefined = await this.repoUtils?.findOne(id, { ignoreACL: true });
+        if (existing && existing.userUid !== user.uid) {
+            throw new ApiError(ApiErrors.AUTH_PERMISSION_FAILURE, 403, ApiErrorMessages.AUTH_PERMISSION_FAILURE);
+        }
+
+        if ("userUid" in obj && obj.userUid !== user.uid) {
             throw new ApiError(ApiErrors.AUTH_PERMISSION_FAILURE, 403, ApiErrorMessages.AUTH_PERMISSION_FAILURE);
         }
     }

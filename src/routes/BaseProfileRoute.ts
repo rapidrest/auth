@@ -43,7 +43,12 @@ export abstract class BaseProfileRoute<T extends Profile> extends CRUDRoute<T> {
 
         await super.validateUpdate(id, obj, user);
 
-        if ("uid" in obj && obj.uid !== user.uid && !UserUtils.hasRoles(user, this.trustedRoles)) {
+        // Compare against `id` (the record actually being targeted), not `obj.uid`. Checking `obj.uid` only
+        // caught a caller trying to reassign ownership, but did nothing when the payload simply omitted
+        // `uid` entirely (e.g. `PUT /profile/:id/:property`, which never includes it) - letting anyone
+        // modify any other field of a profile they don't own.
+        const targetUid: string = id.toLowerCase() === "me" ? user.uid : id;
+        if (targetUid !== user.uid && !UserUtils.hasRoles(user, this.trustedRoles)) {
             throw new ApiError(ApiErrors.AUTH_PERMISSION_FAILURE, 403, ApiErrorMessages.AUTH_PERMISSION_FAILURE);
         }
     }
