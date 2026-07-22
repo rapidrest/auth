@@ -1,5 +1,9 @@
 # RapidREST: Authentication Library
 
+[![CI](https://github.com/rapidrest/auth/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/rapidrest/auth/actions/workflows/build.yml)
+[![Coverage Status](https://coveralls.io/repos/github/rapidrest/auth/badge.svg?branch=main)](https://coveralls.io/github/rapidrest/auth?branch=main)
+[![npm version](https://img.shields.io/npm/v/@rapidrest/auth)](https://www.npmjs.com/package/@rapidrest/auth)
+
 A library for implementing a complete authentication server with [RapidREST](https://rapidrest.dev). It
 provides the data models, persistence adapters, and HTTP routes needed to register and authenticate users via
 password, TOTP, OTP (email/SMS), WebAuthn passkeys, FIDO2 hardware security keys, multi-factor authentication, and
