@@ -38,7 +38,6 @@ const { Column, Entity } = PersistenceDecorators;
             },
         ],
     },
-    true,
 )
 export class ProfileMongo extends BaseMongoEntity implements Profile {
     @Column()

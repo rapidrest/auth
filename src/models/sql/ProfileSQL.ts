@@ -32,7 +32,6 @@ const { Column, Entity } = PersistenceDecorators;
             },
         ],
     },
-    true,
 )
 export class ProfileSQL extends BaseEntity implements Profile {
     @Column({ nullable: true })
