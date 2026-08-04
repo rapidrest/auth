@@ -1,8 +1,7 @@
 ///////////////////////////////////////////////////////////////////////////////
 // Copyright (C) 2026 Jean-Philippe Steinmetz. All rights reserved.
 ///////////////////////////////////////////////////////////////////////////////
-import { ObjectDecorators, ValidationUtils } from "@rapidrest/core";
-import { ACLAction, BaseEntity, DocDecorators, ModelDecorators, PersistenceDecorators } from "@rapidrest/service-core";
+import { BaseEntity, DocDecorators, ModelDecorators, PersistenceDecorators } from "@rapidrest/service-core";
 import { User } from "../types.js";
 const { Description } = DocDecorators;
 const { DataStore, Protect } = ModelDecorators;
@@ -22,7 +21,7 @@ const { Column, Entity } = PersistenceDecorators;
     records: [
         {
             userOrRoleId: "anonymous",
-            actions: [ACLAction.CREATE],
+            actions: [],
         },
         {
             userOrRoleId: ".*",

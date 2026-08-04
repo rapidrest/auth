@@ -7,6 +7,7 @@ export * from "./BaseAuthOTPRoute.js";
 export * from "./BaseAuthPasskeyRoute.js";
 export * from "./BaseAuthTOTPRoute.js";
 export * from "./BaseProfileRoute.js";
+export * from "./BaseRegistrationRoute.js";
 export * from "./BaseSecretRoute.js";
 export * from "./BaseUserRoute.js";
 export * from "./UserUtils.js";

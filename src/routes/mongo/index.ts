@@ -7,5 +7,6 @@ export * from "./BaseAuthOTPRouteMongo.js";
 export * from "./BaseAuthPasskeyRouteMongo.js";
 export * from "./BaseAuthTOTPRouteMongo.js";
 export * from "./BaseProfileRouteMongo.js";
+export * from "./BaseRegistrationRouteMongo.js";
 export * from "./BaseSecretRouteMongo.js";
 export * from "./BaseUserRouteMongo.js";
