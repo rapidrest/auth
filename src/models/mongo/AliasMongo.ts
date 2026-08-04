@@ -1,7 +1,13 @@
 ///////////////////////////////////////////////////////////////////////////////
 // Copyright (C) 2026 Jean-Philippe Steinmetz. All rights reserved.
 ///////////////////////////////////////////////////////////////////////////////
-import { BaseMongoEntity, DocDecorators, ModelDecorators, PersistenceDecorators } from "@rapidrest/service-core";
+import {
+    ACLAction,
+    BaseMongoEntity,
+    DocDecorators,
+    ModelDecorators,
+    PersistenceDecorators,
+} from "@rapidrest/service-core";
 import { Alias, AliasType } from "../types.js";
 const { Description } = DocDecorators;
 const { DataStore, Identifier, Protect } = ModelDecorators;
@@ -25,7 +31,7 @@ const { Column, Entity, Index } = PersistenceDecorators;
         },
         {
             userOrRoleId: ".*",
-            actions: [],
+            actions: [ACLAction.CREATE],
         },
     ],
 })
