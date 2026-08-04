@@ -18,19 +18,22 @@ const { Column, Entity } = PersistenceDecorators;
 @DataStore("sql")
 @Entity()
 @Description("Defines a record for a single user alias in the system.")
-@Protect({
-    uid: "Secret",
-    records: [
-        {
-            userOrRoleId: "anonymous",
-            actions: [],
-        },
-        {
-            userOrRoleId: ".*",
-            actions: [ACLAction.CREATE],
-        },
-    ],
-})
+@Protect(
+    {
+        uid: "Secret",
+        records: [
+            {
+                userOrRoleId: "anonymous",
+                actions: [],
+            },
+            {
+                userOrRoleId: ".*",
+                actions: [ACLAction.CREATE],
+            },
+        ],
+    },
+    true,
+)
 export class SecretSQL extends BaseEntity implements Secret {
     @Column({ type: "simple-json", nullable: true })
     @Nullable

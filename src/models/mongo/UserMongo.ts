@@ -16,19 +16,22 @@ const { Column, Entity } = PersistenceDecorators;
 @DataStore("mongo")
 @Entity()
 @Description("Defines a record for a single user account in the system.")
-@Protect({
-    uid: "User",
-    records: [
-        {
-            userOrRoleId: "anonymous",
-            actions: [],
-        },
-        {
-            userOrRoleId: ".*",
-            actions: [],
-        },
-    ],
-})
+@Protect(
+    {
+        uid: "User",
+        records: [
+            {
+                userOrRoleId: "anonymous",
+                actions: [],
+            },
+            {
+                userOrRoleId: ".*",
+                actions: [],
+            },
+        ],
+    },
+    true,
+)
 export class UserMongo extends BaseMongoEntity implements User {
     @Column()
     @Description("The list of permission roles the user has.")

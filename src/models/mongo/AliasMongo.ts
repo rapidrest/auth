@@ -22,19 +22,22 @@ const { Column, Entity, Index } = PersistenceDecorators;
 @DataStore("mongo")
 @Entity()
 @Description("Defines a record for a single user alias in the system.")
-@Protect({
-    uid: "Alias",
-    records: [
-        {
-            userOrRoleId: "anonymous",
-            actions: [],
-        },
-        {
-            userOrRoleId: ".*",
-            actions: [ACLAction.CREATE],
-        },
-    ],
-})
+@Protect(
+    {
+        uid: "Alias",
+        records: [
+            {
+                userOrRoleId: "anonymous",
+                actions: [],
+            },
+            {
+                userOrRoleId: ".*",
+                actions: [ACLAction.CREATE],
+            },
+        ],
+    },
+    true,
+)
 export class AliasMongo extends BaseMongoEntity implements Alias {
     @Column()
     @Identifier

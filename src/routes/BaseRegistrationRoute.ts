@@ -111,7 +111,13 @@ export abstract class BaseRegistrationRoute<U extends User, A extends Alias> {
         }
 
         if (email) {
-            const existing = await this.aliasRepo.find({ alias: email, type: AliasType.EMAIL }, { ignoreACL: true });
+            const existing = await this.aliasRepo.find(
+                {
+                    alias: email,
+                    type: AliasType.EMAIL,
+                },
+                { ignoreACL: true },
+            );
             if (existing.some((a) => a.verified)) {
                 // An account for this identifier already exists. We do not throw an error here so that this cannot
                 // be used to discover registered accounts.
@@ -126,7 +132,13 @@ export abstract class BaseRegistrationRoute<U extends User, A extends Alias> {
                 this.logger.debug(`[BaseAuthRegisterRoute] verification code for ${email}: ${token}`);
             }
         } else if (phone) {
-            const existing = await this.aliasRepo.find({ alias: phone, type: AliasType.PHONE }, { ignoreACL: true });
+            const existing = await this.aliasRepo.find(
+                {
+                    alias: phone,
+                    type: AliasType.PHONE,
+                },
+                { ignoreACL: true },
+            );
             if (existing.some((a) => a.verified)) {
                 // An account for this identifier already exists. We do not throw an error here so that this cannot
                 // be used to discover registered accounts.

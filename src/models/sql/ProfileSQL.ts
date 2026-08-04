@@ -18,19 +18,22 @@ const { Column, Entity } = PersistenceDecorators;
 @DataStore("sql")
 @Entity()
 @Description("")
-@Protect({
-    uid: "Profile",
-    records: [
-        {
-            userOrRoleId: "anonymous",
-            actions: [],
-        },
-        {
-            userOrRoleId: ".*",
-            actions: [ACLAction.CREATE],
-        },
-    ],
-})
+@Protect(
+    {
+        uid: "Profile",
+        records: [
+            {
+                userOrRoleId: "anonymous",
+                actions: [],
+            },
+            {
+                userOrRoleId: ".*",
+                actions: [ACLAction.CREATE],
+            },
+        ],
+    },
+    true,
+)
 export class ProfileSQL extends BaseEntity implements Profile {
     @Column({ nullable: true })
     @Description("The URL or path to the user's avatar image (e.g. gravatar).")

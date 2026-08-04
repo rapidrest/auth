@@ -16,19 +16,22 @@ const { Column, Entity } = PersistenceDecorators;
 @DataStore("sql")
 @Entity()
 @Description("Defines a record for a single user account in the system.")
-@Protect({
-    uid: "User",
-    records: [
-        {
-            userOrRoleId: "anonymous",
-            actions: [],
-        },
-        {
-            userOrRoleId: ".*",
-            actions: [],
-        },
-    ],
-})
+@Protect(
+    {
+        uid: "User",
+        records: [
+            {
+                userOrRoleId: "anonymous",
+                actions: [],
+            },
+            {
+                userOrRoleId: ".*",
+                actions: [],
+            },
+        ],
+    },
+    true,
+)
 export class UserSQL extends BaseEntity implements User {
     @Column({ type: "simple-json" })
     @Description("The list of permission roles the user has.")
