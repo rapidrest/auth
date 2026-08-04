@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Jean-Philippe Steinmetz. All rights reserved.
 ///////////////////////////////////////////////////////////////////////////////
 import { ObjectDecorators, ValidationUtils } from "@rapidrest/core";
-import { BaseEntity, DocDecorators, ModelDecorators, PersistenceDecorators } from "@rapidrest/service-core";
+import { ACLAction, BaseEntity, DocDecorators, ModelDecorators, PersistenceDecorators } from "@rapidrest/service-core";
 import { Contact, Preferences, Profile } from "../types.js";
 const { Description } = DocDecorators;
 const { DataStore, Protect } = ModelDecorators;
@@ -27,7 +27,7 @@ const { Column, Entity } = PersistenceDecorators;
         },
         {
             userOrRoleId: ".*",
-            actions: [],
+            actions: [ACLAction.CREATE],
         },
     ],
 })
