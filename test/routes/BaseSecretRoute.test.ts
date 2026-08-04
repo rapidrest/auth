@@ -138,6 +138,14 @@ describe("BaseSecretRoute Tests", () => {
         });
     });
 
+    describe("getPasswordConfig", () => {
+        it("Can retrieve password requirements.", async () => {
+            const route = new TestSecretRoute();
+            const result: any = await route.getPasswordConfig();
+            expect(result).toEqual(new PasswordConfig());
+        });
+    });
+
     describe("truncate", () => {
         it("Delegates to ModelRoute.doTruncate().", async () => {
             const spy = vi.spyOn(ModelRoute.prototype as any, "doTruncate").mockResolvedValue(undefined);

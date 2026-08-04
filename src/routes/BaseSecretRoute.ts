@@ -380,6 +380,14 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
         return this.beginWebAuthnRegistration(req, user, SecretType.PASSKEY, this.passkeyConfig);
     }
 
+    @Summary("Password Requirements")
+    @Description("Returns the requirements for creating passwords")
+    @Returns([Object])
+    @Get("/password")
+    public async getPasswordConfig(): Promise<any> {
+        return this.passwordConfig;
+    }
+
     @Summary("Generate FIDO2 Registration Options")
     @Description(
         "Begins a WebAuthn registration ceremony for the authenticated user's FIDO2 hardware security key and " +
