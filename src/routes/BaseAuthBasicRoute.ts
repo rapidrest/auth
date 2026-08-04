@@ -27,6 +27,9 @@ export abstract class BaseAuthBasicRoute<U extends User, S extends Secret, A ext
     @Inject(AuthMiddleware)
     protected authMiddleware?: AuthMiddleware;
 
+    @Config("auth:default_scopes", [])
+    protected defaultScopes: string[] = [];
+
     @Config("auth")
     protected jwtConfig?: any;
 
@@ -127,7 +130,10 @@ export abstract class BaseAuthBasicRoute<U extends User, S extends Secret, A ext
     @Auth(["basic"])
     @Get()
     public async authenticate(@AuthUser user: JWTUser): Promise<AuthResult | undefined> {
-        const token: string = await JWTUtils.createToken(this.jwtConfig, user);
+        const token: string = await JWTUtils.createToken(this.jwtConfig, {
+            ...user,
+            scopes: this.defaultScopes,
+        });
         return new AuthResult({
             token,
             user,

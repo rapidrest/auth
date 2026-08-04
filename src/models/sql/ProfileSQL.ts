@@ -44,7 +44,7 @@ export class ProfileSQL extends BaseEntity implements Profile {
     public birthdate?: Date;
 
     @Column({ type: "simple-json" })
-    @RequiresScope("profile:email")
+    @RequiresScope("profile:contacts")
     @Description("The user's list of contact e-mails.")
     public contacts: Contact[] = [];
 

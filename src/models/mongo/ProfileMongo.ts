@@ -50,8 +50,8 @@ export class ProfileMongo extends BaseMongoEntity implements Profile {
     public birthdate?: Date;
 
     @Column()
-    @RequiresScope("profile:email")
-    @Description("The user's list of contact e-mails.")
+    @RequiresScope("profile:contacts")
+    @Description("The user's list of contacts.")
     public contacts: Contact[] = [];
 
     @Column()

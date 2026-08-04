@@ -44,6 +44,9 @@ export abstract class BaseRegistrationRoute<U extends User, A extends Alias> {
     protected abstract aliasClass: any;
     protected abstract userClass: any;
 
+    @Config("auth:default_scopes", [])
+    protected defaultScopes: string[] = [];
+
     @Config("auth")
     protected jwtConfig?: any;
 
@@ -196,7 +199,10 @@ export abstract class BaseRegistrationRoute<U extends User, A extends Alias> {
         }
 
         const result = new AuthResult({
-            token: await JWTUtils.createToken(this.jwtConfig, user),
+            token: await JWTUtils.createToken(this.jwtConfig, {
+                ...user,
+                scopes: this.defaultScopes,
+            }),
             user,
         });
         return result;

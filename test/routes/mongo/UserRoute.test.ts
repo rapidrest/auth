@@ -254,7 +254,7 @@ describe("Route:UserMongo Tests", () => {
     it("Can make update request (with admin token).", async () => {
         const obj: UserMongo = await createUserMongo();
         const url = baseUrl + "/" + obj.uid;
-        obj.scopes = ["profile", "profile:email"];
+        obj.scopes = ["profile", "profile:contacts"];
 
         const result = await request(server.getApplication())
             .put(url)
@@ -278,7 +278,7 @@ describe("Route:UserMongo Tests", () => {
     it("Can make update property request (with admin token).", async () => {
         const obj: UserMongo = await createUserMongo();
         const url = baseUrl + "/" + obj.uid + "/scopes";
-        obj.scopes = ["profile", "profile:email"];
+        obj.scopes = ["profile", "profile:contacts"];
 
         const result = await request(server.getApplication())
             .put(url)

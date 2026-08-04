@@ -36,13 +36,13 @@ describe("Route:ProfileSQL Tests", () => {
     const admin: any = {
         uid: uuid.v4(),
         roles: ["admin"],
-        scopes: ["profile:email", "profile:preferences"],
+        scopes: ["profile:contacts", "profile:preferences"],
     };
     const adminToken = JWTUtils.createTokenSync(config.get("auth"), admin);
     const user: any = {
         uid: uuid.v4(),
         roles: [],
-        scopes: ["profile:email", "profile:preferences"],
+        scopes: ["profile:contacts", "profile:preferences"],
     };
     const userToken = JWTUtils.createTokenSync(config.get("auth"), user);
 

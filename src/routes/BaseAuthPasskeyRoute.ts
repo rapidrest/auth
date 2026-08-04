@@ -28,6 +28,9 @@ export abstract class BaseAuthPasskeyRoute<U extends User, A extends Alias, S ex
     @Inject(AuthMiddleware)
     protected authMiddleware?: AuthMiddleware;
 
+    @Config("auth:default_scopes", [])
+    protected defaultScopes: string[] = [];
+
     @Config("auth")
     protected jwtConfig?: any;
 
@@ -114,7 +117,10 @@ export abstract class BaseAuthPasskeyRoute<U extends User, A extends Alias, S ex
     @Get()
     @Post()
     public async authenticate(@AuthUser user: JWTUser): Promise<AuthResult | undefined> {
-        const token: string = await JWTUtils.createToken(this.jwtConfig, user);
+        const token: string = await JWTUtils.createToken(this.jwtConfig, {
+            ...user,
+            scopes: this.defaultScopes,
+        });
         return new AuthResult({
             token,
             user,
