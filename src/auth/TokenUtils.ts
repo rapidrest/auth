@@ -76,16 +76,35 @@ export class TokenUtils {
     }
 
     /**
-     * Builds the `Set-Cookie` header value for the given token using the configured cookie options.
+     * Clears the cookie previously set by `createToken()`, when cookie issuance is enabled via the
+     * `auth:cookie` configuration. An `HttpOnly` cookie can only ever be cleared by the server writing a
+     * new `Set-Cookie` header — client-side JavaScript has no ability to read or overwrite it — so a
+     * logout flow that relies on cookie-based auth must call this (see `BaseAuthLogoutRoute`) rather than
+     * attempting to clear the cookie from the frontend.
+     *
+     * @param res The response to write the clearing `Set-Cookie` header to. When omitted, nothing happens.
+     */
+    public clearToken(res?: HttpResponse): void {
+        if (res && this.cookieConfig?.enabled) {
+            res.setHeader("Set-Cookie", this.buildCookie(""));
+        }
+    }
+
+    /**
+     * Builds the `Set-Cookie` header value for the given token using the configured cookie options. Pass
+     * an empty string to build a header that immediately expires/clears the cookie instead.
      */
     protected buildCookie(token: string): string {
         const cfg: TokenCookieConfig = this.cookieConfig ?? {};
+        const clearing: boolean = token === "";
         const parts: string[] = [
             `${cfg.name ?? "jwt"}=${token}`,
             `Path=${cfg.path ?? "/"}`,
             `SameSite=${cfg.sameSite ?? "Lax"}`,
         ];
-        if (cfg.maxAge !== undefined) {
+        if (clearing) {
+            parts.push("Max-Age=0");
+        } else if (cfg.maxAge !== undefined) {
             parts.push(`Max-Age=${cfg.maxAge}`);
         }
         if (cfg.httpOnly !== false) {

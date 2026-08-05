@@ -106,15 +106,44 @@ describe("BaseSecretRoute Tests", () => {
     });
 
     describe("find", () => {
-        it("Delegates to ModelRoute.doFind() and cleans data from all results.", async () => {
+        it("Delegates to ModelRoute.doFind() and cleans data from all results (trusted caller).", async () => {
             const results = [{ data: "a" }, { data: "b" }];
             vi.spyOn(ModelRoute.prototype as any, "doFind").mockResolvedValue(results);
             const route = new TestSecretRoute();
+            (route as any).repoUtils = {};
 
-            const result = await route.find({ p: 1 }, { q: 1 }, { uid: "u1" } as any);
+            const result = await route.find({ p: 1 }, { q: 1 }, { uid: "admin-1", roles: ["admin"] } as any);
 
             expect(result[0].data).toBeUndefined();
             expect(result[1].data).toBeUndefined();
+        });
+
+        it("Scopes the query to the caller's own userUid, bypasses ACL, and cleans data (non-trusted caller).", async () => {
+            const results = [{ data: "a", userUid: "u1" }];
+            const find = vi.fn().mockResolvedValue(results);
+            const route = new TestSecretRoute();
+            (route as any).repoUtils = { find };
+
+            const result = await route.find({ p: 1 }, { q: 1, limit: 10, page: 2 }, { uid: "u1", roles: [] } as any);
+
+            expect(find).toHaveBeenCalledWith(
+                { p: 1, q: 1, limit: 10, page: 2, userUid: "u1" },
+                { limit: 10, page: 2, ignoreACL: true, user: { uid: "u1", roles: [] } },
+            );
+            expect(result[0].data).toBeUndefined();
+        });
+
+        it("Discards a client-supplied userUid filter for a non-trusted caller, replacing it with their own.", async () => {
+            const find = vi.fn().mockResolvedValue([]);
+            const route = new TestSecretRoute();
+            (route as any).repoUtils = { find };
+
+            await route.find({}, { userUid: "someone-else" }, { uid: "u1", roles: [] } as any);
+
+            expect(find).toHaveBeenCalledWith(
+                expect.objectContaining({ userUid: "u1" }),
+                expect.anything(),
+            );
         });
     });
 

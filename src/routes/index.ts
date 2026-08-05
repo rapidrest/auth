@@ -1,5 +1,6 @@
 export * from "./BaseAliasRoute.js";
 export * from "./BaseAuthBasicRoute.js";
+export * from "./BaseAuthLogoutRoute.js";
 export * from "./BaseAuthFIDO2Route.js";
 export * from "./BaseAuthMFARoute.js";
 export * from "./BaseAuthOIDCRoute.js";
