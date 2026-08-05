@@ -230,6 +230,51 @@ describe("Route:AliasSQL Tests", () => {
         expectMatchingFields(result.body, obj);
     });
 
+    it("Can retrieve only their own aliases via findAll (with user token).", async () => {
+        const ownAliases: AliasSQL[] = await createAliasSQLs(3, { userUid: user.uid });
+        await createAliasSQLs(2);
+
+        const result = await request(server.getApplication())
+            .get(baseUrl)
+            .set("Authorization", "jwt " + userToken);
+
+        expect(result).toBeDefined();
+        expect(result.status).toBeGreaterThanOrEqual(200);
+        expect(result.status).toBeLessThan(300);
+        expect(result.body).toBeDefined();
+        expect(result.body).toHaveLength(ownAliases.length);
+        for (const alias of result.body) {
+            expect(alias.userUid).toBe(user.uid);
+        }
+    });
+
+    it("Can retrieve their own alias by id (with user token).", async () => {
+        const obj: AliasSQL = await createAliasSQL({ userUid: user.uid });
+        const url = baseUrl + "/" + obj.uid;
+
+        const result = await request(server.getApplication())
+            .get(url)
+            .set("Authorization", "jwt " + userToken);
+
+        expect(result).toBeDefined();
+        expect(result.status).toBeGreaterThanOrEqual(200);
+        expect(result.status).toBeLessThan(300);
+        expect(result.body).toBeDefined();
+        expectMatchingFields(result.body, obj);
+    });
+
+    it("Cannot retrieve another user's alias by id (with user token).", async () => {
+        const obj: AliasSQL = await createAliasSQL();
+        const url = baseUrl + "/" + obj.uid;
+
+        const result = await request(server.getApplication())
+            .get(url)
+            .set("Authorization", "jwt " + userToken);
+
+        expect(result).toBeDefined();
+        expect(result.status).toBe(403);
+    });
+
     it("Can make truncate request (with admin token).", async () => {
         const objs: AliasSQL[] = await createAliasSQLs(5);
         let count: number = await repo.count();

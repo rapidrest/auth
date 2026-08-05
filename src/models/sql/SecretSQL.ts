@@ -28,7 +28,7 @@ const { Column, Entity } = PersistenceDecorators;
             },
             {
                 userOrRoleId: ".*",
-                actions: [ACLAction.CREATE],
+                actions: [ACLAction.CREATE, ACLAction.LIST],
             },
         ],
     },

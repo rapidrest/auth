@@ -18,21 +18,29 @@ const { Column, Entity } = PersistenceDecorators;
 @DataStore("sql")
 @Entity()
 @Description("")
-@Protect(
-    {
-        uid: "Profile",
-        records: [
-            {
-                userOrRoleId: "anonymous",
-                actions: [],
-            },
-            {
-                userOrRoleId: ".*",
-                actions: [ACLAction.CREATE],
-            },
-        ],
-    },
-)
+// `recordACL` (the `Protect()` second argument) is deliberately left at its default `false` here. A
+// `Profile`'s `uid` is intentionally the same value as its owning `User`'s `uid` (see the `Profile`
+// interface doc comment), and the generic per-record ACL system keys every `AccessControlList` document
+// by that bare `uid` with no per-model-class namespace. Enabling `recordACL` would make a `Profile`'s
+// per-record ACL alias its owning `User`'s ACL document, so whichever of the two is created second would
+// reuse/silently no-op against the first one's record instead of getting its own — and if the `User` was
+// self-registered (`BaseRegistrationRoute` creates it with no authenticated `user` in context), that
+// shared record ends up with no owner grant at all, permanently locking the owner out of ACL-mediated
+// access. `BaseProfileRoute` avoids the whole system for record-level operations (`find`/`findById`/
+// `update`/`delete`) by doing its own ownership check and passing `ignoreACL: true`.
+@Protect({
+    uid: "Profile",
+    records: [
+        {
+            userOrRoleId: "anonymous",
+            actions: [],
+        },
+        {
+            userOrRoleId: ".*",
+            actions: [ACLAction.CREATE, ACLAction.LIST],
+        },
+    ],
+})
 export class ProfileSQL extends BaseEntity implements Profile {
     @Column({ nullable: true })
     @Description("The URL or path to the user's avatar image (e.g. gravatar).")

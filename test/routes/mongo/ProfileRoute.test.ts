@@ -7,6 +7,7 @@ import {
     ACLRecord,
     MongoConnection,
     MongoRepository,
+    RepoUtils,
     Server,
     ObjectFactory,
     ConnectionManager,
@@ -15,6 +16,7 @@ import {
 import { JWTUtils, Logger } from "@rapidrest/core";
 import * as uuid from "uuid";
 import { ProfileMongo } from "../../../src/models/mongo/ProfileMongo.js";
+import { UserMongo } from "../../../src/models/mongo/UserMongo.js";
 import { MongoMemoryServer } from "mongodb-memory-server";
 
 const mongod: MongoMemoryServer = new MongoMemoryServer({
@@ -57,9 +59,10 @@ describe("Route:ProfileMongo Tests", () => {
 
         const records: ACLRecord[] = [];
 
-        // Owner has CRUD access
+        // Owner has CRUD access. Unlike Alias/Secret, a Profile has no separate `userUid` field — its own
+        // `uid` *is* the owning user's uid — so the ACL record must be keyed by `obj.uid`.
         records.push({
-            userOrRoleId: obj.userUid,
+            userOrRoleId: obj.uid,
             actions: [
                 ACLAction.COUNT,
                 ACLAction.CREATE,
@@ -80,6 +83,11 @@ describe("Route:ProfileMongo Tests", () => {
             records,
             parentUid: "ProfileMongo",
         };
+        // Unlike Alias/Secret (whose own uid is always freshly random), some tests pin a Profile's uid to a
+        // fixed `user.uid` to represent "the caller's own profile" — since `repo.clear()` in `beforeEach`
+        // only clears Profile documents (not ACLs), a leftover ACL from an earlier test with the same uid
+        // must be removed first to avoid colliding with the (uid, version) unique index.
+        await aclRepo.deleteOne({ uid: result.uid });
         await aclRepo.save(acl);
 
         return result;
@@ -243,6 +251,124 @@ describe("Route:ProfileMongo Tests", () => {
         expect(result.body).toBeDefined();
         expectMatchingFields(result.body, obj);
     });
+
+    it("Can retrieve their own profile by id (with user token).", async () => {
+        const obj: ProfileMongo = await createProfileMongo({ uid: user.uid });
+        const url = baseUrl + "/" + obj.uid;
+
+        const result = await request(server.getApplication())
+            .get(url)
+            .set("Authorization", "jwt " + userToken);
+
+        expect(result).toBeDefined();
+        expect(result.status).toBeGreaterThanOrEqual(200);
+        expect(result.status).toBeLessThan(300);
+        expect(result.body).toBeDefined();
+        expectMatchingFields(result.body, obj);
+    });
+
+    it("Can retrieve their own profile via the 'me' alias (with user token).", async () => {
+        const obj: ProfileMongo = await createProfileMongo({ uid: user.uid });
+
+        const result = await request(server.getApplication())
+            .get(`${baseUrl}/me`)
+            .set("Authorization", "jwt " + userToken);
+
+        expect(result).toBeDefined();
+        expect(result.status).toBeGreaterThanOrEqual(200);
+        expect(result.status).toBeLessThan(300);
+        expect(result.body).toBeDefined();
+        expectMatchingFields(result.body, obj);
+    });
+
+    it("Cannot retrieve another user's profile by id (with user token).", async () => {
+        const obj: ProfileMongo = await createProfileMongo();
+        const url = baseUrl + "/" + obj.uid;
+
+        const result = await request(server.getApplication())
+            .get(url)
+            .set("Authorization", "jwt " + userToken);
+
+        expect(result).toBeDefined();
+        expect(result.status).toBe(403);
+    });
+
+    it("findAll only returns their own profile, not other users' (with user token).", async () => {
+        const own: ProfileMongo = await createProfileMongo({ uid: user.uid });
+        await createProfileMongos(3);
+
+        const result = await request(server.getApplication())
+            .get(baseUrl)
+            .set("Authorization", "jwt " + userToken);
+
+        expect(result).toBeDefined();
+        expect(result.status).toBeGreaterThanOrEqual(200);
+        expect(result.status).toBeLessThan(300);
+        expect(result.body).toBeDefined();
+        expect(result.body).toHaveLength(1);
+        expectMatchingFields(result.body[0], own);
+    });
+
+    it(
+        "A self-registered User (created with no authenticated actor, exactly like " +
+            "BaseRegistrationRoute.verify() does) can still create, read and update their own Profile " +
+            "afterward, even though the two share the same uid (regression test for the User/Profile ACL " +
+            "collision — a Profile's uid is intentionally the same as its owning User's uid, and Profile no " +
+            "longer participates in the generic per-record ACL system precisely because of this).",
+        async () => {
+            const userRepoUtils: RepoUtils<UserMongo> = await objectFactory.newInstance(RepoUtils, {
+                name: UserMongo.name,
+                args: [UserMongo],
+            });
+            const newUser: UserMongo = await userRepoUtils.create(new UserMongo({ verified: true }), {
+                ignoreACL: true,
+            });
+            const newUserToken = JWTUtils.createTokenSync(config.get("auth"), {
+                uid: newUser.uid,
+                roles: [],
+                scopes: ["profile:contacts", "profile:preferences"],
+            });
+
+            const createResult = await request(server.getApplication())
+                .post(baseUrl)
+                .set("Authorization", "jwt " + newUserToken)
+                .send({ givenName: "New", familyName: "User" });
+
+            expect(createResult).toBeDefined();
+            expect(createResult.status).toBeGreaterThanOrEqual(200);
+            expect(createResult.status).toBeLessThan(300);
+            expect(createResult.body.uid).toBe(newUser.uid);
+
+            const readResult = await request(server.getApplication())
+                .get(`${baseUrl}/me`)
+                .set("Authorization", "jwt " + newUserToken);
+
+            expect(readResult.status).toBeGreaterThanOrEqual(200);
+            expect(readResult.status).toBeLessThan(300);
+            expect(readResult.body.uid).toBe(newUser.uid);
+
+            const updateResult = await request(server.getApplication())
+                .put(`${baseUrl}/${newUser.uid}`)
+                .set("Authorization", "jwt " + newUserToken)
+                .send({ ...readResult.body, givenName: "Updated" });
+
+            expect(updateResult).toBeDefined();
+            expect(updateResult.status).toBeGreaterThanOrEqual(200);
+            expect(updateResult.status).toBeLessThan(300);
+            expect(updateResult.body.givenName).toBe("Updated");
+
+            // findAll is the path that actually depended on the (colliding) per-record ACL grant before
+            // Profile stopped using it — everything above already goes through `ignoreACL: true`.
+            const listResult = await request(server.getApplication())
+                .get(baseUrl)
+                .set("Authorization", "jwt " + newUserToken);
+
+            expect(listResult.status).toBeGreaterThanOrEqual(200);
+            expect(listResult.status).toBeLessThan(300);
+            expect(listResult.body).toHaveLength(1);
+            expect(listResult.body[0].uid).toBe(newUser.uid);
+        },
+    );
 
     it("Can make truncate request (with admin token).", async () => {
         const objs: ProfileMongo[] = await createProfileMongos(5);

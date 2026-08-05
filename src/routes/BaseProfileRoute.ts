@@ -77,6 +77,38 @@ export abstract class BaseProfileRoute<T extends Profile> extends CRUDRoute<T> {
     }
 
     /**
+     * This function is overridden for the same reason as `delete()`/`findById()`/`update()`: a `Profile`'s
+     * `uid` collides with its owning `User`'s `uid` on the shared per-record ACL system, so it can't be relied
+     * on here either. Non-trusted callers are scoped directly to their own uid (`Profile` is never shared with
+     * a third party, so that's always exactly the caller's entire result set) and the generic ACL check is
+     * bypassed with `ignoreACL`.
+     */
+    @Summary("Find Profiles")
+    @Description("Returns the caller's own Profile, or all Profiles if the caller holds a trusted role.")
+    @Returns([[Array, Object]])
+    @Get()
+    public async find(@Param() params: any, @Query() query: any, @User user?: JWTUser): Promise<T[]> {
+        if (!this.repoUtils) {
+            throw new ApiError(ApiErrors.INTERNAL_ERROR, 500, ApiErrorMessages.INTERNAL_ERROR);
+        }
+        if (!user) {
+            throw new ApiError(ApiErrors.AUTH_REQUIRED, 401, ApiErrorMessages.AUTH_REQUIRED);
+        }
+
+        const searchQuery: any = { ...query, ...params };
+        if (!UserUtils.hasRoles(user, this.trustedRoles)) {
+            searchQuery.uid = user.uid;
+        }
+        return await this.repoUtils.find(searchQuery, {
+            limit: query?.limit,
+            page: query?.page,
+            version: params?.version || query?.version,
+            user,
+            ignoreACL: true,
+        });
+    }
+
+    /**
      * This function is overridden because a `Profile`'s `uid` is intentionally the same value as its owning
      * `User`'s `uid`. The generic per-document ACL system keys `AccessControlList` rows by bare `uid` with no
      * per-class namespace, so a `User` and its own `Profile` permanently collide on the same ACL row: whichever

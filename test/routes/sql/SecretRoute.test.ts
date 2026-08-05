@@ -260,6 +260,53 @@ describe("Route:SecretSQL Tests", () => {
         expectMatchingFields(result.body, obj);
     });
 
+    it("Can retrieve only their own secrets via findAll, with data stripped (with user token).", async () => {
+        const ownSecrets: SecretSQL[] = await createSecretSQLs(3, { userUid: user.uid });
+        await createSecretSQLs(2);
+
+        const result = await request(server.getApplication())
+            .get(baseUrl)
+            .set("Authorization", "jwt " + userToken);
+
+        expect(result).toBeDefined();
+        expect(result.status).toBeGreaterThanOrEqual(200);
+        expect(result.status).toBeLessThan(300);
+        expect(result.body).toBeDefined();
+        expect(result.body).toHaveLength(ownSecrets.length);
+        for (const secret of result.body) {
+            expect(secret.userUid).toBe(user.uid);
+            expect(secret.data).toBeUndefined();
+        }
+    });
+
+    it("Can retrieve their own secret by id, with data stripped (with user token).", async () => {
+        const obj: SecretSQL = await createSecretSQL({ userUid: user.uid });
+        const url = baseUrl + "/" + obj.uid;
+
+        const result = await request(server.getApplication())
+            .get(url)
+            .set("Authorization", "jwt " + userToken);
+
+        expect(result).toBeDefined();
+        expect(result.status).toBeGreaterThanOrEqual(200);
+        expect(result.status).toBeLessThan(300);
+        expect(result.body).toBeDefined();
+        expect(result.body.data).toBeUndefined();
+        expectMatchingFields(result.body, obj);
+    });
+
+    it("Cannot retrieve another user's secret by id (with user token).", async () => {
+        const obj: SecretSQL = await createSecretSQL();
+        const url = baseUrl + "/" + obj.uid;
+
+        const result = await request(server.getApplication())
+            .get(url)
+            .set("Authorization", "jwt " + userToken);
+
+        expect(result).toBeDefined();
+        expect(result.status).toBe(403);
+    });
+
     it("Can make truncate request (with admin token).", async () => {
         const objs: SecretSQL[] = await createSecretSQLs(5);
         let count: number = await repo.count();
