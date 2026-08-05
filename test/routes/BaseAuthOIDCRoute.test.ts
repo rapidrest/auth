@@ -7,6 +7,7 @@ import { OIDCProfile, OIDCProvider, OIDCStrategy, OIDCStrategyOptions } from "..
 import { BaseAuthOIDCRoute } from "../../src/routes/BaseAuthOIDCRoute.js";
 import { UserUtils } from "../../src/routes/UserUtils.js";
 import { AliasType } from "../../src/models/types.js";
+import { TokenUtils } from "../../src/auth/TokenUtils.js";
 
 class FakeAliasClass {
     static readonly name = "FakeAlias";
@@ -413,11 +414,28 @@ describe("BaseAuthOIDCRoute Tests", () => {
         it("Returns an AuthResult containing a signed JWT for the authenticated user.", async () => {
             const route = new TestAuthOIDCRoute();
             (route as any).jwtConfig = { secret: "test-secret" };
+            (route as any).tokenUtils = new TokenUtils();
+            const res = { setHeader: vi.fn() } as any;
 
-            const result = await route.login({ uid: "user-1" } as any);
+            const result = await route.login({ uid: "user-1" } as any, res);
 
             expect(result?.user).toEqual({ uid: "user-1" });
             expect(typeof result?.token).toBe("string");
+            // Cookie issuance is disabled by default (`auth:cookie.enabled` defaults to `false`).
+            expect(res.setHeader).not.toHaveBeenCalled();
+        });
+
+        it("Sets a `Set-Cookie` header when cookie issuance is enabled.", async () => {
+            const route = new TestAuthOIDCRoute();
+            (route as any).jwtConfig = { secret: "test-secret" };
+            const tokenUtils = new TokenUtils();
+            (tokenUtils as any).cookieConfig = { enabled: true };
+            (route as any).tokenUtils = tokenUtils;
+            const res = { setHeader: vi.fn() } as any;
+
+            const result = await route.login({ uid: "user-1" } as any, res);
+
+            expect(res.setHeader).toHaveBeenCalledWith("Set-Cookie", expect.stringContaining(`jwt=${result?.token}`));
         });
     });
 });

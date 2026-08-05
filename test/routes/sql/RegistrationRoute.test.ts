@@ -95,6 +95,7 @@ describe("Route:RegistrationSQL Tests", () => {
         expect(verifyResult.body).toHaveProperty("token");
         expect(verifyResult.body).toHaveProperty("user");
         expect(verifyResult.body.user.verified).toBe(true);
+        expect(String(verifyResult.headers["set-cookie"])).toContain(`jwt=${verifyResult.body.token}`);
 
         const createdUser: UserSQL | null = await userRepo.findOne({ where: { uid: verifyResult.body.user.uid } });
         expect(createdUser).toBeDefined();

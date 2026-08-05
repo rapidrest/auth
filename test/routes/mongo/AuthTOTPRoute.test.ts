@@ -174,6 +174,7 @@ describe("Route:AuthBasicMongo Tests", () => {
         expect(result.body).toBeDefined();
         expect(result.body).toHaveProperty("token");
         expect(result.body).toHaveProperty("user");
+        expect(String(result.headers["set-cookie"])).toContain(`jwt=${result.body.token}`);
     });
 
     it("Can authenticate with valid user id and totp when multiple totp secrets exist.", async () => {

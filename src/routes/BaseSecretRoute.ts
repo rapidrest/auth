@@ -467,7 +467,7 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
     }
 
     @Summary("Find All Secrets")
-    @Description("Returns all Secrets from the system that the user has access to.")
+    @Description("Returns all Secrets the caller owns, or all Secrets if the caller holds a trusted role.")
     @Returns([[Array, Object]])
     @Get()
     public async find(@Param() params: any, @Query() query: any, @User user?: JWTUser): Promise<Array<T>> {

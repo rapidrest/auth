@@ -1,17 +1,25 @@
 ///////////////////////////////////////////////////////////////////////////////
 // Copyright (C) 2026 Jean-Philippe Steinmetz
 ///////////////////////////////////////////////////////////////////////////////
-import { JWTUser, JWTUtils, ObjectDecorators } from "@rapidrest/core";
-import { RouteDecorators, DocDecorators, RepoUtils, AuthMiddleware, ObjectFactory } from "@rapidrest/service-core";
+import { JWTUser, ObjectDecorators } from "@rapidrest/core";
+import {
+    RouteDecorators,
+    DocDecorators,
+    HttpResponse,
+    RepoUtils,
+    AuthMiddleware,
+    ObjectFactory,
+} from "@rapidrest/service-core";
 import { Alias, AuthResult, Secret, SecretType, User } from "../models/types.js";
 import { BasicStrategy, BasicStrategyOptions } from "../auth/BasicStrategy.js";
 import { RateLimiter } from "../auth/RateLimiter.js";
 import { importArgon2, verifyDummyPassword } from "../auth/shared.js";
+import { TokenUtils } from "../auth/TokenUtils.js";
 import { UserUtils } from "./UserUtils.js";
 
 const { Config, Init, Inject } = ObjectDecorators;
 const { Summary, Description, Returns } = DocDecorators;
-const { Auth, Get } = RouteDecorators;
+const { Auth, Get, Response } = RouteDecorators;
 const AuthUser = RouteDecorators.User;
 
 /**
@@ -40,6 +48,9 @@ export abstract class BaseAuthBasicRoute<U extends User, S extends Secret, A ext
     protected rateLimiter?: RateLimiter;
 
     protected secretRepo?: RepoUtils<S>;
+
+    @Inject(TokenUtils)
+    protected tokenUtils?: TokenUtils;
 
     protected userUtils?: UserUtils<U, A>;
 
@@ -129,11 +140,11 @@ export abstract class BaseAuthBasicRoute<U extends User, S extends Secret, A ext
     @Returns([AuthResult, undefined])
     @Auth(["basic"])
     @Get()
-    public async authenticate(@AuthUser user: JWTUser): Promise<AuthResult | undefined> {
-        const token: string = await JWTUtils.createToken(this.jwtConfig, {
-            ...user,
-            scopes: this.defaultScopes,
-        });
+    public async authenticate(
+        @AuthUser user: JWTUser,
+        @Response res: HttpResponse,
+    ): Promise<AuthResult | undefined> {
+        const token: string = await this.tokenUtils!.createToken(this.jwtConfig, user, this.defaultScopes, res);
         return new AuthResult({
             token,
             user,

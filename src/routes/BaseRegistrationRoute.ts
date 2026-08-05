@@ -1,21 +1,23 @@
 ////////////////////////////////////////////////////////////////////////////////
 // Copyright (C) 2026 Jean-Philippe Steinmetz
 ////////////////////////////////////////////////////////////////////////////////
-import { ApiError, JWTUtils, MessagingUtils, ObjectDecorators, ValidationUtils } from "@rapidrest/core";
+import { ApiError, MessagingUtils, ObjectDecorators, ValidationUtils } from "@rapidrest/core";
 import {
     ApiErrors,
     DocDecorators,
     HttpRequest,
+    HttpResponse,
     ObjectFactory,
     RepoUtils,
     RouteDecorators,
 } from "@rapidrest/service-core";
 import { Alias, AliasType, AuthResult, User } from "../models/types.js";
 import { generateOTP, verifyOTP } from "../auth/shared.js";
+import { TokenUtils } from "../auth/TokenUtils.js";
 
 const { Config, Init, Inject, Logger } = ObjectDecorators;
 const { Summary, Description } = DocDecorators;
-const { Post, Request } = RouteDecorators;
+const { Post, Request, Response } = RouteDecorators;
 
 interface StartBody {
     email?: string;
@@ -58,6 +60,9 @@ export abstract class BaseRegistrationRoute<U extends User, A extends Alias> {
 
     @Inject(ObjectFactory)
     protected objectFactory?: ObjectFactory;
+
+    @Inject(TokenUtils)
+    protected tokenUtils?: TokenUtils;
 
     protected aliasRepo?: RepoUtils<A>;
     protected userRepo?: RepoUtils<U>;
@@ -164,7 +169,11 @@ export abstract class BaseRegistrationRoute<U extends User, A extends Alias> {
     @Summary("Verify registration e-mail code")
     @Description("Verifies the one-time code sent to the claimed e-mail address so that registration can be completed.")
     @Post("/verify")
-    public async verify(body: VerifyBody, @Request req: HttpRequest): Promise<AuthResult> {
+    public async verify(
+        body: VerifyBody,
+        @Request req: HttpRequest,
+        @Response res: HttpResponse,
+    ): Promise<AuthResult> {
         if (!this.aliasRepo) {
             throw new Error("aliasRepo is not set.");
         }
@@ -211,10 +220,7 @@ export abstract class BaseRegistrationRoute<U extends User, A extends Alias> {
         }
 
         const result = new AuthResult({
-            token: await JWTUtils.createToken(this.jwtConfig, {
-                ...user,
-                scopes: this.defaultScopes,
-            }),
+            token: await this.tokenUtils!.createToken(this.jwtConfig, user, this.defaultScopes, res),
             user,
         });
         return result;

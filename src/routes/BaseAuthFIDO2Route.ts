@@ -1,16 +1,24 @@
 ///////////////////////////////////////////////////////////////////////////////
 // Copyright (C) 2026 Jean-Philippe Steinmetz
 ///////////////////////////////////////////////////////////////////////////////
-import { JWTUser, JWTUtils, MessagingUtils, ObjectDecorators } from "@rapidrest/core";
-import { RouteDecorators, DocDecorators, RepoUtils, AuthMiddleware, ObjectFactory } from "@rapidrest/service-core";
+import { JWTUser, MessagingUtils, ObjectDecorators } from "@rapidrest/core";
+import {
+    RouteDecorators,
+    DocDecorators,
+    HttpResponse,
+    RepoUtils,
+    AuthMiddleware,
+    ObjectFactory,
+} from "@rapidrest/service-core";
 import { Alias, AuthResult, Secret, SecretType, User } from "../models/types.js";
 import { FIDO2Strategy, FIDO2StrategyOptions } from "../auth/FIDO2Strategy.js";
 import { PasskeyConfig, StoredPasskeyCredential } from "../auth/types.js";
+import { TokenUtils } from "../auth/TokenUtils.js";
 import { UserUtils } from "./UserUtils.js";
 
 const { Config, Init, Inject } = ObjectDecorators;
 const { Summary, Description, Returns } = DocDecorators;
-const { Auth, Get, Post } = RouteDecorators;
+const { Auth, Get, Post, Response } = RouteDecorators;
 const AuthUser = RouteDecorators.User;
 
 /**
@@ -56,6 +64,9 @@ export abstract class BaseAuthFIDO2Route<U extends User, A extends Alias, S exte
         rpID: "rapidrest",
         origin: "http://localhost:3000",
     };
+
+    @Inject(TokenUtils)
+    protected tokenUtils?: TokenUtils;
 
     protected userRepo?: RepoUtils<U>;
 
@@ -125,11 +136,11 @@ export abstract class BaseAuthFIDO2Route<U extends User, A extends Alias, S exte
     @Auth(["fido2"])
     @Get()
     @Post()
-    public async authenticate(@AuthUser user: JWTUser): Promise<AuthResult | undefined> {
-        const token: string = await JWTUtils.createToken(this.jwtConfig, {
-            ...user,
-            scopes: this.defaultScopes,
-        });
+    public async authenticate(
+        @AuthUser user: JWTUser,
+        @Response res: HttpResponse,
+    ): Promise<AuthResult | undefined> {
+        const token: string = await this.tokenUtils!.createToken(this.jwtConfig, user, this.defaultScopes, res);
         return new AuthResult({
             token,
             user,

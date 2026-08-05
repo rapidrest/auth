@@ -24,21 +24,19 @@ const { Column, Entity } = PersistenceDecorators;
 @DataStore("mongo")
 @Entity()
 @Description("")
-@Protect(
-    {
-        uid: "Profile",
-        records: [
-            {
-                userOrRoleId: "anonymous",
-                actions: [],
-            },
-            {
-                userOrRoleId: ".*",
-                actions: [ACLAction.CREATE],
-            },
-        ],
-    },
-)
+@Protect({
+    uid: "Profile",
+    records: [
+        {
+            userOrRoleId: "anonymous",
+            actions: [],
+        },
+        {
+            userOrRoleId: ".*",
+            actions: [ACLAction.CREATE, ACLAction.LIST],
+        },
+    ],
+})
 export class ProfileMongo extends BaseMongoEntity implements Profile {
     @Column()
     @Description("The URL or path to the user's avatar image (e.g. gravatar).")

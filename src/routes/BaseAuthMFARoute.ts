@@ -1,18 +1,26 @@
 ///////////////////////////////////////////////////////////////////////////////
 // Copyright (C) 2026 Jean-Philippe Steinmetz
 ///////////////////////////////////////////////////////////////////////////////
-import { JWTUser, JWTUtils, MessagingUtils, ObjectDecorators } from "@rapidrest/core";
-import { RouteDecorators, DocDecorators, RepoUtils, AuthMiddleware, ObjectFactory } from "@rapidrest/service-core";
+import { JWTUser, MessagingUtils, ObjectDecorators } from "@rapidrest/core";
+import {
+    RouteDecorators,
+    DocDecorators,
+    HttpResponse,
+    RepoUtils,
+    AuthMiddleware,
+    ObjectFactory,
+} from "@rapidrest/service-core";
 import { Alias, AliasType, AuthResult, Secret, SecretType, User } from "../models/types.js";
 import { MFAMethod, MFAMethodType, MFAStrategy, MFAStrategyOptions } from "../auth/MFAStrategy.js";
 import { OTPContact, OTPContactType } from "../auth/types.js";
 import { RateLimiter } from "../auth/RateLimiter.js";
 import { importArgon2, verifyDummyPassword } from "../auth/shared.js";
+import { TokenUtils } from "../auth/TokenUtils.js";
 import { UserUtils } from "./UserUtils.js";
 
 const { Config, Init, Inject } = ObjectDecorators;
 const { Summary, Description, Returns } = DocDecorators;
-const { Auth, Get, Post } = RouteDecorators;
+const { Auth, Get, Post, Response } = RouteDecorators;
 const AuthUser = RouteDecorators.User;
 
 /**
@@ -49,6 +57,9 @@ export abstract class BaseAuthMFARoute<U extends User, S extends Secret, A exten
 
     /** The name of the messaging template to use for sending notifications. */
     protected template: string = "login-otp";
+
+    @Inject(TokenUtils)
+    protected tokenUtils?: TokenUtils;
 
     protected userRepo?: RepoUtils<U>;
 
@@ -119,11 +130,11 @@ export abstract class BaseAuthMFARoute<U extends User, S extends Secret, A exten
     @Auth(["mfa"])
     @Get()
     @Post()
-    public async authenticate(@AuthUser user: JWTUser): Promise<AuthResult | undefined> {
-        const token: string = await JWTUtils.createToken(this.jwtConfig, {
-            ...user,
-            scopes: this.defaultScopes,
-        });
+    public async authenticate(
+        @AuthUser user: JWTUser,
+        @Response res: HttpResponse,
+    ): Promise<AuthResult | undefined> {
+        const token: string = await this.tokenUtils!.createToken(this.jwtConfig, user, this.defaultScopes, res);
         return new AuthResult({
             token,
             user,

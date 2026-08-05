@@ -260,6 +260,7 @@ describe("Route:AuthMFASQL Tests", () => {
         expect(phase3.body).toHaveProperty("token");
         expect(phase3.body).toHaveProperty("user");
         expect(phase3.body.user.uid).toBe(user.uid);
+        expect(String(phase3.headers["set-cookie"])).toContain(`jwt=${phase3.body.token}`);
     });
 
     it("Cannot complete phase 3 with an invalid OTP token.", async () => {

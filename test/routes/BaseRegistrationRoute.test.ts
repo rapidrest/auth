@@ -8,6 +8,11 @@ import { RepoUtils } from "@rapidrest/service-core";
 import { BaseRegistrationRoute } from "../../src/routes/BaseRegistrationRoute.js";
 import { AliasType } from "../../src/models/types.js";
 import { generateOTP } from "../../src/auth/shared.js";
+import { TokenUtils } from "../../src/auth/TokenUtils.js";
+
+function makeRes(): any {
+    return { setHeader: vi.fn() };
+}
 
 class FakeAliasClass {
     static readonly name = "FakeAlias";
@@ -290,8 +295,10 @@ describe("BaseRegistrationRoute Tests", () => {
             (route as any).aliasRepo = { create: aliasCreate };
             (route as any).userRepo = { create: userCreate };
             (route as any).jwtConfig = { secret: "test-secret" };
+            (route as any).tokenUtils = new TokenUtils();
+            const res = makeRes();
 
-            const result = await (route as any).verify({ email: "user@example.com", token }, req);
+            const result = await (route as any).verify({ email: "user@example.com", token }, req, res);
 
             expect(userCreate).toHaveBeenCalledWith({ verified: true }, { ignoreACL: true });
             expect(aliasCreate).toHaveBeenCalledWith(
@@ -300,6 +307,27 @@ describe("BaseRegistrationRoute Tests", () => {
             );
             expect(result.user).toEqual(user);
             expect(typeof result.token).toBe("string");
+            // Cookie issuance is disabled by default (`auth:cookie.enabled` defaults to `false`).
+            expect(res.setHeader).not.toHaveBeenCalled();
+        });
+
+        it("Sets a `Set-Cookie` header when cookie issuance is enabled.", async () => {
+            const req = makeReq();
+            const token = await generateOTP(req, { id: "user@example.com" });
+
+            const route = new TestRegistrationRoute();
+            const user = { uid: "user-1", roles: [], scopes: [] };
+            (route as any).aliasRepo = { create: vi.fn().mockResolvedValue(undefined) };
+            (route as any).userRepo = { create: vi.fn().mockResolvedValue(user) };
+            (route as any).jwtConfig = { secret: "test-secret" };
+            const tokenUtils = new TokenUtils();
+            (tokenUtils as any).cookieConfig = { enabled: true };
+            (route as any).tokenUtils = tokenUtils;
+            const res = makeRes();
+
+            const result = await (route as any).verify({ email: "user@example.com", token }, req, res);
+
+            expect(res.setHeader).toHaveBeenCalledWith("Set-Cookie", expect.stringContaining(`jwt=${result.token}`));
         });
 
         it("Creates a phone alias when a phone number was verified instead of an e-mail.", async () => {
@@ -313,6 +341,7 @@ describe("BaseRegistrationRoute Tests", () => {
             (route as any).aliasRepo = { create: aliasCreate };
             (route as any).userRepo = { create: userCreate };
             (route as any).jwtConfig = { secret: "test-secret" };
+            (route as any).tokenUtils = new TokenUtils();
 
             const result = await (route as any).verify({ phone: "+15551234567", token }, req);
 
@@ -331,6 +360,7 @@ describe("BaseRegistrationRoute Tests", () => {
             (route as any).aliasRepo = { create: vi.fn().mockResolvedValue(undefined) };
             (route as any).userRepo = { create: vi.fn().mockResolvedValue({ uid: "user-1", roles: [], scopes: [] }) };
             (route as any).jwtConfig = { secret: "test-secret" };
+            (route as any).tokenUtils = new TokenUtils();
 
             await (route as any).verify({ email: "user@example.com", token }, req);
 

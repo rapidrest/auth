@@ -188,6 +188,7 @@ describe("Route:AuthOTPMongo Tests", () => {
         expect(result.body).toBeDefined();
         expect(result.body).toHaveProperty("token");
         expect(result.body).toHaveProperty("user");
+        expect(String(result.headers["set-cookie"])).toContain(`jwt=${result.body.token}`);
     });
 
     it("Cannot verify an OTP challenge with an invalid token.", async () => {

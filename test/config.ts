@@ -52,6 +52,12 @@ conf.defaults({
             audience: "mydomain.com",
             issuer: "api.mydomain.com",
         },
+        // Controls the `Set-Cookie` header written alongside the JWT returned by the various
+        // authentication routes. Enabled here so integration tests can verify the cookie is set.
+        cookie: {
+            enabled: true,
+            name: "jwt",
+        },
         oidc: {
             name: "test",
             authorizationURL: "https://oidc-test.com/authorize",

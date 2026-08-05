@@ -1,7 +1,14 @@
 ///////////////////////////////////////////////////////////////////////////////
 // Copyright (C) 2026 Jean-Philippe Steinmetz. All rights reserved.
 ///////////////////////////////////////////////////////////////////////////////
-import { ApiErrorMessages, ApiErrors, CRUDRoute, UpdateObject } from "@rapidrest/service-core";
+import {
+    ApiErrorMessages,
+    ApiErrors,
+    CRUDRoute,
+    DocDecorators,
+    RouteDecorators,
+    UpdateObject,
+} from "@rapidrest/service-core";
 import { ApiError, JWTUser, ObjectDecorators, UserUtils } from "@rapidrest/core";
 import { Alias } from "../models/types.js";
 

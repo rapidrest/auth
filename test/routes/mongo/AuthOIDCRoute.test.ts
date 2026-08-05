@@ -150,6 +150,7 @@ describe("Route:AuthOIDCMongo Tests", () => {
         expect(result.body).toBeDefined();
         expect(result.body).toHaveProperty("token");
         expect(result.body).toHaveProperty("user");
+        expect(String(result.headers["set-cookie"])).toContain(`jwt=${result.body.token}`);
 
         expect(mockPost).toHaveBeenCalledWith(
             "https://oidc-test.com/profile",

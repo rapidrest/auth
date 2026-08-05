@@ -227,6 +227,7 @@ describe("Route:AuthPasskeySQL Tests", () => {
         expect(finishResult.body).toBeDefined();
         expect(finishResult.body).toHaveProperty("token");
         expect(finishResult.body).toHaveProperty("user");
+        expect(String(finishResult.headers["set-cookie"])).toContain(`jwt=${finishResult.body.token}`);
         expect(mockVerifyAuthenticationResponse).toHaveBeenCalledWith(
             expect.objectContaining({
                 expectedChallenge: "test-challenge",
