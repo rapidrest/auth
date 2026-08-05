@@ -132,6 +132,48 @@ describe("Route:RegistrationSQL Tests", () => {
         expect(aliases[0].verified).toBe(true);
     });
 
+    it(
+        "A newly self-registered user can read and update their own User record afterward " +
+            "(regression test: `RepoUtils.create()` only grants the new record's creator ownership of it via " +
+            "`options.user` — but registration creates the User with no `options.user` in context, since the " +
+            "user themselves doesn't exist as an authenticatable principal until this very call returns, so " +
+            "without this fix the resulting per-record ACL grants nobody anything and the user is locked out " +
+            "of their own account).",
+        async () => {
+            const client = agent(server.getApplication());
+            const email = `${uuid.v4()}@example.com`;
+
+            await client.post(`${baseUrl}/start`).send({ email });
+            const sendEmailMock = messagingUtils.sendEmail as any;
+            const token: string = sendEmailMock.mock.calls[0][1].totp;
+            const verifyResult = await client.post(`${baseUrl}/verify`).send({ email, token });
+            const newUserToken: string = verifyResult.body.token;
+            const newUserUid: string = verifyResult.body.user.uid;
+
+            const readResult = await request(server.getApplication())
+                .get(`/sql/users/${newUserUid}`)
+                .set("Authorization", "jwt " + newUserToken);
+
+            expect(readResult).toBeDefined();
+            expect(readResult.status).toBeGreaterThanOrEqual(200);
+            expect(readResult.status).toBeLessThan(300);
+            expect(readResult.body.uid).toBe(newUserUid);
+
+            // `scopes` has no `@Column()` and isn't persisted for the SQL model — the update route can't
+            // tolerate an unrecognized `scopes` key in the request body, so it's stripped here (see the
+            // identical note in test/routes/sql/UserRoute.test.ts).
+            const { scopes, ...payload } = readResult.body;
+            const updateResult = await request(server.getApplication())
+                .put(`/sql/users/${newUserUid}`)
+                .set("Authorization", "jwt " + newUserToken)
+                .send({ ...payload, verified: true });
+
+            expect(updateResult).toBeDefined();
+            expect(updateResult.status).toBeGreaterThanOrEqual(200);
+            expect(updateResult.status).toBeLessThan(300);
+        },
+    );
+
     it("Does not send a challenge or reveal that an account already exists for a verified e-mail.", async () => {
         const email = `${uuid.v4()}@example.com`;
         const user: UserSQL = await userRepo.save(new UserSQL({ roles: [], scopes: [], verified: true }));

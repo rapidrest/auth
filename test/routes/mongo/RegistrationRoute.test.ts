@@ -131,6 +131,44 @@ describe("Route:RegistrationMongo Tests", () => {
         expect(aliases[0].verified).toBe(true);
     });
 
+    it(
+        "A newly self-registered user can read and update their own User record afterward " +
+            "(regression test: `RepoUtils.create()` only grants the new record's creator ownership of it via " +
+            "`options.user` — but registration creates the User with no `options.user` in context, since the " +
+            "user themselves doesn't exist as an authenticatable principal until this very call returns, so " +
+            "without this fix the resulting per-record ACL grants nobody anything and the user is locked out " +
+            "of their own account).",
+        async () => {
+            const client = agent(server.getApplication());
+            const email = `${uuid.v4()}@example.com`;
+
+            await client.post(`${baseUrl}/start`).send({ email });
+            const sendEmailMock = messagingUtils.sendEmail as any;
+            const token: string = sendEmailMock.mock.calls[0][1].totp;
+            const verifyResult = await client.post(`${baseUrl}/verify`).send({ email, token });
+            const newUserToken: string = verifyResult.body.token;
+            const newUserUid: string = verifyResult.body.user.uid;
+
+            const readResult = await request(server.getApplication())
+                .get(`/mongo/users/${newUserUid}`)
+                .set("Authorization", "jwt " + newUserToken);
+
+            expect(readResult).toBeDefined();
+            expect(readResult.status).toBeGreaterThanOrEqual(200);
+            expect(readResult.status).toBeLessThan(300);
+            expect(readResult.body.uid).toBe(newUserUid);
+
+            const updateResult = await request(server.getApplication())
+                .put(`/mongo/users/${newUserUid}`)
+                .set("Authorization", "jwt " + newUserToken)
+                .send({ ...readResult.body, verified: true });
+
+            expect(updateResult).toBeDefined();
+            expect(updateResult.status).toBeGreaterThanOrEqual(200);
+            expect(updateResult.status).toBeLessThan(300);
+        },
+    );
+
     it("Does not send a challenge or reveal that an account already exists for a verified e-mail.", async () => {
         const email = `${uuid.v4()}@example.com`;
         const user: UserMongo = await userRepo.save(new UserMongo({ roles: [], scopes: [], verified: true }));

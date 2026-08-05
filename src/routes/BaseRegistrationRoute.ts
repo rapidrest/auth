@@ -202,8 +202,17 @@ export abstract class BaseRegistrationRoute<U extends User, A extends Alias> {
             throw new ApiError(ApiErrors.AUTH_FAILED, 400, "The verification code is invalid or has expired.");
         }
 
-        const user = await this.userRepo.create({ verified: true } as any, {
+        // `RepoUtils.create()` only grants the new record's owner permission over it via `options.user` — but
+        // there's no authenticated actor to supply here, since the account being created *is* the actor and
+        // doesn't exist as an authenticatable principal until this call returns. Passing plain `{verified:
+        // true}` would leave the per-record ACL grant with nobody in it, locking the new user out of their
+        // own account. `uid` is generated client-side in the entity constructor (see `BaseEntity`), so it's
+        // known before `create()` is ever called — pre-instantiate the object and pass it as `options.user`
+        // too, exactly like the alias creation below does, so the new user is recognized as their own owner.
+        const newUser = new this.userClass({ verified: true });
+        const user = await this.userRepo.create(newUser, {
             ignoreACL: true,
+            user: newUser,
         });
         const options = { ignoreACL: true, user };
         if (email) {

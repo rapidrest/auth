@@ -180,6 +180,53 @@ describe("Route:UserSQL Tests", () => {
         }
     });
 
+    it(
+        "A User provisioned by an admin can read and update their own record afterward " +
+            "(regression test: `RepoUtils.create()`'s automatic owner grant is skipped for trusted-role " +
+            "callers, since a trusted caller creating e.g. an Alias/Secret for themselves doesn't need a " +
+            "redundant grant — but an admin provisioning a User on someone else's behalf has no such " +
+            "self-service creator, so without this fix nobody ever gets a grant and the new user is locked " +
+            "out of their own account).",
+        async () => {
+            const createResult = await request(server.getApplication())
+                .post(baseUrl)
+                .set("Authorization", "jwt " + adminToken)
+                .send({ roles: [], scopes: [], verified: true });
+
+            expect(createResult).toBeDefined();
+            expect(createResult.status).toBeGreaterThanOrEqual(200);
+            expect(createResult.status).toBeLessThan(300);
+            const newUserUid: string = createResult.body.uid;
+
+            const newUserToken = JWTUtils.createTokenSync(config.get("auth"), {
+                uid: newUserUid,
+                roles: [],
+                scopes: [],
+            });
+
+            const readResult = await request(server.getApplication())
+                .get(`${baseUrl}/${newUserUid}`)
+                .set("Authorization", "jwt " + newUserToken);
+
+            expect(readResult).toBeDefined();
+            expect(readResult.status).toBeGreaterThanOrEqual(200);
+            expect(readResult.status).toBeLessThan(300);
+            expect(readResult.body.uid).toBe(newUserUid);
+
+            // `scopes` has no `@Column()` and isn't persisted for the SQL model — the update route can't
+            // tolerate an unrecognized `scopes` key in the request body, so it's stripped here.
+            const { scopes, ...payload } = readResult.body;
+            const updateResult = await request(server.getApplication())
+                .put(`${baseUrl}/${newUserUid}`)
+                .set("Authorization", "jwt " + newUserToken)
+                .send({ ...payload, verified: true });
+
+            expect(updateResult).toBeDefined();
+            expect(updateResult.status).toBeGreaterThanOrEqual(200);
+            expect(updateResult.status).toBeLessThan(300);
+        },
+    );
+
     it("Can make delete request (with admin token).", async () => {
         const obj: UserSQL = await createUserSQL();
         const url = baseUrl + "/" + obj.uid;

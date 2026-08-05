@@ -19,6 +19,12 @@ class FakeAliasClass {
 }
 class FakeUserClass {
     static readonly name = "FakeUser";
+    verified?: boolean;
+    constructor(other?: any) {
+        if (other) {
+            Object.assign(this, other);
+        }
+    }
 }
 
 class TestRegistrationRoute extends BaseRegistrationRoute<any, any> {
@@ -300,7 +306,15 @@ describe("BaseRegistrationRoute Tests", () => {
 
             const result = await (route as any).verify({ email: "user@example.com", token }, req, res);
 
-            expect(userCreate).toHaveBeenCalledWith({ verified: true }, { ignoreACL: true });
+            // The new User is instantiated up front (its `uid` is generated client-side by the entity
+            // constructor) and passed as both the object to create *and* `options.user`, so `RepoUtils.
+            // create()`'s owner-grant logic attributes ownership of the new record to the user themselves —
+            // there's no other authenticated actor to attribute it to during self-registration.
+            expect(userCreate).toHaveBeenCalledTimes(1);
+            const [passedUser, passedOptions] = userCreate.mock.calls[0];
+            expect(passedUser).toBeInstanceOf(FakeUserClass);
+            expect(passedUser.verified).toBe(true);
+            expect(passedOptions).toEqual({ ignoreACL: true, user: passedUser });
             expect(aliasCreate).toHaveBeenCalledWith(
                 { alias: "user@example.com", type: AliasType.EMAIL, userUid: "user-1", verified: true },
                 { ignoreACL: true, user },
