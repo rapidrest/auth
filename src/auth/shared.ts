@@ -312,6 +312,23 @@ export const generatePasskeyChallenge = async function (
     return result;
 };
 
+/**
+ * Coerces a stored credential public key back into a `Uint8Array`.
+ *
+ * `StoredPasskeyCredential.publicKey` is a `Uint8Array` when it's first produced by the
+ * registration ceremony, but by the time it's read back here it's been round-tripped through
+ * whatever the `Secret` datastore uses to persist `data` (e.g. TypeORM's `simple-json` column,
+ * which serializes via `JSON.stringify`/`JSON.parse`). That round-trip doesn't preserve typed
+ * arrays — a `Uint8Array` comes back as a plain object keyed by numeric index
+ * (`{"0":1,"1":2,...}`). Passed as-is to `@simplewebauthn/server`, that plain object has no
+ * `byteLength`, so its CBOR/COSE key decoder treats it as zero-length input and fails with an
+ * opaque "No data" error. Reconstruct a real `Uint8Array` regardless of which shape it comes in
+ * as, so verification always sees the actual key bytes.
+ */
+function toUint8Array(value: Uint8Array | ArrayLike<number>): Uint8Array {
+    return value instanceof Uint8Array ? value : Uint8Array.from(Object.values(value));
+}
+
 export const verifyPasskeyChallenge = async function (
     credential: StoredPasskeyCredential,
     config: PasskeyConfig,
@@ -332,7 +349,7 @@ export const verifyPasskeyChallenge = async function (
         credential: {
             id: credential.id,
             counter: credential.counter,
-            publicKey: credential.publicKey,
+            publicKey: toUint8Array(credential.publicKey),
             transports: credential.transports,
         },
         requireUserVerification: config.requireUserVerification ?? true,
