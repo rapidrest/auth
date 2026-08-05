@@ -466,12 +466,35 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
         return super.doExists(id, { query, res, user });
     }
 
+    /**
+     * `Secret`'s class-level ACL intentionally does NOT grant `LIST` to `.*` — per-record ACL narrowing in
+     * `RepoUtils.find()` falls back to the *parent* (class-level) ACL when a specific record has no direct
+     * grant for the caller, so a class-level `.*: LIST` wildcard would make every record's per-record check
+     * pass for every caller via that fallback, leaking every user's secrets to every other user. Instead,
+     * self-service "list my own secrets" is handled here directly: scope the query to the caller's own
+     * `userUid` (discarding any client-supplied `userUid` filter, which would otherwise let a caller probe
+     * another user's secrets) and bypass ACL entirely with `ignoreACL` for that already-scoped lookup — the
+     * same pattern already used internally by `beginWebAuthnRegistration()` above. A trusted role keeps the
+     * normal, unscoped behavior.
+     */
     @Summary("Find All Secrets")
     @Description("Returns all Secrets the caller owns, or all Secrets if the caller holds a trusted role.")
     @Returns([[Array, Object]])
     @Get()
     public async find(@Param() params: any, @Query() query: any, @User user?: JWTUser): Promise<Array<T>> {
-        const results: Array<T> = await super.doFind({ params, query, user });
+        if (!this.repoUtils) {
+            throw new ApiError(ApiErrors.INTERNAL_ERROR, 500, ApiErrorMessages.INTERNAL_ERROR);
+        }
+
+        let results: Array<T>;
+        if (user && !UserUtils.hasRoles(user, this.trustedRoles)) {
+            results = await this.repoUtils.find(
+                { ...params, ...query, userUid: user.uid },
+                { limit: query?.limit, page: query?.page, ignoreACL: true, user },
+            );
+        } else {
+            results = await super.doFind({ params, query, user });
+        }
         this.cleanData(results);
         return results;
     }

@@ -1,11 +1,20 @@
 ///////////////////////////////////////////////////////////////////////////////
 // Copyright (C) 2026 Jean-Philippe Steinmetz. All rights reserved.
 ///////////////////////////////////////////////////////////////////////////////
-import { ApiErrorMessages, ApiErrors, CRUDRoute, UpdateObject } from "@rapidrest/service-core";
+import {
+    ApiErrorMessages,
+    ApiErrors,
+    CRUDRoute,
+    DocDecorators,
+    RouteDecorators,
+    UpdateObject,
+} from "@rapidrest/service-core";
 import { ApiError, JWTUser, ObjectDecorators, UserUtils } from "@rapidrest/core";
 import { Alias } from "../models/types.js";
 
 const { Config } = ObjectDecorators;
+const { Description, Returns, Summary } = DocDecorators;
+const { Get, Param, Query, User } = RouteDecorators;
 
 /**
  * @author Jean-Philippe Steinmetz
@@ -18,6 +27,35 @@ export abstract class BaseAliasRoute<T extends Alias> extends CRUDRoute<T> {
      */
     @Config("trusted_roles", ["admin"])
     protected trustedRoles: string[] = ["admin"];
+
+    /**
+     * `Alias`'s class-level ACL intentionally does NOT grant `LIST` to `.*` — per-record ACL narrowing in
+     * `RepoUtils.find()` falls back to the *parent* (class-level) ACL when a specific record has no direct
+     * grant for the caller, so a class-level `.*: LIST` wildcard would make every record's per-record check
+     * pass for every caller via that fallback, leaking every user's aliases to every other user. Instead,
+     * self-service "list my own aliases" is handled here directly: scope the query to the caller's own
+     * `userUid` (discarding any client-supplied `userUid` filter, which would otherwise let a caller probe
+     * another user's aliases) and bypass ACL entirely with `ignoreACL` for that already-scoped lookup. A
+     * trusted role keeps the normal, unscoped behavior.
+     */
+    @Summary("Find All Aliases")
+    @Description("Returns all Aliases the caller owns, or all Aliases if the caller holds a trusted role.")
+    @Returns([[Array, Object]])
+    @Get()
+    public async find(@Param() params: any, @Query() query: any, @User user?: JWTUser): Promise<T[]> {
+        if (!this.repoUtils) {
+            throw new ApiError(ApiErrors.INTERNAL_ERROR, 500, ApiErrorMessages.INTERNAL_ERROR);
+        }
+
+        if (!user || UserUtils.hasRoles(user, this.trustedRoles)) {
+            return super.find(params, query, user);
+        }
+
+        return await this.repoUtils.find(
+            { ...params, ...query, userUid: user.uid },
+            { limit: query?.limit, page: query?.page, ignoreACL: true, user },
+        );
+    }
 
     protected async validateCreate(obj: Partial<T> | Partial<T>[], user?: JWTUser): Promise<void> {
         if (!user) {
