@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Jean-Philippe Steinmetz
 ///////////////////////////////////////////////////////////////////////////////
 import config from "../../config.js";
-import { request } from "@rapidrest/service-core/test";
+import { agent, request } from "@rapidrest/service-core/test";
 import {
     ACLRecord,
     MongoConnection,
@@ -20,6 +20,7 @@ import { Repository } from "typeorm";
 import { ProfileSQL } from "../../../src/models/sql/ProfileSQL.js";
 import { UserSQL } from "../../../src/models/sql/UserSQL.js";
 import { MongoMemoryServer } from "mongodb-memory-server";
+import { ContactType } from "../../../src/models/types.js";
 
 const mongod: MongoMemoryServer = new MongoMemoryServer({
     instance: {
@@ -426,5 +427,208 @@ describe("Route:ProfileSQL Tests", () => {
         if (existing) {
             expectMatchingFields(existing, obj);
         }
+    });
+
+    it("Cannot create a profile for another user (with user token).", async () => {
+        const obj = { uid: uuid.v4(), givenName: "Victim" };
+
+        const result = await request(server.getApplication())
+            .post(baseUrl)
+            .set("Authorization", "jwt " + userToken)
+            .send(obj);
+
+        // See the identical note in test/routes/mongo/ProfileRoute.test.ts: the real error here is 403
+        // AUTH_PERMISSION_FAILURE from validateCreate(), but CRUDRoute.validateCreateBulk (an upstream bug
+        // in @rapidrest/service-core) flattens every create-time validation failure to a generic 400.
+        expect(result.status).toBe(400);
+
+        const count: number = await repo.count({ where: { uid: obj.uid } });
+        expect(count).toBe(0);
+    });
+
+    it("Can update their own profile (with user token).", async () => {
+        const obj: ProfileSQL = await createProfileSQL({ uid: user.uid });
+        const url = baseUrl + "/" + obj.uid;
+
+        const result = await request(server.getApplication())
+            .put(url)
+            .set("Authorization", "jwt " + userToken)
+            .send({ ...obj, givenName: "Updated" });
+
+        expect(result.status).toBeGreaterThanOrEqual(200);
+        expect(result.status).toBeLessThan(300);
+        expect(result.body.givenName).toBe("Updated");
+    });
+
+    it("Cannot update another user's profile (with user token).", async () => {
+        const obj: ProfileSQL = await createProfileSQL();
+        const url = baseUrl + "/" + obj.uid;
+
+        const result = await request(server.getApplication())
+            .put(url)
+            .set("Authorization", "jwt " + userToken)
+            .send({ ...obj, givenName: "Hijacked" });
+
+        expect(result.status).toBe(403);
+
+        const existing: ProfileSQL | null = await repo.findOne({ where: { uid: obj.uid } });
+        expect(existing?.givenName).not.toBe("Hijacked");
+    });
+
+    it("Can update a single property of their own profile (with user token).", async () => {
+        const obj: ProfileSQL = await createProfileSQL({ uid: user.uid });
+        const url = baseUrl + "/" + obj.uid + "/avatar";
+
+        const result = await request(server.getApplication())
+            .put(url)
+            .set("Authorization", "jwt " + userToken)
+            .send("https://gravatar.com/updated");
+
+        expect(result.status).toBeGreaterThanOrEqual(200);
+        expect(result.status).toBeLessThan(300);
+        expect(result.body.avatar).toBe("https://gravatar.com/updated");
+    });
+
+    it("Cannot update a single property of another user's profile (with user token).", async () => {
+        const obj: ProfileSQL = await createProfileSQL();
+        const url = baseUrl + "/" + obj.uid + "/avatar";
+
+        const result = await request(server.getApplication())
+            .put(url)
+            .set("Authorization", "jwt " + userToken)
+            .send("https://gravatar.com/hijacked");
+
+        expect(result.status).toBe(403);
+    });
+
+    it("Can delete their own profile (with user token).", async () => {
+        const obj: ProfileSQL = await createProfileSQL({ uid: user.uid });
+        const url = baseUrl + "/" + obj.uid;
+
+        const result = await request(server.getApplication())
+            .delete(url)
+            .set("Authorization", "jwt " + userToken);
+
+        expect(result.status).toBeGreaterThanOrEqual(200);
+        expect(result.status).toBeLessThan(300);
+
+        const count: number = await repo.count({ where: { uid: obj.uid } });
+        expect(count).toBe(0);
+    });
+
+    it("Cannot delete another user's profile (with user token).", async () => {
+        const obj: ProfileSQL = await createProfileSQL();
+        const url = baseUrl + "/" + obj.uid;
+
+        const result = await request(server.getApplication())
+            .delete(url)
+            .set("Authorization", "jwt " + userToken);
+
+        expect(result.status).toBe(403);
+
+        const count: number = await repo.count({ where: { uid: obj.uid } });
+        expect(count).toBe(1);
+    });
+
+    it("Cannot make count request (with user token).", async () => {
+        await createProfileSQL({ uid: user.uid });
+
+        const result = await request(server.getApplication())
+            .head(baseUrl)
+            .set("Authorization", "jwt " + userToken);
+
+        expect(result.status).toBe(403);
+    });
+
+    it("Can request and complete verification for a newly-added contact on their own profile (with user token, end-to-end).", async () => {
+        const obj: ProfileSQL = await createProfileSQL({ uid: user.uid, contacts: [] });
+        const client = agent(server.getApplication());
+        const debugSpy = vi.spyOn(logger, "debug");
+        const contactValue = `${uuid.v4()}@example.com`;
+
+        const updateResult = await client
+            .put(`${baseUrl}/${obj.uid}`)
+            .set("Authorization", "jwt " + userToken)
+            .send({
+                ...obj,
+                contacts: [{ contact: contactValue, type: ContactType.EMAIL, verified: false }],
+            });
+        expect(updateResult.status).toBeGreaterThanOrEqual(200);
+        expect(updateResult.status).toBeLessThan(300);
+
+        const debugCall = debugSpy.mock.calls
+            .map((args) => args[0])
+            .find((msg) => typeof msg === "string" && msg.includes("[BaseProfileRoute] verification code for"));
+        expect(debugCall).toBeDefined();
+        const match = (debugCall as string).match(/verification code for .*: (\S+)$/);
+        expect(match).toBeDefined();
+        const token = match![1];
+
+        const verifyResult = await client
+            .post(`${baseUrl}/${obj.uid}/contacts/verify`)
+            .set("Authorization", "jwt " + userToken)
+            .send({ contact: contactValue, token });
+
+        expect(verifyResult.status).toBeGreaterThanOrEqual(200);
+        expect(verifyResult.status).toBeLessThan(300);
+        const verifiedContact = verifyResult.body.contacts.find((c: any) => c.contact === contactValue);
+        expect(verifiedContact?.verified).toBe(true);
+
+        const stored: ProfileSQL | null = await repo.findOne({ where: { uid: obj.uid } });
+        expect(stored?.contacts.find((c) => c.contact === contactValue)?.verified).toBe(true);
+
+        debugSpy.mockRestore();
+    });
+
+    it("Rejects contact verification with an incorrect code, leaving the contact unverified.", async () => {
+        const contactValue = `${uuid.v4()}@example.com`;
+        const obj: ProfileSQL = await createProfileSQL({
+            uid: user.uid,
+            contacts: [{ contact: contactValue, type: ContactType.EMAIL, verified: false }],
+        });
+        const client = agent(server.getApplication());
+
+        const sendResult = await client
+            .get(`${baseUrl}/${obj.uid}/contacts/sendCode?contact=${encodeURIComponent(contactValue)}`)
+            .set("Authorization", "jwt " + userToken);
+        expect(sendResult.status).toBeGreaterThanOrEqual(200);
+        expect(sendResult.status).toBeLessThan(300);
+
+        const verifyResult = await client
+            .post(`${baseUrl}/${obj.uid}/contacts/verify`)
+            .set("Authorization", "jwt " + userToken)
+            .send({ contact: contactValue, token: "000000" });
+
+        expect(verifyResult.status).toBe(400);
+
+        const stored: ProfileSQL | null = await repo.findOne({ where: { uid: obj.uid } });
+        expect(stored?.contacts.find((c) => c.contact === contactValue)?.verified).toBe(false);
+    });
+
+    it("Cannot request a verification code for another user's profile contact (with user token).", async () => {
+        const contactValue = `${uuid.v4()}@example.com`;
+        const obj: ProfileSQL = await createProfileSQL({
+            contacts: [{ contact: contactValue, type: ContactType.EMAIL, verified: false }],
+        });
+
+        const result = await request(server.getApplication())
+            .get(`${baseUrl}/${obj.uid}/contacts/sendCode?contact=${encodeURIComponent(contactValue)}`)
+            .set("Authorization", "jwt " + userToken);
+
+        expect(result.status).toBe(403);
+    });
+
+    it("Cannot verify a contact on another user's profile (with user token).", async () => {
+        const contactValue = `${uuid.v4()}@example.com`;
+        const obj: ProfileSQL = await createProfileSQL({
+            contacts: [{ contact: contactValue, type: ContactType.EMAIL, verified: false }],
+        });
+
+        const result = await request(server.getApplication())
+            .post(`${baseUrl}/${obj.uid}/contacts/verify`)
+            .set("Authorization", "jwt " + userToken)
+            .send({ contact: contactValue, token: "000000" });
+
+        expect(result.status).toBe(403);
     });
 });

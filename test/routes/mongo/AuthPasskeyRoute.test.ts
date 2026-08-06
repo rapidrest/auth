@@ -30,8 +30,8 @@ import { SecretMongo } from "../../../src/models/mongo/SecretMongo.js";
 import { SecretType } from "../../../src/models/types.js";
 import { StoredPasskeyCredential } from "../../../src/auth/types.js";
 
-const mockGenerateAuthenticationOptions = generateAuthenticationOptions as unknown as ReturnType<typeof vi.fn>;
-const mockVerifyAuthenticationResponse = verifyAuthenticationResponse as unknown as ReturnType<typeof vi.fn>;
+const mockGenerateAuthenticationOptions = generateAuthenticationOptions as any;
+const mockVerifyAuthenticationResponse = verifyAuthenticationResponse as any;
 
 const mongod: MongoMemoryServer = new MongoMemoryServer({
     instance: {

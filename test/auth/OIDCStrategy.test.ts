@@ -24,11 +24,11 @@ import * as jwt from "jsonwebtoken";
 import jwksClientFactory from "jwks-rsa";
 import { OIDCProvider, OIDCStrategy, OIDCStrategyOptions } from "../../src/auth/OIDCStrategy.js";
 
-const mockPost = axios.post as unknown as ReturnType<typeof vi.fn>;
-const mockGet = axios.get as unknown as ReturnType<typeof vi.fn>;
-const mockJwtDecode = jwt.decode as unknown as ReturnType<typeof vi.fn>;
-const mockJwtVerify = jwt.verify as unknown as ReturnType<typeof vi.fn>;
-const mockJwksClientFactory = jwksClientFactory as unknown as ReturnType<typeof vi.fn>;
+const mockPost = axios.post as any;
+const mockGet = axios.get as any;
+const mockJwtDecode = jwt.decode as any;
+const mockJwtVerify = jwt.verify as any;
+const mockJwksClientFactory = jwksClientFactory as any;
 
 function makeProvider(overrides: Partial<OIDCProvider> = {}): OIDCProvider {
     return {

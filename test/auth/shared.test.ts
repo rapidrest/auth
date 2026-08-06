@@ -47,10 +47,10 @@ import {
     TOTPSecret,
 } from "../../src/auth/types.js";
 
-const mockGenerateAuthenticationOptions = generateAuthenticationOptions as unknown as ReturnType<typeof vi.fn>;
-const mockVerifyAuthenticationResponse = verifyAuthenticationResponse as unknown as ReturnType<typeof vi.fn>;
-const mockGenerateRegistrationOptions = generateRegistrationOptions as unknown as ReturnType<typeof vi.fn>;
-const mockVerifyRegistrationResponse = verifyRegistrationResponse as unknown as ReturnType<typeof vi.fn>;
+const mockGenerateAuthenticationOptions = generateAuthenticationOptions as any;
+const mockVerifyAuthenticationResponse = verifyAuthenticationResponse as any;
+const mockGenerateRegistrationOptions = generateRegistrationOptions as any;
+const mockVerifyRegistrationResponse = verifyRegistrationResponse as any;
 
 function makeReq(overrides: Partial<HttpRequest> = {}): HttpRequest {
     return {

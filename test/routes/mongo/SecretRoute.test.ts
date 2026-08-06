@@ -30,8 +30,8 @@ import { MongoMemoryServer } from "mongodb-memory-server";
 import { SecretType } from "../../../src/models/types.js";
 import { StoredPasskeyCredential, TOTPSecret } from "../../../src/auth/types.js";
 
-const mockGenerateRegistrationOptions = generateRegistrationOptions as unknown as ReturnType<typeof vi.fn>;
-const mockVerifyRegistrationResponse = verifyRegistrationResponse as unknown as ReturnType<typeof vi.fn>;
+const mockGenerateRegistrationOptions = generateRegistrationOptions as any;
+const mockVerifyRegistrationResponse = verifyRegistrationResponse as any;
 
 function makeRegistrationBody(credentialId: string, overrides: any = {}) {
     return {
@@ -627,5 +627,102 @@ describe("Route:SecretMongo Tests", () => {
             .send({ data: "not-valid-base32-!!!", type: SecretType.TOTP, userUid: uuid.v4() });
 
         expect(result.status).toBe(400);
+    });
+
+    it("Can create their own password secret (with user token).", async () => {
+        const result = await request(server.getApplication())
+            .post(baseUrl)
+            .set("Authorization", "jwt " + userToken)
+            .send({ data: "MyValidPassw0rd!", type: SecretType.PASSWORD, userUid: user.uid });
+
+        expect(result.status).toBeGreaterThanOrEqual(200);
+        expect(result.status).toBeLessThan(300);
+        expect(result.body.userUid).toBe(user.uid);
+        expect(result.body.data).toBeUndefined();
+
+        const existing: SecretMongo | null = await repo.findOne({ uid: result.body.uid } as any);
+        expect(existing).toBeDefined();
+    });
+
+    it("Defaults a newly-created secret's userUid to the caller when omitted (with user token).", async () => {
+        const result = await request(server.getApplication())
+            .post(baseUrl)
+            .set("Authorization", "jwt " + userToken)
+            .send({ data: "MyValidPassw0rd!", type: SecretType.PASSWORD });
+
+        expect(result.status).toBeGreaterThanOrEqual(200);
+        expect(result.status).toBeLessThan(300);
+        expect(result.body.userUid).toBe(user.uid);
+    });
+
+    it("Cannot create a secret on behalf of another user (with user token).", async () => {
+        const result = await request(server.getApplication())
+            .post(baseUrl)
+            .set("Authorization", "jwt " + userToken)
+            .send({ data: "MyValidPassw0rd!", type: SecretType.PASSWORD, userUid: uuid.v4() });
+
+        // Unlike Alias/Profile/User (which rely on CRUDRoute's default `create()` and its buggy
+        // `validateCreateBulk` wrapper — see the note in test/routes/mongo/AliasRoute.test.ts), Secret
+        // defines its own `create()` wired directly to `@Validate("validateCreate")`, so the real 403
+        // AUTH_PERMISSION_FAILURE from `enforceOwnership()` propagates unmangled.
+        expect(result.status).toBe(403);
+    });
+
+    it("Can delete their own secret (with user token).", async () => {
+        const obj: SecretMongo = await createSecretMongo({ userUid: user.uid });
+        const url = baseUrl + "/" + obj.uid;
+
+        const result = await request(server.getApplication())
+            .delete(url)
+            .set("Authorization", "jwt " + userToken);
+
+        expect(result.status).toBeGreaterThanOrEqual(200);
+        expect(result.status).toBeLessThan(300);
+
+        const count: number = await repo.count({ uid: obj.uid });
+        expect(count).toBe(0);
+    });
+
+    it("Cannot delete another user's secret (with user token).", async () => {
+        const obj: SecretMongo = await createSecretMongo();
+        const url = baseUrl + "/" + obj.uid;
+
+        const result = await request(server.getApplication())
+            .delete(url)
+            .set("Authorization", "jwt " + userToken);
+
+        expect(result.status).toBe(403);
+
+        const count: number = await repo.count({ uid: obj.uid });
+        expect(count).toBe(1);
+    });
+
+    it("Cannot make count request (with user token).", async () => {
+        await createSecretMongos(3, { userUid: user.uid });
+
+        const result = await request(server.getApplication())
+            .head(baseUrl)
+            .set("Authorization", "jwt " + userToken);
+
+        expect(result.status).toBe(403);
+    });
+
+    it("Truncate (with user token) only removes secrets the caller owns, leaving others' intact.", async () => {
+        await createSecretMongos(3, { userUid: user.uid });
+        const others: SecretMongo[] = await createSecretMongos(2);
+
+        const result = await request(server.getApplication())
+            .delete(baseUrl)
+            .set("Authorization", "jwt " + userToken);
+
+        expect(result.status).toBeGreaterThanOrEqual(200);
+        expect(result.status).toBeLessThan(300);
+
+        const ownCount: number = await repo.count({ userUid: user.uid });
+        expect(ownCount).toBe(0);
+        for (const other of others) {
+            const stillExists: number = await repo.count({ uid: other.uid });
+            expect(stillExists).toBe(1);
+        }
     });
 });

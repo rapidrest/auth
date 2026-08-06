@@ -345,4 +345,102 @@ describe("Route:UserSQL Tests", () => {
             expectMatchingFields(existing, obj);
         }
     });
+
+    it("Cannot create a User (with non-admin token).", async () => {
+        // UserSQL's class-level ACL grants `.*` no actions at all (unlike Alias/Profile/Secret, which at
+        // least grant CREATE) — self-service User creation isn't a thing; accounts come from
+        // BaseRegistrationRoute or an admin provisioning them.
+        const result = await request(server.getApplication())
+            .post(baseUrl)
+            .set("Authorization", "jwt " + userToken)
+            .send({ roles: [], scopes: [], verified: true });
+
+        expect(result.status).toBe(403);
+    });
+
+    it("Cannot read another user's record (with user token).", async () => {
+        const obj: UserSQL = await createUserSQL();
+        const url = baseUrl + "/" + obj.uid;
+
+        const result = await request(server.getApplication())
+            .get(url)
+            .set("Authorization", "jwt " + userToken);
+
+        expect(result.status).toBe(403);
+    });
+
+    it("Cannot update another user's record (with user token).", async () => {
+        const obj: UserSQL = await createUserSQL();
+        const url = baseUrl + "/" + obj.uid;
+
+        const result = await request(server.getApplication())
+            .put(url)
+            .set("Authorization", "jwt " + userToken)
+            .send({ ...obj, roles: ["admin"] });
+
+        expect(result.status).toBe(403);
+
+        const existing: UserSQL | null = await repo.findOne({ where: { uid: obj.uid } });
+        expect(existing?.roles).not.toContain("admin");
+    });
+
+    it("Cannot update a single property of another user's record (with user token).", async () => {
+        const obj: UserSQL = await createUserSQL();
+        const url = baseUrl + "/" + obj.uid + "/roles";
+
+        const result = await request(server.getApplication())
+            .put(url)
+            .set("Authorization", "jwt " + userToken)
+            .send(["admin"]);
+
+        expect(result.status).toBe(403);
+    });
+
+    it("Cannot delete another user's record (with user token).", async () => {
+        const obj: UserSQL = await createUserSQL();
+        const url = baseUrl + "/" + obj.uid;
+
+        const result = await request(server.getApplication())
+            .delete(url)
+            .set("Authorization", "jwt " + userToken);
+
+        expect(result.status).toBe(403);
+
+        const count: number = await repo.count({ where: { uid: obj.uid } });
+        expect(count).toBe(1);
+    });
+
+    it("Cannot make count request (with user token).", async () => {
+        await createUserSQLs(3);
+
+        const result = await request(server.getApplication())
+            .head(baseUrl)
+            .set("Authorization", "jwt " + userToken);
+
+        expect(result.status).toBe(403);
+    });
+
+    it("Truncate (with user token) affects nothing when the caller has no per-record grants.", async () => {
+        const objs: UserSQL[] = await createUserSQLs(3);
+
+        const result = await request(server.getApplication())
+            .delete(baseUrl)
+            .set("Authorization", "jwt " + userToken);
+
+        expect(result.status).toBeGreaterThanOrEqual(200);
+        expect(result.status).toBeLessThan(300);
+
+        const count: number = await repo.count();
+        expect(count).toBe(objs.length);
+    });
+
+    it("Cannot list Users at all with a user token that has no per-record grants.", async () => {
+        await createUserSQLs(3);
+
+        const result = await request(server.getApplication())
+            .get(baseUrl)
+            .set("Authorization", "jwt " + userToken);
+
+        expect(result.status).toBe(403);
+    });
 });

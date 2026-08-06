@@ -247,8 +247,8 @@ describe("BaseAuthOTPRoute Tests", () => {
     describe("notifyContact", () => {
         it("Sends an email when the contact type is EMAIL.", async () => {
             const route = new TestAuthOTPRoute();
-            const sendEmail = vi.fn();
-            (route as any).messagingUtils = { sendEmail, sendSMS: vi.fn() };
+            const sendEmail = vi.fn().mockResolvedValue(undefined);
+            (route as any).messagingUtils = { sendEmail, sendSMS: vi.fn().mockResolvedValue(undefined) };
 
             await (route as any).notifyContact({ contact: "user@example.com", type: OTPContactType.EMAIL }, "123456");
 
@@ -257,8 +257,8 @@ describe("BaseAuthOTPRoute Tests", () => {
 
         it("Sends an SMS when the contact type is SMS.", async () => {
             const route = new TestAuthOTPRoute();
-            const sendSMS = vi.fn();
-            (route as any).messagingUtils = { sendEmail: vi.fn(), sendSMS };
+            const sendSMS = vi.fn().mockResolvedValue(undefined);
+            (route as any).messagingUtils = { sendEmail: vi.fn().mockResolvedValue(undefined), sendSMS };
 
             await (route as any).notifyContact({ contact: "+15551234567", type: OTPContactType.SMS }, "123456");
 
@@ -267,6 +267,19 @@ describe("BaseAuthOTPRoute Tests", () => {
 
         it("Does nothing (and does not throw) when messagingUtils is unset.", async () => {
             const route = new TestAuthOTPRoute();
+            await expect(
+                (route as any).notifyContact({ contact: "user@example.com", type: OTPContactType.EMAIL }, "123456"),
+            ).resolves.toBeUndefined();
+        });
+
+        it("Does not crash the process when the messaging provider rejects (e.g. Twilio/SMTP not configured).", async () => {
+            const route = new TestAuthOTPRoute();
+            (route as any).messagingUtils = {
+                sendEmail: vi.fn().mockRejectedValue(new Error("Twilio is not configured.")),
+                sendSMS: vi.fn().mockRejectedValue(new Error("Twilio is not configured.")),
+            };
+            (route as any).logger = { debug: vi.fn() };
+
             await expect(
                 (route as any).notifyContact({ contact: "user@example.com", type: OTPContactType.EMAIL }, "123456"),
             ).resolves.toBeUndefined();

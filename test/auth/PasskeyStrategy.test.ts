@@ -20,8 +20,8 @@ import {
     type StoredPasskeyCredential,
 } from "../../src/auth/PasskeyStrategy.js";
 
-const mockGenerateAuthenticationOptions = generateAuthenticationOptions as unknown as ReturnType<typeof vi.fn>;
-const mockVerifyAuthenticationResponse = verifyAuthenticationResponse as unknown as ReturnType<typeof vi.fn>;
+const mockGenerateAuthenticationOptions = generateAuthenticationOptions as any;
+const mockVerifyAuthenticationResponse = verifyAuthenticationResponse as any;
 
 function makeConfig(overrides: Partial<PasskeyConfig> = {}): PasskeyConfig {
     return {

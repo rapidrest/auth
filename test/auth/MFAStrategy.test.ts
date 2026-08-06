@@ -16,7 +16,7 @@ import * as otplib from "otplib";
 import { MFAMethod, MFAMethodType, MFAStrategy, MFAStrategyOptions } from "../../src/auth/MFAStrategy.js";
 import { OTPContactType, PasskeyConfig } from "../../src/auth/types.js";
 
-const mockGenerateAuthenticationOptions = generateAuthenticationOptions as unknown as ReturnType<typeof vi.fn>;
+const mockGenerateAuthenticationOptions = generateAuthenticationOptions as any;
 
 function makeFidoConfig(overrides: Partial<PasskeyConfig> = {}): PasskeyConfig {
     return {

@@ -17,7 +17,7 @@ import { OTPContact, OTPContactType } from "../auth/types.js";
 import { TokenUtils } from "../auth/TokenUtils.js";
 import { UserUtils } from "./UserUtils.js";
 
-const { Config, Init, Inject } = ObjectDecorators;
+const { Config, Init, Inject, Logger } = ObjectDecorators;
 const { Summary, Description, Returns } = DocDecorators;
 const { Auth, Get, Post, Response } = RouteDecorators;
 const AuthUser = RouteDecorators.User;
@@ -36,6 +36,9 @@ export abstract class BaseAuthOTPRoute<U extends User, A extends Alias, S extend
 
     @Inject(AuthMiddleware)
     protected authMiddleware?: AuthMiddleware;
+
+    @Logger
+    protected logger: any;
 
     @Config("auth:default_scopes", [])
     protected defaultScopes: string[] = [];
@@ -128,10 +131,7 @@ export abstract class BaseAuthOTPRoute<U extends User, A extends Alias, S extend
     @Auth(["otp"])
     @Get()
     @Post()
-    public async authenticate(
-        @AuthUser user: JWTUser,
-        @Response res: HttpResponse,
-    ): Promise<AuthResult | undefined> {
+    public async authenticate(@AuthUser user: JWTUser, @Response res: HttpResponse): Promise<AuthResult | undefined> {
         const token: string = await this.tokenUtils!.createToken(this.jwtConfig, user, this.defaultScopes, res);
         return new AuthResult({
             token,
@@ -229,24 +229,22 @@ export abstract class BaseAuthOTPRoute<U extends User, A extends Alias, S extend
     }
 
     protected async notifyContact(contact: OTPContact, totp: string): Promise<void> {
+        if (process.env.environment !== "production") {
+            this.logger?.debug(`[BaseAuthOTPRoute] verification code for ${contact.contact}: ${totp}`);
+        }
+
         switch (contact.type) {
             case OTPContactType.EMAIL:
-                void this.messagingUtils?.sendEmail(
-                    this.template,
-                    { totp },
-                    {
-                        to: contact.contact,
-                    },
-                );
+                this.messagingUtils
+                    ?.sendEmail(this.template, { totp }, { to: contact.contact })
+                    .catch((err) =>
+                        this.logger?.debug(`[BaseAuthOTPRoute] Failed to send verification e-mail: ${err}`),
+                    );
                 break;
             case OTPContactType.SMS:
-                void this.messagingUtils?.sendSMS(
-                    this.template,
-                    { totp },
-                    {
-                        to: contact.contact,
-                    },
-                );
+                this.messagingUtils
+                    ?.sendSMS(this.template, { totp }, { to: contact.contact })
+                    .catch((err) => this.logger?.debug(`[BaseAuthOTPRoute] Failed to send verification SMS: ${err}`));
                 break;
         }
     }

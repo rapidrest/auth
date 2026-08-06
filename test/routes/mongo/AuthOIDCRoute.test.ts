@@ -36,8 +36,8 @@ import { ProfileMongo } from "../../../src/models/mongo/ProfileMongo.js";
 import { AliasType } from "../../../src/models/types.js";
 import * as uuid from "uuid";
 
-const mockPost = axios.post as unknown as ReturnType<typeof vi.fn>;
-const mockGet = axios.get as unknown as ReturnType<typeof vi.fn>;
+const mockPost = axios.post as any;
+const mockGet = axios.get as any;
 
 const mongod: MongoMemoryServer = new MongoMemoryServer({
     instance: {

@@ -16,8 +16,8 @@ import { BaseSecretRoute } from "../../src/routes/BaseSecretRoute.js";
 import { PasswordConfig } from "../../src/auth/types.js";
 import { SecretType } from "../../src/models/types.js";
 
-const mockGenerateRegistrationOptions = generateRegistrationOptions as unknown as ReturnType<typeof vi.fn>;
-const mockVerifyRegistrationResponse = verifyRegistrationResponse as unknown as ReturnType<typeof vi.fn>;
+const mockGenerateRegistrationOptions = generateRegistrationOptions as any;
+const mockVerifyRegistrationResponse = verifyRegistrationResponse as any;
 
 // Satisfies every default PasswordConfig rule: length >= 8, lowercase, UPPERCASE, a numeral, and a
 // special character from the default `special_chars` set.
