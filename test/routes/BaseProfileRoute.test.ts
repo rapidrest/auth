@@ -277,6 +277,114 @@ describe("BaseProfileRoute Tests", () => {
         });
     });
 
+    describe("delete", () => {
+        it("Throws INTERNAL_ERROR when repoUtils is not set.", async () => {
+            const route = new TestProfileRoute();
+
+            await expect(
+                route.delete("user-1", undefined, undefined, makeReq(), { uid: "user-1" } as any),
+            ).rejects.toThrow(/internal error/i);
+        });
+
+        it("Throws NOT_FOUND when the profile does not exist.", async () => {
+            const route = new TestProfileRoute();
+            (route as any).repoUtils = { findOne: vi.fn().mockResolvedValue(undefined) };
+
+            await expect(
+                route.delete("user-1", undefined, undefined, makeReq(), { uid: "user-1" } as any),
+            ).rejects.toThrow(/no resource could be found/i);
+        });
+
+        it("Deletes the caller's own profile.", async () => {
+            const route = new TestProfileRoute();
+            const existing = { uid: "user-1", version: 0 };
+            const deleteFn = vi.fn().mockResolvedValue(undefined);
+            (route as any).repoUtils = { findOne: vi.fn().mockResolvedValue(existing), delete: deleteFn };
+            const user: any = { uid: "user-1" };
+
+            await route.delete("user-1", "0", "true", makeReq(), user);
+
+            expect(deleteFn).toHaveBeenCalledWith("user-1", { user, ignoreACL: true, purge: true, version: "0" });
+        });
+    });
+
+    describe("find", () => {
+        it("Throws INTERNAL_ERROR when repoUtils is not set.", async () => {
+            const route = new TestProfileRoute();
+
+            await expect(route.find({}, {}, { uid: "user-1" } as any)).rejects.toThrow(/internal error/i);
+        });
+
+        it("Throws AUTH_REQUIRED when there is no authenticated user.", async () => {
+            const route = new TestProfileRoute();
+            (route as any).repoUtils = { find: vi.fn() };
+
+            await expect(route.find({}, {}, undefined)).rejects.toThrow(/authorization is required/i);
+        });
+
+        it("Scopes the query to the caller's own uid without a trusted role.", async () => {
+            const route = new TestProfileRoute();
+            const find = vi.fn().mockResolvedValue([]);
+            (route as any).repoUtils = { find };
+            const user: any = { uid: "user-1", roles: [] };
+
+            await route.find({}, {}, user);
+
+            expect(find).toHaveBeenCalledWith(
+                expect.objectContaining({ uid: "user-1" }),
+                expect.objectContaining({ ignoreACL: true, user }),
+            );
+        });
+
+        it("Does not scope the query for a trusted (admin) caller.", async () => {
+            const route = new TestProfileRoute();
+            const find = vi.fn().mockResolvedValue([]);
+            (route as any).repoUtils = { find };
+            const user: any = { uid: "admin-uid", roles: ["admin"] };
+
+            await route.find({}, {}, user);
+
+            expect(find).toHaveBeenCalledWith(expect.not.objectContaining({ uid: "admin-uid" }), expect.anything());
+        });
+    });
+
+    describe("findById", () => {
+        it("Throws INTERNAL_ERROR when repoUtils is not set.", async () => {
+            const route = new TestProfileRoute();
+
+            await expect(route.findById("user-1", {}, { uid: "user-1" } as any)).rejects.toThrow(/internal error/i);
+        });
+
+        it("Throws NOT_FOUND when the profile does not exist.", async () => {
+            const route = new TestProfileRoute();
+            (route as any).repoUtils = { findOne: vi.fn().mockResolvedValue(undefined) };
+
+            await expect(route.findById("user-1", {}, { uid: "user-1" } as any)).rejects.toThrow(
+                /no resource could be found/i,
+            );
+        });
+
+        it("Returns the profile when found.", async () => {
+            const route = new TestProfileRoute();
+            const existing = { uid: "user-1", version: 0 };
+            (route as any).repoUtils = { findOne: vi.fn().mockResolvedValue(existing) };
+
+            const result = await route.findById("user-1", {}, { uid: "user-1" } as any);
+
+            expect(result).toBe(existing);
+        });
+    });
+
+    describe("resolveOwnedUid", () => {
+        it("Throws AUTH_REQUIRED when there is no authenticated user.", () => {
+            const route = new TestProfileRoute();
+
+            expect(() => (route as any).resolveOwnedUid("user-1", undefined)).toThrow(
+                /authorization is required/i,
+            );
+        });
+    });
+
     describe("create — contact verification side effect", () => {
         it("Sends a verification code for each contact on a newly-created profile.", async () => {
             const spy = vi.spyOn(CRUDRoute.prototype as any, "create").mockResolvedValue({
@@ -478,6 +586,130 @@ describe("BaseProfileRoute Tests", () => {
         });
     });
 
+    describe("sendVerificationCode", () => {
+        it("Does nothing for an already-verified contact.", async () => {
+            const route = new TestProfileRoute();
+            const checkAndIncrement = vi.fn();
+            (route as any).rateLimiter = { checkAndIncrement };
+            const contact: any = { contact: "user@example.com", type: ContactType.EMAIL, verified: true };
+
+            await (route as any).sendVerificationCode(contact, makeReq());
+
+            expect(checkAndIncrement).not.toHaveBeenCalled();
+        });
+
+        it("Sends nothing for a contact of neither email nor phone type.", async () => {
+            const route = new TestProfileRoute();
+            (route as any).rateLimiter = { checkAndIncrement: vi.fn().mockResolvedValue(undefined) };
+            const sendEmail = vi.fn();
+            const sendSMS = vi.fn();
+            (route as any).messagingUtils = { sendEmail, sendSMS };
+            const contact: any = { contact: "unknown", type: "other", verified: false };
+
+            await (route as any).sendVerificationCode(contact, makeReq());
+
+            expect(sendEmail).not.toHaveBeenCalled();
+            expect(sendSMS).not.toHaveBeenCalled();
+        });
+
+        it("Does not throw when sendSMS rejects (failure is logged, not propagated).", async () => {
+            const route = new TestProfileRoute();
+            (route as any).rateLimiter = { checkAndIncrement: vi.fn().mockResolvedValue(undefined) };
+            const debug = vi.fn();
+            (route as any).logger = { debug };
+            (route as any).messagingUtils = {
+                sendEmail: vi.fn().mockResolvedValue(undefined),
+                sendSMS: vi.fn().mockRejectedValue(new Error("provider unavailable")),
+            };
+            const contact: any = { contact: "+15551234567", type: ContactType.PHONE, verified: false };
+
+            await expect((route as any).sendVerificationCode(contact, makeReq())).resolves.toBeUndefined();
+            // Flush the rejected .catch() microtask registered inside sendVerificationCode.
+            await new Promise((resolve) => setImmediate(resolve));
+
+            expect(debug).toHaveBeenCalledWith(expect.stringContaining("Failed to send verification SMS"));
+        });
+
+        it("Does not log the verification code to debug in production.", async () => {
+            const route = new TestProfileRoute();
+            (route as any).rateLimiter = { checkAndIncrement: vi.fn().mockResolvedValue(undefined) };
+            const debug = vi.fn();
+            (route as any).logger = { debug };
+            (route as any).messagingUtils = { sendEmail: vi.fn().mockResolvedValue(undefined), sendSMS: vi.fn() };
+            const contact: any = { contact: "user@example.com", type: ContactType.EMAIL, verified: false };
+            const originalEnv = process.env.environment;
+            process.env.environment = "production";
+
+            try {
+                await (route as any).sendVerificationCode(contact, makeReq());
+            } finally {
+                process.env.environment = originalEnv;
+            }
+
+            expect(debug).not.toHaveBeenCalledWith(expect.stringContaining("verification code for"));
+        });
+    });
+
+    describe("update", () => {
+        it("Throws INTERNAL_ERROR when repoUtils is not set.", async () => {
+            const route = new TestProfileRoute();
+
+            await expect(
+                route.update("user-1", { uid: "user-1", version: 0 } as any, makeReq(), { uid: "user-1" } as any),
+            ).rejects.toThrow(/internal error/i);
+        });
+
+        it("Throws NOT_FOUND when the profile does not exist.", async () => {
+            const route = new TestProfileRoute();
+            (route as any).repoUtils = { findOne: vi.fn().mockResolvedValue(undefined) };
+
+            await expect(
+                route.update("user-1", { uid: "user-1", version: 0 } as any, makeReq(), { uid: "user-1" } as any),
+            ).rejects.toThrow(/no resource could be found/i);
+        });
+
+        it("Resolves the 'me' keyword to the caller's own uid.", async () => {
+            const route = new TestProfileRoute();
+            const existing = { uid: "user-1", version: 0, contacts: [] };
+            const updated = { uid: "user-1", version: 1, givenName: "Ada" };
+            const findOne = vi.fn().mockResolvedValue(existing);
+            (route as any).repoUtils = { findOne, update: vi.fn().mockResolvedValue(updated) };
+
+            const result = await route.update("me", { givenName: "Ada" } as any, makeReq(), {
+                uid: "user-1",
+            } as any);
+
+            expect(findOne).toHaveBeenCalledWith("user-1", expect.objectContaining({ skipCache: true }));
+            expect(result).toBe(updated);
+        });
+
+        it("Treats a missing existing.contacts as an empty list when sending verification for new contacts.", async () => {
+            const route = new TestProfileRoute();
+            const existing = { uid: "user-1", version: 0 };
+            const updated = {
+                uid: "user-1",
+                version: 1,
+                contacts: [{ contact: "new@example.com", type: ContactType.EMAIL, verified: false }],
+            };
+            (route as any).repoUtils = {
+                findOne: vi.fn().mockResolvedValue(existing),
+                update: vi.fn().mockResolvedValue(updated),
+            };
+            const sendEmail = vi.fn().mockResolvedValue(undefined);
+            (route as any).messagingUtils = { sendEmail, sendSMS: vi.fn().mockResolvedValue(undefined) };
+            (route as any).rateLimiter = { checkAndIncrement: vi.fn() };
+            const obj = { contacts: [{ contact: "new@example.com", type: ContactType.EMAIL, verified: false }] };
+
+            await route.update("user-1", obj as any, makeReq(), { uid: "user-1" } as any);
+
+            expect(sendEmail).toHaveBeenCalledWith(
+                "verify-contact-otp",
+                { totp: expect.any(String) },
+                { to: "new@example.com" },
+            );
+        });
+    });
+
     describe("update — contact verification side effect", () => {
         it("Sends a verification code when a new unverified contact is added via update().", async () => {
             const route = new TestProfileRoute();
@@ -548,6 +780,17 @@ describe("BaseProfileRoute Tests", () => {
     });
 
     describe("verifyContact", () => {
+        it("Throws INTERNAL_ERROR when repoUtils is not set.", async () => {
+            const route = new TestProfileRoute();
+            const req = makeReq();
+
+            await expect(
+                route.verifyContact("user-1", { contact: "new@example.com", token: "123456" }, req, {
+                    uid: "user-1",
+                } as any),
+            ).rejects.toThrow(/internal error/i);
+        });
+
         it("Throws 400 when no contact is given in the body.", async () => {
             const route = new TestProfileRoute();
             (route as any).repoUtils = {};
@@ -604,6 +847,40 @@ describe("BaseProfileRoute Tests", () => {
                 } as any),
             ).rejects.toThrow(/invalid or expired/i);
             expect(update).not.toHaveBeenCalled();
+        });
+
+        // Regression/branch guard: verifyOTP() itself throws (rather than returning false) for a malformed
+        // request, e.g. a missing token - that internal error must be caught and translated into the same
+        // clean 400 "Invalid or expired verification code." response, not leak out as a raw/unhandled error.
+        it("Throws 400 (not a raw error) when verifyOTP itself throws for a malformed request.", async () => {
+            const route = new TestProfileRoute();
+            const req = makeReq();
+            const update = vi.fn();
+            (route as any).repoUtils = {
+                findOne: vi.fn().mockResolvedValue({
+                    uid: "user-1",
+                    version: 0,
+                    contacts: [{ contact: "new@example.com", type: ContactType.EMAIL, verified: false }],
+                }),
+                update,
+            };
+
+            await expect(
+                route.verifyContact("user-1", { contact: "new@example.com" }, req, { uid: "user-1" } as any),
+            ).rejects.toThrow(/invalid or expired/i);
+            expect(update).not.toHaveBeenCalled();
+        });
+
+        it("Treats a missing existing.contacts as an empty list (no such contact, rather than crashing).", async () => {
+            const route = new TestProfileRoute();
+            (route as any).repoUtils = { findOne: vi.fn().mockResolvedValue({ uid: "user-1", version: 0 }) };
+            const req = makeReq();
+
+            await expect(
+                route.verifyContact("user-1", { contact: "new@example.com", token: "123456" }, req, {
+                    uid: "user-1",
+                } as any),
+            ).rejects.toThrow(/no such contact/i);
         });
 
         it("Flips verified to true on a correct code, leaving other contacts untouched.", async () => {

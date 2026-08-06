@@ -161,6 +161,20 @@ describe("BaseAuthOTPRoute Tests", () => {
             await expect((route as any).getContacts("id-1")).rejects.toThrow(/userRepo is not set/);
         });
 
+        it("Returns an empty list without querying the repo when id is not a string (NoSQL operator injection guard).", async () => {
+            const route = new TestAuthOTPRoute();
+            const findOne = vi.fn();
+            const find = vi.fn();
+            (route as any).userRepo = { findOne };
+            (route as any).aliasRepo = { find };
+
+            const result = await (route as any).getContacts({ $ne: null });
+
+            expect(result).toEqual([]);
+            expect(findOne).not.toHaveBeenCalled();
+            expect(find).not.toHaveBeenCalled();
+        });
+
         it("Looks up aliases by userUid when the id resolves to a user.", async () => {
             const route = new TestAuthOTPRoute();
             const findOne = vi.fn().mockResolvedValue({ uid: "user-1" });
@@ -300,6 +314,45 @@ describe("BaseAuthOTPRoute Tests", () => {
             await expect(
                 (route as any).notifyContact({ contact: "user@example.com", type: OTPContactType.EMAIL }, "123456"),
             ).resolves.toBeUndefined();
+        });
+
+        it("Does not crash the process when sendSMS rejects.", async () => {
+            const route = new TestAuthOTPRoute();
+            const debug = vi.fn();
+            (route as any).messagingUtils = {
+                sendEmail: vi.fn().mockResolvedValue(undefined),
+                sendSMS: vi.fn().mockRejectedValue(new Error("Twilio is not configured.")),
+            };
+            (route as any).logger = { debug };
+
+            await (route as any).notifyContact({ contact: "+15551234567", type: OTPContactType.SMS }, "123456");
+            // Flush the rejected .catch() microtask registered inside notifyContact.
+            await new Promise((resolve) => setImmediate(resolve));
+
+            expect(debug).toHaveBeenCalledWith(expect.stringContaining("Failed to send verification SMS"));
+        });
+
+        it("Does not log the verification code to debug in production.", async () => {
+            const route = new TestAuthOTPRoute();
+            const debug = vi.fn();
+            (route as any).logger = { debug };
+            (route as any).messagingUtils = {
+                sendEmail: vi.fn().mockResolvedValue(undefined),
+                sendSMS: vi.fn().mockResolvedValue(undefined),
+            };
+            const originalEnv = process.env.environment;
+            process.env.environment = "production";
+
+            try {
+                await (route as any).notifyContact(
+                    { contact: "user@example.com", type: OTPContactType.EMAIL },
+                    "123456",
+                );
+            } finally {
+                process.env.environment = originalEnv;
+            }
+
+            expect(debug).not.toHaveBeenCalledWith(expect.stringContaining("verification code for"));
         });
     });
 });

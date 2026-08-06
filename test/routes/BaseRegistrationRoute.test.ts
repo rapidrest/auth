@@ -212,6 +212,38 @@ describe("BaseRegistrationRoute Tests", () => {
             );
         });
 
+        it("Does not throw when sendEmail rejects (failure is logged, not propagated).", async () => {
+            const route = new TestRegistrationRoute();
+            (route as any).aliasRepo = { find: vi.fn().mockResolvedValue([]) };
+            const debug = vi.fn();
+            const sendEmail = vi.fn().mockRejectedValue(new Error("provider unavailable"));
+            (route as any).messagingUtils = { sendEmail, sendSMS: vi.fn() };
+            (route as any).logger = { debug };
+            const req = makeReq();
+
+            await expect((route as any).start({ email: "user@example.com" }, req)).resolves.toEqual({});
+            // Flush the rejected .catch() microtask registered inside start().
+            await new Promise((resolve) => setImmediate(resolve));
+
+            expect(debug).toHaveBeenCalledWith(expect.stringContaining("Failed to send verification e-mail"));
+        });
+
+        it("Does not throw when sendSMS rejects (failure is logged, not propagated).", async () => {
+            const route = new TestRegistrationRoute();
+            (route as any).aliasRepo = { find: vi.fn().mockResolvedValue([]) };
+            const debug = vi.fn();
+            const sendSMS = vi.fn().mockRejectedValue(new Error("provider unavailable"));
+            (route as any).messagingUtils = { sendEmail: vi.fn(), sendSMS };
+            (route as any).logger = { debug };
+            const req = makeReq();
+
+            await expect((route as any).start({ phone: "+14155552671" }, req)).resolves.toEqual({});
+            // Flush the rejected .catch() microtask registered inside start().
+            await new Promise((resolve) => setImmediate(resolve));
+
+            expect(debug).toHaveBeenCalledWith(expect.stringContaining("Failed to send verification SMS"));
+        });
+
         it("Rate-limits by the e-mail address before sending an OTP.", async () => {
             const route = new TestRegistrationRoute();
             (route as any).aliasRepo = { find: vi.fn().mockResolvedValue([]) };

@@ -106,6 +106,12 @@ describe("BaseSecretRoute Tests", () => {
     });
 
     describe("find", () => {
+        it("Throws INTERNAL_ERROR when repoUtils is not set.", async () => {
+            const route = new TestSecretRoute();
+
+            await expect(route.find({}, {}, { uid: "u1" } as any)).rejects.toThrow(/internal error/i);
+        });
+
         it("Delegates to ModelRoute.doFind() and cleans data from all results (trusted caller).", async () => {
             const results = [{ data: "a" }, { data: "b" }];
             vi.spyOn(ModelRoute.prototype as any, "doFind").mockResolvedValue(results);

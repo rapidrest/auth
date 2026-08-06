@@ -335,6 +335,17 @@ describe("OIDCStrategy Tests", () => {
             await expect(strategy.authenticate(req, makeRes())).rejects.toThrow(/Invalid or missing state/);
         });
 
+        // Regression/branch guard: a caller that never went through the authorization redirect (so
+        // req.session exists, satisfying the earlier "session support" check, but session.state was never
+        // set) must not crash when Buffer.from(undefined) would otherwise be attempted.
+        it("Throws cleanly when req.session exists but session.state was never set.", async () => {
+            const options = new OIDCStrategyOptions("test", makeProvider());
+            const strategy = new OIDCStrategy(options);
+            const req = makeReq({ query: { code: "auth-code", state: "some-state" }, session: {} });
+
+            await expect(strategy.authenticate(req, makeRes())).rejects.toThrow(/Invalid or missing state/);
+        });
+
         // Regression: the CSRF state comparison now uses crypto.timingSafeEqual(), which throws on
         // mismatched buffer lengths rather than returning false - a naive fix could leak that as an
         // unhandled 500 instead of the same clean "Invalid or missing state" error. This case is same-

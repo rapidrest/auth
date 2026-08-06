@@ -71,4 +71,55 @@ describe("TokenUtils Tests", () => {
             expect(value).toBe(`access_token=${token}; Path=/api; SameSite=Strict; Max-Age=3600; Secure`);
         });
     });
+
+    describe("clearToken", () => {
+        it("Does nothing when no response is provided.", () => {
+            const tokenUtils = new TokenUtils();
+            (tokenUtils as any).cookieConfig = { enabled: true };
+
+            expect(() => tokenUtils.clearToken()).not.toThrow();
+        });
+
+        it("Does nothing when cookie issuance is disabled (the default).", () => {
+            const tokenUtils = new TokenUtils();
+            const res = makeRes();
+
+            tokenUtils.clearToken(res);
+
+            expect(res.setHeader).not.toHaveBeenCalled();
+        });
+
+        it("Sets a `Set-Cookie` header that immediately expires the cookie when cookie issuance is enabled.", () => {
+            const tokenUtils = new TokenUtils();
+            (tokenUtils as any).cookieConfig = { enabled: true };
+            const res = makeRes();
+
+            tokenUtils.clearToken(res);
+
+            expect(res.setHeader).toHaveBeenCalledTimes(1);
+            const [name, value] = res.setHeader.mock.calls[0];
+            expect(name).toBe("Set-Cookie");
+            expect(value).toBe("jwt=; Path=/; SameSite=Lax; Max-Age=0; HttpOnly");
+        });
+
+        it("Honors a custom cookie name and path when clearing.", () => {
+            const tokenUtils = new TokenUtils();
+            (tokenUtils as any).cookieConfig = { enabled: true, name: "access_token", path: "/api" };
+            const res = makeRes();
+
+            tokenUtils.clearToken(res);
+
+            const [, value] = res.setHeader.mock.calls[0];
+            expect(value).toBe("access_token=; Path=/api; SameSite=Lax; Max-Age=0; HttpOnly");
+        });
+
+        it("Falls back to all-default cookie attributes when cookieConfig itself is unset.", () => {
+            const tokenUtils = new TokenUtils();
+            (tokenUtils as any).cookieConfig = undefined;
+
+            const value = (tokenUtils as any).buildCookie("");
+
+            expect(value).toBe("jwt=; Path=/; SameSite=Lax; Max-Age=0; HttpOnly");
+        });
+    });
 });

@@ -18,6 +18,40 @@ describe("BaseAliasRoute Tests", () => {
         vi.restoreAllMocks();
     });
 
+    describe("init", () => {
+        it("Does nothing when objectFactory is not set.", async () => {
+            const route = new TestAliasRoute();
+
+            await (route as any).init();
+
+            expect((route as any).profileRepo).toBeUndefined();
+        });
+
+        it("Does not recreate profileRepo if init() runs again.", async () => {
+            const route = new TestAliasRoute();
+            const newInstance = vi.fn();
+            (route as any).objectFactory = { newInstance };
+            const existingProfileRepo = { findOne: vi.fn() };
+            (route as any).profileRepo = existingProfileRepo;
+
+            await (route as any).init();
+
+            expect((route as any).profileRepo).toBe(existingProfileRepo);
+            expect(newInstance).not.toHaveBeenCalled();
+        });
+
+        it("Creates profileRepo using the object factory.", async () => {
+            const route = new TestAliasRoute();
+            const profileRepo = { findOne: vi.fn() };
+            const newInstance = vi.fn().mockResolvedValue(profileRepo);
+            (route as any).objectFactory = { newInstance };
+
+            await (route as any).init();
+
+            expect((route as any).profileRepo).toBe(profileRepo);
+        });
+    });
+
     describe("validateCreate", () => {
         it("Delegates to CRUDRoute.validateCreate() for schema validation.", async () => {
             const spy = vi.spyOn(CRUDRoute.prototype as any, "validateCreate").mockResolvedValue(undefined);
@@ -123,6 +157,21 @@ describe("BaseAliasRoute Tests", () => {
                 expect(obj.verified).toBe(false);
             });
 
+            it("Leaves verified:true intact for a phone alias when the caller's Profile lists it as verified.", async () => {
+                vi.spyOn(CRUDRoute.prototype as any, "validateCreate").mockResolvedValue(undefined);
+                const route = new TestAliasRoute();
+                (route as any).profileRepo = {
+                    findOne: vi.fn().mockResolvedValue({
+                        contacts: [{ contact: "+15551234567", type: ContactType.PHONE, verified: true }],
+                    }),
+                };
+                const obj: any = { type: AliasType.PHONE, alias: "+15551234567", verified: true };
+
+                await (route as any).validateCreate(obj, { uid: "user-1" });
+
+                expect(obj.verified).toBe(true);
+            });
+
             it("Downgrades verified:true to false when profileRepo is unavailable.", async () => {
                 vi.spyOn(CRUDRoute.prototype as any, "validateCreate").mockResolvedValue(undefined);
                 const route = new TestAliasRoute();
@@ -172,6 +221,14 @@ describe("BaseAliasRoute Tests", () => {
 
                 expect(obj.verified).toBe(true);
             });
+        });
+    });
+
+    describe("find", () => {
+        it("Throws INTERNAL_ERROR when repoUtils is not set.", async () => {
+            const route = new TestAliasRoute();
+
+            await expect(route.find({}, {}, { uid: "user-1" } as any)).rejects.toThrow(/internal error/i);
         });
     });
 
@@ -317,6 +374,43 @@ describe("BaseAliasRoute Tests", () => {
             expect(sendEmail).not.toHaveBeenCalled();
             expect(sendSMS).not.toHaveBeenCalled();
         });
+
+        it("Does not throw when sendSMS rejects (failure is logged, not propagated).", async () => {
+            const route = new TestAliasRoute();
+            (route as any).rateLimiter = { checkAndIncrement: vi.fn().mockResolvedValue(undefined) };
+            const debug = vi.fn();
+            (route as any).logger = { debug };
+            (route as any).messagingUtils = {
+                sendEmail: vi.fn().mockResolvedValue(undefined),
+                sendSMS: vi.fn().mockRejectedValue(new Error("provider unavailable")),
+            };
+            const alias: any = { alias: "+15551234567", type: AliasType.PHONE, verified: false };
+
+            await expect((route as any).sendVerificationCode(alias, { session: {} })).resolves.toBeUndefined();
+
+            // Flush the rejected .catch() microtask registered inside sendVerificationCode.
+            await new Promise((resolve) => setImmediate(resolve));
+            expect(debug).toHaveBeenCalledWith(expect.stringContaining("Failed to send verification SMS"));
+        });
+
+        it("Does not log the verification code to debug in production.", async () => {
+            const route = new TestAliasRoute();
+            (route as any).rateLimiter = { checkAndIncrement: vi.fn().mockResolvedValue(undefined) };
+            const debug = vi.fn();
+            (route as any).logger = { debug };
+            (route as any).messagingUtils = { sendEmail: vi.fn().mockResolvedValue(undefined), sendSMS: vi.fn() };
+            const alias: any = { alias: "user@example.com", type: AliasType.EMAIL, verified: false };
+            const originalEnv = process.env.environment;
+            process.env.environment = "production";
+
+            try {
+                await (route as any).sendVerificationCode(alias, { session: {} });
+            } finally {
+                process.env.environment = originalEnv;
+            }
+
+            expect(debug).not.toHaveBeenCalledWith(expect.stringContaining("verification code for"));
+        });
     });
 
     describe("update / updateBulk / updateProperty", () => {
@@ -386,6 +480,30 @@ describe("BaseAliasRoute Tests", () => {
 
             await expect(
                 route.verifyContact("alias-1", { token: "000000" }, req, { uid: "user-1" } as any),
+            ).rejects.toThrow(/invalid or expired/i);
+            expect(update).not.toHaveBeenCalled();
+        });
+
+        // Regression/branch guard: verifyOTP() itself throws (rather than returning false) for a malformed
+        // request, e.g. a missing token - that internal error must be caught and translated into the same
+        // clean 400 "Invalid or expired verification code." response, not leak out as a raw/unhandled error.
+        it("Throws 400 (not a raw error) when verifyOTP itself throws for a malformed request.", async () => {
+            const route = new TestAliasRoute();
+            const req: any = { session: {} };
+            const update = vi.fn();
+            (route as any).repoUtils = {
+                findOne: vi.fn().mockResolvedValue({
+                    uid: "alias-1",
+                    version: 0,
+                    alias: "new@example.com",
+                    type: AliasType.EMAIL,
+                    verified: false,
+                }),
+                update,
+            };
+
+            await expect(
+                route.verifyContact("alias-1", {}, req, { uid: "user-1" } as any),
             ).rejects.toThrow(/invalid or expired/i);
             expect(update).not.toHaveBeenCalled();
         });

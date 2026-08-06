@@ -7,6 +7,21 @@ import { BaseAuthDiscoverRoute } from "../../src/routes/BaseAuthDiscoverRoute.js
 import { UserUtils } from "../../src/routes/UserUtils.js";
 import { AliasType, SecretType } from "../../src/models/types.js";
 
+function makeMockObjectFactory(aliasRepo: any, secretRepo: any, userUtils: any) {
+    const newInstance = vi.fn(async (type: any, opts: any) => {
+        if (type === RepoUtils) {
+            if (opts.name === FakeAliasClass.name) return aliasRepo;
+            if (opts.name === FakeSecretClass.name) return secretRepo;
+            return undefined;
+        }
+        if (type === UserUtils) {
+            return userUtils;
+        }
+        return undefined;
+    });
+    return { newInstance };
+}
+
 class FakeSecretClass {
     static readonly name = "FakeSecret";
 }
@@ -26,7 +41,56 @@ class TestAuthDiscoverRoute extends BaseAuthDiscoverRoute<any, any, any> {
 const EMPTY_RESULT = { password: false, totp: false, passkey: false, fido2: false, otp: [] };
 
 describe("BaseAuthDiscoverRoute Tests", () => {
+    describe("initialize", () => {
+        it("Throws if objectFactory was not injected.", async () => {
+            const route = new TestAuthDiscoverRoute();
+
+            await expect((route as any).initialize()).rejects.toThrow(/objectFactory is not set/);
+        });
+
+        it("Creates aliasRepo, secretRepo, and userUtils using the object factory.", async () => {
+            const aliasRepo = { find: vi.fn() };
+            const secretRepo = { find: vi.fn() };
+            const userUtils = { lookup: vi.fn() };
+            const route = new TestAuthDiscoverRoute();
+            (route as any).objectFactory = makeMockObjectFactory(aliasRepo, secretRepo, userUtils);
+
+            await (route as any).initialize();
+
+            expect((route as any).aliasRepo).toBe(aliasRepo);
+            expect((route as any).secretRepo).toBe(secretRepo);
+            expect((route as any).userUtils).toBe(userUtils);
+        });
+
+        it("Does not recreate repos/utils if initialize() runs again.", async () => {
+            const route = new TestAuthDiscoverRoute();
+            (route as any).objectFactory = makeMockObjectFactory({}, {}, {});
+            const existingAliasRepo = { find: vi.fn() };
+            const existingSecretRepo = { find: vi.fn() };
+            const existingUserUtils = { lookup: vi.fn() };
+            (route as any).aliasRepo = existingAliasRepo;
+            (route as any).secretRepo = existingSecretRepo;
+            (route as any).userUtils = existingUserUtils;
+
+            await (route as any).initialize();
+
+            expect((route as any).aliasRepo).toBe(existingAliasRepo);
+            expect((route as any).secretRepo).toBe(existingSecretRepo);
+            expect((route as any).userUtils).toBe(existingUserUtils);
+        });
+    });
+
     describe("discover", () => {
+        it("Treats every secret type as absent when secretRepo is unavailable.", async () => {
+            const route = new TestAuthDiscoverRoute();
+            (route as any).userUtils = { lookup: vi.fn().mockResolvedValue({ uid: "user-1" }) };
+            (route as any).aliasRepo = { find: vi.fn().mockResolvedValue([]) };
+
+            const result = await route.discover("user-1");
+
+            expect(result).toEqual(EMPTY_RESULT);
+        });
+
         it("Returns the equalized empty result immediately when no id is given.", async () => {
             const route = new TestAuthDiscoverRoute();
             const result = await route.discover(undefined);
