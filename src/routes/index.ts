@@ -1,3 +1,4 @@
+export * from "./BaseAccountRoute.js";
 export * from "./BaseAliasRoute.js";
 export * from "./BaseAuthBasicRoute.js";
 export * from "./BaseAuthDiscoverRoute.js";

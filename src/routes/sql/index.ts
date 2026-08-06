@@ -1,3 +1,4 @@
+export * from "./BaseAccountRouteSQL.js";
 export * from "./BaseAliasRouteSQL.js";
 export * from "./BaseAuthBasicRouteSQL.js";
 export * from "./BaseAuthDiscoverRouteSQL.js";

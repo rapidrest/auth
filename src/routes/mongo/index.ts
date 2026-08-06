@@ -1,3 +1,4 @@
+export * from "./BaseAccountRouteMongo.js";
 export * from "./BaseAliasRouteMongo.js";
 export * from "./BaseAuthBasicRouteMongo.js";
 export * from "./BaseAuthDiscoverRouteMongo.js";
