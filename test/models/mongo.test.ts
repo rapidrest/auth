@@ -32,8 +32,15 @@ describe("Mongo model default construction", () => {
         const obj = new SecretMongo();
 
         expect(obj.data).toBeUndefined();
+        expect(obj.hint).toBeUndefined();
         expect(obj.type).toBe(SecretType.PASSWORD);
         expect(obj.userUid).toBe("");
+    });
+
+    it("SecretMongo applies a provided hint when constructed with data.", () => {
+        const obj = new SecretMongo({ hint: "My favorite pet's name" });
+
+        expect(obj.hint).toBe("My favorite pet's name");
     });
 
     it("UserMongo falls back to class defaults when constructed with no data.", () => {

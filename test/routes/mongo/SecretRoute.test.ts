@@ -217,6 +217,27 @@ describe("Route:SecretMongo Tests", () => {
         }
     });
 
+    it("Persists and returns the optional hint field (with admin token).", async () => {
+        const obj: SecretMongo = new SecretMongo({
+            data: await argon2.hash("my-password"),
+            hint: "My favorite pet's name",
+            type: SecretType.PASSWORD,
+            userUid: uuid.v4(),
+        });
+
+        const result = await request(server.getApplication())
+            .post(baseUrl)
+            .set("Authorization", "jwt " + adminToken)
+            .send(obj);
+
+        expect(result.status).toBeGreaterThanOrEqual(200);
+        expect(result.status).toBeLessThan(300);
+        expect(result.body.hint).toBe("My favorite pet's name");
+
+        const existing: SecretMongo | null = await repo.findOne({ uid: obj.uid } as any);
+        expect(existing?.hint).toBe("My favorite pet's name");
+    });
+
     it("Can make delete request (with admin token).", async () => {
         const obj: SecretMongo = await createSecretMongo();
         const url = baseUrl + "/" + obj.uid;

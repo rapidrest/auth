@@ -46,6 +46,10 @@ export class SecretMongo extends BaseMongoEntity implements Secret {
     public data: any;
 
     @Column()
+    @Nullable
+    public hint?: string;
+
+    @Column()
     public type: SecretType = SecretType.PASSWORD;
 
     @Column()
@@ -56,6 +60,7 @@ export class SecretMongo extends BaseMongoEntity implements Secret {
 
         if (other) {
             this.data = "data" in other ? other.data : this.data;
+            this.hint = "hint" in other ? other.hint : this.hint;
             this.type = other.type !== undefined ? other.type : this.type;
             this.userUid = other.userUid !== undefined ? other.userUid : this.userUid;
         }

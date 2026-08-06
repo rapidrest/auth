@@ -141,6 +141,11 @@ export interface Secret extends BaseEntity {
     data: any;
 
     /**
+     * A short textual description that gives the user a hint about what the secret is.
+     */
+    hint?: string;
+
+    /**
      * The type of secret (e.g. `fido2`, `openid`, `password`, `passkey`, `totp`)
      */
     type: SecretType;

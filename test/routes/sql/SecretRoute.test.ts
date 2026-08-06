@@ -135,6 +135,11 @@ describe("Route:SecretSQL Tests", () => {
             if (SERVER_ASSIGNED_FIELDS.includes(key)) {
                 continue;
             }
+            // A nullable column left unset (e.g. `hint`) round-trips through SQL as `null`, even though
+            // the client-side object never assigned it anything but `undefined`.
+            if (expected[key] === undefined && actual[key] === null) {
+                continue;
+            }
             expect(actual[key]).toEqual(expected[key]);
         }
         expect(actual.uid).toBeDefined();
@@ -209,6 +214,27 @@ describe("Route:SecretSQL Tests", () => {
         if (existing) {
             expectMatchingFields(existing, obj);
         }
+    });
+
+    it("Persists and returns the optional hint field (with admin token).", async () => {
+        const obj: SecretSQL = new SecretSQL({
+            data: await argon2.hash("my-password"),
+            hint: "My favorite pet's name",
+            type: SecretType.PASSWORD,
+            userUid: uuid.v4(),
+        });
+
+        const result = await request(server.getApplication())
+            .post(baseUrl)
+            .set("Authorization", "jwt " + adminToken)
+            .send(obj);
+
+        expect(result.status).toBeGreaterThanOrEqual(200);
+        expect(result.status).toBeLessThan(300);
+        expect(result.body.hint).toBe("My favorite pet's name");
+
+        const existing: SecretSQL | null = await repo.findOne({ where: { uid: obj.uid } });
+        expect(existing?.hint).toBe("My favorite pet's name");
     });
 
     it("Can make delete request (with admin token).", async () => {
