@@ -205,22 +205,28 @@ describe("BaseProfileRoute Tests", () => {
 
             it("Preserves an already-verified contact's true value when echoed back unchanged.", async () => {
                 const route = new TestProfileRoute();
-                (route as any).repoUtils = {
-                    validate: vi.fn().mockResolvedValue(undefined),
-                    findOne: vi.fn().mockResolvedValue({
-                        uid: "user-1",
-                        contacts: [{ contact: "user@example.com", type: ContactType.EMAIL, verified: true }],
-                    }),
-                };
+                const findOne = vi.fn().mockResolvedValue({
+                    uid: "user-1",
+                    contacts: [{ contact: "user@example.com", type: ContactType.EMAIL, verified: true }],
+                });
+                (route as any).repoUtils = { validate: vi.fn().mockResolvedValue(undefined), findOne };
                 const obj: any = {
                     contacts: [{ contact: "user@example.com", type: ContactType.EMAIL, verified: true }],
                 };
+                const user = { uid: "user-1" };
 
-                await (route as any).validateUpdate("user-1", obj, { uid: "user-1" });
+                await (route as any).validateUpdate("user-1", obj, user);
 
                 expect(obj.contacts).toEqual([
                     { contact: "user@example.com", type: ContactType.EMAIL, verified: true },
                 ]);
+                // Regression guard: RepoUtils.findOne() strips @RequiresScope-gated properties (like
+                // Profile.contacts, which requires `profile:contacts`) whenever no `user` is passed in the
+                // options, silently returning `contacts: undefined` — which made every contact here look
+                // unmatched and get force-downgraded to `verified: false`, including already-verified ones
+                // untouched by this request. `user` (and, since this is a security-relevant read,
+                // `skipCache: true`) must always be passed.
+                expect(findOne).toHaveBeenCalledWith("user-1", { ignoreACL: true, user, skipCache: true });
             });
 
             it("Does not touch obj.contacts when the update doesn't include contacts.", async () => {

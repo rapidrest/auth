@@ -388,7 +388,7 @@ export abstract class BaseProfileRoute<T extends Profile> extends CRUDRoute<T> {
         // reject the whole request so a legitimate update (e.g. adding a genuinely new, unverified
         // contact) still goes through.
         if (obj.contacts) {
-            const existing = await this.repoUtils?.findOne(targetUid, { ignoreACL: true });
+            const existing = await this.repoUtils?.findOne(targetUid, { ignoreACL: true, user, skipCache: true });
             const existingContacts = existing?.contacts ?? [];
             obj.contacts = obj.contacts.map((c) => {
                 const match = existingContacts.find((e) => e.contact === c.contact && e.type === c.type);
