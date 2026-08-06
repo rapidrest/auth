@@ -118,14 +118,27 @@ describe("BaseAuthPasskeyRoute Tests", () => {
             expect(findOne).not.toHaveBeenCalled();
         });
 
-        it("Returns the .data of the matching secret.", async () => {
+        it("Returns the .data of a matching secret of type PASSKEY.", async () => {
             const route = new TestAuthPasskeyRoute();
-            const findOne = vi.fn().mockResolvedValue({ data: { id: "cred-1" } });
+            const findOne = vi.fn().mockResolvedValue({ type: SecretType.PASSKEY, data: { id: "cred-1" } });
             (route as any).secretRepo = { findOne };
 
             const result = await (route as any).getCredentialById("cred-1");
 
             expect(result).toEqual({ id: "cred-1" });
+        });
+
+        // Regression: without this check, a credential id belonging to some other Secret type (e.g. a
+        // `fido2` registration) would be handed to WebAuthn verification here unchecked, letting a
+        // credential registered under one strategy be used to authenticate through the other.
+        it("Returns undefined for a matching secret of a different type (e.g. FIDO2).", async () => {
+            const route = new TestAuthPasskeyRoute();
+            const findOne = vi.fn().mockResolvedValue({ type: SecretType.FIDO2, data: { id: "cred-1" } });
+            (route as any).secretRepo = { findOne };
+
+            const result = await (route as any).getCredentialById("cred-1");
+
+            expect(result).toBeUndefined();
         });
     });
 

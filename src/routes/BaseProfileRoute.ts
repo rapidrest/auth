@@ -354,20 +354,17 @@ export abstract class BaseProfileRoute<T extends Profile> extends CRUDRoute<T> {
         );
     }
 
-    protected async validateCreate(obj: Partial<T> | Partial<T>[], user?: JWTUser): Promise<void> {
+    protected async validateCreate(obj: Partial<T>, user?: JWTUser): Promise<void> {
         if (!user) {
             throw new ApiError(ApiErrors.AUTH_REQUIRED, 401, ApiErrorMessages.AUTH_REQUIRED);
         }
 
         await super.validateCreate(obj, user);
 
-        const objs: Partial<T>[] = Array.isArray(obj) ? obj : [obj];
-        for (const o of objs) {
-            if (!o.uid) {
-                o.uid = user.uid;
-            } else if (o.uid !== user.uid && !UserUtils.hasRoles(user, this.trustedRoles)) {
-                throw new ApiError(ApiErrors.AUTH_PERMISSION_FAILURE, 403, ApiErrorMessages.AUTH_PERMISSION_FAILURE);
-            }
+        if (!obj.uid) {
+            obj.uid = user.uid;
+        } else if (obj.uid !== user.uid && !UserUtils.hasRoles(user, this.trustedRoles)) {
+            throw new ApiError(ApiErrors.AUTH_PERMISSION_FAILURE, 403, ApiErrorMessages.AUTH_PERMISSION_FAILURE);
         }
     }
 
@@ -382,6 +379,31 @@ export abstract class BaseProfileRoute<T extends Profile> extends CRUDRoute<T> {
         // caught a caller trying to reassign ownership, but did nothing when the payload simply omitted
         // `uid` entirely (e.g. `PUT /profile/:id/:property`, which never includes it) - letting anyone
         // modify any other field of a profile they don't own.
-        this.resolveOwnedUid(id, user);
+        const targetUid = this.resolveOwnedUid(id, user);
+
+        // A contact's `verified` flag must only ever flip via `verifyContact()`'s real OTP check (or
+        // stay whatever it already was) - never via a client-supplied value here, which would let anyone
+        // self-verify an email/phone they don't own and pre-empt the real owner's registration (see
+        // `BaseAliasRoute.isVerifiedContact()` / `BaseRegistrationRoute.start()`). Reconcile rather than
+        // reject the whole request so a legitimate update (e.g. adding a genuinely new, unverified
+        // contact) still goes through.
+        if (obj.contacts) {
+            const existing = await this.repoUtils?.findOne(targetUid, { ignoreACL: true });
+            const existingContacts = existing?.contacts ?? [];
+            obj.contacts = obj.contacts.map((c) => {
+                const match = existingContacts.find((e) => e.contact === c.contact && e.type === c.type);
+                return { ...c, verified: match ? match.verified : false };
+            });
+        }
+    }
+
+    // Note: We intentionallty do not allow updating properties directly.
+    public updateProperty(
+        @Param("id") id: string,
+        @Param("propertyName") propertyName: string,
+        obj: any,
+        @User user?: JWTUser,
+    ): Promise<T> {
+        throw new ApiError(ApiErrors.NOT_FOUND, 404, ApiErrorMessages.NOT_FOUND);
     }
 }

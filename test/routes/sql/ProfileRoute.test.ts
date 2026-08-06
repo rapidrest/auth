@@ -405,29 +405,27 @@ describe("Route:ProfileSQL Tests", () => {
         }
     });
 
-    it("Can make update property request (with admin token).", async () => {
-        const obj: ProfileSQL = await createProfileSQL();
-        const url = baseUrl + "/" + obj.uid + "/avatar";
-        obj.avatar = "https://facebook.com/ladeeda";
+    it(
+        "updateProperty is disabled, even for an admin token (regression: CRUDRoute.updateProperty " +
+            "calls validateUpdate() with a throwaway wrapper object, not the object that actually gets " +
+            "persisted, so the contacts[].verified reconciliation guard cannot protect PUT " +
+            "/:id/contacts - it's disabled outright instead, the same way BaseAliasRoute disables it).",
+        async () => {
+            const obj: ProfileSQL = await createProfileSQL();
+            const url = baseUrl + "/" + obj.uid + "/avatar";
 
-        const result = await request(server.getApplication())
-            .put(url)
-            .set("Authorization", "jwt " + adminToken)
-            .send(obj.avatar);
+            const result = await request(server.getApplication())
+                .put(url)
+                .set("Authorization", "jwt " + adminToken)
+                .send("https://facebook.com/ladeeda");
 
-        expect(result).toBeDefined();
-        expect(result.status).toBeGreaterThanOrEqual(200);
-        expect(result.status).toBeLessThan(300);
-        expect(result.body).toBeDefined();
-        expectMatchingFields(result.body, obj);
+            expect(result.status).toBe(404);
 
-        // Validate the contents were stored correctly
-        const existing: ProfileSQL | null = await repo.findOne({ where: { uid: obj.uid } });
-        expect(existing).toBeDefined();
-        if (existing) {
-            expectMatchingFields(existing, obj);
-        }
-    });
+            // Validate nothing was stored
+            const existing: ProfileSQL | null = await repo.findOne({ where: { uid: obj.uid } });
+            expect(existing?.avatar).toEqual(obj.avatar);
+        },
+    );
 
     it("Cannot create a profile for another user (with user token).", async () => {
         const obj = { uid: uuid.v4(), givenName: "Victim" };
@@ -475,7 +473,7 @@ describe("Route:ProfileSQL Tests", () => {
         expect(existing?.givenName).not.toBe("Hijacked");
     });
 
-    it("Can update a single property of their own profile (with user token).", async () => {
+    it("Cannot update a single property of their own profile either - updateProperty is disabled entirely.", async () => {
         const obj: ProfileSQL = await createProfileSQL({ uid: user.uid });
         const url = baseUrl + "/" + obj.uid + "/avatar";
 
@@ -484,12 +482,10 @@ describe("Route:ProfileSQL Tests", () => {
             .set("Authorization", "jwt " + userToken)
             .send("https://gravatar.com/updated");
 
-        expect(result.status).toBeGreaterThanOrEqual(200);
-        expect(result.status).toBeLessThan(300);
-        expect(result.body.avatar).toBe("https://gravatar.com/updated");
+        expect(result.status).toBe(404);
     });
 
-    it("Cannot update a single property of another user's profile (with user token).", async () => {
+    it("Cannot update a single property of another user's profile (with user token) - updateProperty is disabled.", async () => {
         const obj: ProfileSQL = await createProfileSQL();
         const url = baseUrl + "/" + obj.uid + "/avatar";
 
@@ -498,7 +494,7 @@ describe("Route:ProfileSQL Tests", () => {
             .set("Authorization", "jwt " + userToken)
             .send("https://gravatar.com/hijacked");
 
-        expect(result.status).toBe(403);
+        expect(result.status).toBe(404);
     });
 
     it("Can delete their own profile (with user token).", async () => {
@@ -604,6 +600,34 @@ describe("Route:ProfileSQL Tests", () => {
         const stored: ProfileSQL | null = await repo.findOne({ where: { uid: obj.uid } });
         expect(stored?.contacts.find((c) => c.contact === contactValue)?.verified).toBe(false);
     });
+
+    it(
+        "Cannot self-verify a contact by PUTting verified:true directly, bypassing OTP entirely " +
+            "(regression: update() forwarded obj.contacts to repoUtils.update() unsanitized, so a client " +
+            "could fabricate a verified contact with no OTP round-trip at all - and since " +
+            "BaseAliasRoute.isVerifiedContact() trusts Profile.contacts blindly, that could then be used " +
+            "to auto-verify an Alias for an email/phone the caller doesn't own, pre-empting its real owner).",
+        async () => {
+            const contactValue = `${uuid.v4()}@example.com`;
+            const obj: ProfileSQL = await createProfileSQL({ uid: user.uid, contacts: [] });
+
+            const result = await request(server.getApplication())
+                .put(`${baseUrl}/${obj.uid}`)
+                .set("Authorization", "jwt " + userToken)
+                .send({
+                    ...obj,
+                    contacts: [{ contact: contactValue, type: ContactType.EMAIL, verified: true }],
+                });
+
+            expect(result.status).toBeGreaterThanOrEqual(200);
+            expect(result.status).toBeLessThan(300);
+            const contact = result.body.contacts.find((c: any) => c.contact === contactValue);
+            expect(contact?.verified).toBe(false);
+
+            const stored: ProfileSQL | null = await repo.findOne({ where: { uid: obj.uid } });
+            expect(stored?.contacts.find((c) => c.contact === contactValue)?.verified).toBe(false);
+        },
+    );
 
     it("Cannot request a verification code for another user's profile contact (with user token).", async () => {
         const contactValue = `${uuid.v4()}@example.com`;

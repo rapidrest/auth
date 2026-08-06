@@ -319,29 +319,27 @@ describe("Route:UserMongo Tests", () => {
         }
     });
 
-    it("Can make update property request (with admin token).", async () => {
-        const obj: UserMongo = await createUserMongo();
-        const url = baseUrl + "/" + obj.uid + "/scopes";
-        obj.scopes = ["profile", "profile:contacts"];
+    it(
+        "updateProperty is disabled, even for an admin token (regression: CRUDRoute.updateProperty " +
+            "calls validateUpdate() with a throwaway wrapper object, not the object that actually gets " +
+            "persisted, so the roles-reconciliation guard below cannot protect PUT /:id/roles - it's " +
+            "disabled outright instead, the same way BaseAliasRoute disables it).",
+        async () => {
+            const obj: UserMongo = await createUserMongo();
+            const url = baseUrl + "/" + obj.uid + "/scopes";
 
-        const result = await request(server.getApplication())
-            .put(url)
-            .set("Authorization", "jwt " + adminToken)
-            .send(obj.scopes);
+            const result = await request(server.getApplication())
+                .put(url)
+                .set("Authorization", "jwt " + adminToken)
+                .send(["profile", "profile:contacts"]);
 
-        expect(result).toBeDefined();
-        expect(result.status).toBeGreaterThanOrEqual(200);
-        expect(result.status).toBeLessThan(300);
-        expect(result.body).toBeDefined();
-        expectMatchingFields(result.body, obj);
+            expect(result.status).toBe(404);
 
-        // Validate the contents were stored correctly
-        const existing: UserMongo | null = await repo.findOne({ uid: obj.uid } as any);
-        expect(existing).toBeDefined();
-        if (existing) {
-            expectMatchingFields(existing, obj);
-        }
-    });
+            // Validate nothing was stored
+            const existing: UserMongo | null = await repo.findOne({ uid: obj.uid } as any);
+            expect(existing?.scopes).toEqual(obj.scopes);
+        },
+    );
 
     it("Cannot create a User (with non-admin token).", async () => {
         // UserMongo's class-level ACL grants `.*` no actions at all (unlike Alias/Profile/Secret, which at
@@ -381,7 +379,65 @@ describe("Route:UserMongo Tests", () => {
         expect(existing?.roles).not.toContain("admin");
     });
 
-    it("Cannot update a single property of another user's record (with user token).", async () => {
+    it(
+        "Cannot self-escalate roles via update on their own record (regression: `roles` had no `@ReadOnly` " +
+            "protection and every self-registered user is automatically granted UPDATE on their own record, " +
+            "so a plain PUT with an elevated roles array used to persist unmodified - a full account " +
+            "takeover, since roles:[\"admin\"] bypasses every ACL check system-wide). The attempted roles " +
+            "change is now silently discarded rather than rejecting the whole request.",
+        async () => {
+            const obj: UserMongo = await createUserMongo({ roles: [] });
+            const selfToken = JWTUtils.createTokenSync(config.get("auth"), { uid: obj.uid, roles: [] });
+            const url = baseUrl + "/" + obj.uid;
+
+            const result = await request(server.getApplication())
+                .put(url)
+                .set("Authorization", "jwt " + selfToken)
+                .send({ ...obj, roles: ["admin"] });
+
+            expect(result).toBeDefined();
+            expect(result.status).toBeGreaterThanOrEqual(200);
+            expect(result.status).toBeLessThan(300);
+            expect(result.body.roles).not.toContain("admin");
+
+            const existing: UserMongo | null = await repo.findOne({ uid: obj.uid } as any);
+            expect(existing?.roles).not.toContain("admin");
+        },
+    );
+
+    it("Allows a caller to update their own record when roles are unchanged (no false-positive block).", async () => {
+        const obj: UserMongo = await createUserMongo({ roles: [] });
+        const selfToken = JWTUtils.createTokenSync(config.get("auth"), { uid: obj.uid, roles: [] });
+        const url = baseUrl + "/" + obj.uid;
+
+        const result = await request(server.getApplication())
+            .put(url)
+            .set("Authorization", "jwt " + selfToken)
+            .send({ ...obj, roles: [], verified: false });
+
+        expect(result.status).toBeGreaterThanOrEqual(200);
+        expect(result.status).toBeLessThan(300);
+        expect(result.body.verified).toBe(false);
+    });
+
+    it("Admin can still change another user's roles via update (legitimate role management is preserved).", async () => {
+        const obj: UserMongo = await createUserMongo({ roles: [] });
+        const url = baseUrl + "/" + obj.uid;
+
+        const result = await request(server.getApplication())
+            .put(url)
+            .set("Authorization", "jwt " + adminToken)
+            .send({ ...obj, roles: ["admin"] });
+
+        expect(result.status).toBeGreaterThanOrEqual(200);
+        expect(result.status).toBeLessThan(300);
+        expect(result.body.roles).toContain("admin");
+
+        const existing: UserMongo | null = await repo.findOne({ uid: obj.uid } as any);
+        expect(existing?.roles).toContain("admin");
+    });
+
+    it("Cannot update a single property of another user's record (with user token) - updateProperty is disabled.", async () => {
         const obj: UserMongo = await createUserMongo();
         const url = baseUrl + "/" + obj.uid + "/roles";
 
@@ -390,7 +446,10 @@ describe("Route:UserMongo Tests", () => {
             .set("Authorization", "jwt " + userToken)
             .send(["admin"]);
 
-        expect(result.status).toBe(403);
+        expect(result.status).toBe(404);
+
+        const existing: UserMongo | null = await repo.findOne({ uid: obj.uid } as any);
+        expect(existing?.roles).not.toContain("admin");
     });
 
     it("Cannot delete another user's record (with user token).", async () => {

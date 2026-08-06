@@ -155,6 +155,12 @@ export abstract class BaseAuthFIDO2Route<U extends User, A extends Alias, S exte
             return undefined;
         }
         const secret: Secret | undefined = await this.secretRepo.findOne(credentialId, { ignoreACL: true });
+        if (secret && secret.type !== SecretType.FIDO2) {
+            // A credential id is only meaningful within the strategy that registered it - without this
+            // check, a credential id belonging to some other Secret type (e.g. a `passkey` registration)
+            // would be handed to WebAuthn verification here unchecked.
+            return undefined;
+        }
         return secret?.data;
     }
 

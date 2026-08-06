@@ -76,17 +76,6 @@ describe("BaseAliasRoute Tests", () => {
             await expect((route as any).validateCreate(obj, undefined)).rejects.toThrow(/Authorization is required/);
         });
 
-        it("Processes each object in an array of aliases.", async () => {
-            vi.spyOn(CRUDRoute.prototype as any, "validateCreate").mockResolvedValue(undefined);
-            const route = new TestAliasRoute();
-            const objs: any = [{ alias: "a@example.com" }, { alias: "b@example.com" }];
-
-            await (route as any).validateCreate(objs, { uid: "user-1" });
-
-            expect(objs[0].userUid).toBe("user-1");
-            expect(objs[1].userUid).toBe("user-1");
-        });
-
         describe("verified:true ownership check (email/phone)", () => {
             it("Leaves verified:true intact when the caller's Profile lists the contact as verified.", async () => {
                 vi.spyOn(CRUDRoute.prototype as any, "validateCreate").mockResolvedValue(undefined);

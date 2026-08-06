@@ -224,6 +224,23 @@ describe("BaseAuthOTPRoute Tests", () => {
             expect(result).toEqual([]);
             expect(findOne).toHaveBeenCalledTimes(1);
         });
+
+        it("Filters out non-notifiable alias types (e.g. NAME) instead of throwing (regression: the " +
+            "filter's result used to be discarded instead of reassigned, so a user with a username alias " +
+            "could never complete OTP discovery/login).", async () => {
+            const route = new TestAuthOTPRoute();
+            const findOne = vi.fn().mockResolvedValue({ uid: "user-1" });
+            const find = vi.fn().mockResolvedValue([
+                { alias: "coolname", type: AliasType.NAME, verified: true },
+                { alias: "user@example.com", type: AliasType.EMAIL, verified: true },
+            ]);
+            (route as any).userRepo = { findOne };
+            (route as any).aliasRepo = { find };
+
+            const result = await (route as any).getContacts("user-1");
+
+            expect(result).toEqual([{ contact: "user@example.com", type: OTPContactType.EMAIL, verified: true }]);
+        });
     });
 
     describe("getUser", () => {

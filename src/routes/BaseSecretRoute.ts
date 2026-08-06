@@ -139,43 +139,36 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
         return super.doCount({ params, query, res, user });
     }
 
-    protected async validateCreate(
-        obj: Partial<T> | Partial<T>[],
-        @Request req: HttpRequest,
-        @User user?: JWTUser,
-    ): Promise<void> {
+    protected async validateCreate(obj: Partial<T>, @Request req: HttpRequest, @User user?: JWTUser): Promise<void> {
         await super.validate(obj, { user });
 
-        const objs: Partial<T>[] = Array.isArray(obj) ? obj : [obj];
-        for (const obj of objs) {
-            this.enforceOwnership(obj, user);
+        this.enforceOwnership(obj, user);
 
-            switch (obj.type) {
-                case SecretType.FIDO2:
-                    await this.validateWebAuthnCreate(obj, req, this.fido2Config);
-                    break;
-                case SecretType.PASSKEY:
-                    await this.validateWebAuthnCreate(obj, req, this.passkeyConfig);
-                    break;
-                case SecretType.PASSWORD:
-                    {
-                        if (typeof obj.data === "string") {
-                            this.validatePassword(obj.data);
-                            const argon = await importArgon2();
-                            obj.data = await argon.hash(obj.data);
-                        } else {
-                            throw new ApiError(
-                                ApiErrors.INVALID_REQUEST,
-                                400,
-                                "A secret of type 'password' must specify string data.",
-                            );
-                        }
+        switch (obj.type) {
+            case SecretType.FIDO2:
+                await this.validateWebAuthnCreate(obj, req, this.fido2Config);
+                break;
+            case SecretType.PASSKEY:
+                await this.validateWebAuthnCreate(obj, req, this.passkeyConfig);
+                break;
+            case SecretType.PASSWORD:
+                {
+                    if (typeof obj.data === "string") {
+                        this.validatePassword(obj.data);
+                        const argon = await importArgon2();
+                        obj.data = await argon.hash(obj.data);
+                    } else {
+                        throw new ApiError(
+                            ApiErrors.INVALID_REQUEST,
+                            400,
+                            "A secret of type 'password' must specify string data.",
+                        );
                     }
-                    break;
-                case SecretType.TOTP:
-                    await this.validateTOTPCreate(obj);
-                    break;
-            }
+                }
+                break;
+            case SecretType.TOTP:
+                await this.validateTOTPCreate(obj);
+                break;
         }
     }
 

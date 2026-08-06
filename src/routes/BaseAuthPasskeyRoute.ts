@@ -146,6 +146,12 @@ export abstract class BaseAuthPasskeyRoute<U extends User, A extends Alias, S ex
             return undefined;
         }
         const secret: Secret | undefined = await this.secretRepo.findOne(credentialId, { ignoreACL: true });
+        if (secret && secret.type !== SecretType.PASSKEY) {
+            // A credential id is only meaningful within the strategy that registered it - without this
+            // check, a credential id belonging to some other Secret type (e.g. a `fido2` registration)
+            // would be handed to WebAuthn verification here unchecked.
+            return undefined;
+        }
         return secret?.data;
     }
 

@@ -309,7 +309,15 @@ export class OIDCStrategy implements AuthStrategy {
             const csrfPortion = separatorIdx >= 0 ? incomingState.slice(0, separatorIdx) : incomingState;
             const appData = separatorIdx >= 0 ? incomingState.slice(separatorIdx + 1) : undefined;
 
-            if (!csrfPortion || csrfPortion !== req.session.state) {
+            const sessionState = req.session.state ?? "";
+            const csrfBuf = Buffer.from(csrfPortion);
+            const sessionBuf = Buffer.from(sessionState);
+            const csrfValid =
+                !!csrfPortion &&
+                !!sessionState &&
+                csrfBuf.length === sessionBuf.length &&
+                crypto.timingSafeEqual(csrfBuf, sessionBuf);
+            if (!csrfValid) {
                 throw new Error("Invalid or missing state parameter. Possible CSRF attempt.");
             }
             delete req.session.state;

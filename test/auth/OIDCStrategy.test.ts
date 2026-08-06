@@ -335,6 +335,22 @@ describe("OIDCStrategy Tests", () => {
             await expect(strategy.authenticate(req, makeRes())).rejects.toThrow(/Invalid or missing state/);
         });
 
+        // Regression: the CSRF state comparison now uses crypto.timingSafeEqual(), which throws on
+        // mismatched buffer lengths rather than returning false - a naive fix could leak that as an
+        // unhandled 500 instead of the same clean "Invalid or missing state" error. This case is same-
+        // length-but-different-content, so it specifically exercises timingSafeEqual() itself rather than
+        // the length pre-check short-circuit that the "wrong"/shorter-value case above exercises.
+        it("Throws cleanly (not a raw/unhandled error) on a same-length but incorrect CSRF state.", async () => {
+            const options = new OIDCStrategyOptions("test", makeProvider());
+            const strategy = new OIDCStrategy(options);
+            const session = setupSession();
+            const wrongSameLength = session.state.slice(0, -1) + (session.state.slice(-1) === "9" ? "8" : "9");
+            const req = makeReq({ query: { code: "auth-code", state: wrongSameLength }, session });
+
+            expect(wrongSameLength.length).toBe(session.state.length);
+            await expect(strategy.authenticate(req, makeRes())).rejects.toThrow(/Invalid or missing state/);
+        });
+
         it("Throws when no state is supplied at all.", async () => {
             const options = new OIDCStrategyOptions("test", makeProvider());
             const strategy = new OIDCStrategy(options);

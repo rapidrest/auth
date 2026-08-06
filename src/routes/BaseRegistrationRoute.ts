@@ -14,6 +14,7 @@ import {
 import { Alias, AliasType, AuthResult, User } from "../models/types.js";
 import { generateOTP, verifyOTP } from "../auth/shared.js";
 import { TokenUtils } from "../auth/TokenUtils.js";
+import { RateLimiter } from "../auth/RateLimiter.js";
 
 const { Config, Init, Inject, Logger } = ObjectDecorators;
 const { Summary, Description } = DocDecorators;
@@ -63,6 +64,9 @@ export abstract class BaseRegistrationRoute<U extends User, A extends Alias> {
 
     @Inject(TokenUtils)
     protected tokenUtils?: TokenUtils;
+
+    @Inject(RateLimiter)
+    protected rateLimiter?: RateLimiter;
 
     protected aliasRepo?: RepoUtils<A>;
     protected userRepo?: RepoUtils<U>;
@@ -129,12 +133,13 @@ export abstract class BaseRegistrationRoute<U extends User, A extends Alias> {
                 return {};
             }
 
+            await this.rateLimiter?.checkAndIncrement(email);
             const token = await generateOTP(req, { id: email });
             this.messagingUtils?.sendEmail("register-otp", { totp: token }, { to: email }).catch((err) => {
-                this.logger.debug(`[BaseAuthRegisterRoute] Failed to send verification e-mail: ${err}`);
+                this.logger.debug(`Failed to send verification e-mail: ${err}`);
             });
             if (process.env.environment !== "production") {
-                this.logger.debug(`[BaseAuthRegisterRoute] verification code for ${email}: ${token}`);
+                this.logger.debug(`Verification code for ${email}: ${token}`);
             }
         } else if (phone) {
             const existing = await this.aliasRepo.find(
@@ -150,12 +155,13 @@ export abstract class BaseRegistrationRoute<U extends User, A extends Alias> {
                 return {};
             }
 
+            await this.rateLimiter?.checkAndIncrement(phone);
             const token = await generateOTP(req, { id: phone });
             this.messagingUtils?.sendSMS("register-otp", { totp: token }, { to: phone }).catch((err) => {
-                this.logger.debug(`[BaseAuthRegisterRoute] Failed to send verification SMS: ${err}`);
+                this.logger.debug(`Failed to send verification SMS: ${err}`);
             });
             if (process.env.environment !== "production") {
-                this.logger.debug(`[BaseAuthRegisterRoute] verification code for ${phone}: ${token}`);
+                this.logger.debug(`Verification code for ${phone}: ${token}`);
             }
         }
 

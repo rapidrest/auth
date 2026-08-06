@@ -288,19 +288,6 @@ describe("BaseSecretRoute Tests", () => {
             expect(spy).toHaveBeenCalledWith(obj);
         });
 
-        it("Processes each object in an array of secrets.", async () => {
-            const route = new TestSecretRoute();
-            const objs: any = [
-                { type: SecretType.PASSWORD, data: VALID_PASSWORD + "-1" },
-                { type: SecretType.PASSWORD, data: VALID_PASSWORD + "-2" },
-            ];
-
-            await (route as any).validateCreate(objs, {} as any);
-
-            expect(objs[0].data).not.toBe(VALID_PASSWORD + "-1");
-            expect(objs[1].data).not.toBe(VALID_PASSWORD + "-2");
-        });
-
         it("Throws for a PASSWORD secret shorter than the configured minimum length.", async () => {
             const route = new TestSecretRoute();
             const obj: any = { type: SecretType.PASSWORD, data: "Ab1!" };

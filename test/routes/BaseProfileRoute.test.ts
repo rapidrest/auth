@@ -91,17 +91,6 @@ describe("BaseProfileRoute Tests", () => {
 
             expect(obj.uid).toBe("victim-uid");
         });
-
-        it("Processes each object in an array of profiles.", async () => {
-            vi.spyOn(CRUDRoute.prototype as any, "validateCreate").mockResolvedValue(undefined);
-            const route = new TestProfileRoute();
-            const objs: any = [{ givenName: "A" }, { givenName: "B" }];
-
-            await (route as any).validateCreate(objs, { uid: "user-1" });
-
-            expect(objs[0].uid).toBe("user-1");
-            expect(objs[1].uid).toBe("user-1");
-        });
     });
 
     describe("validateUpdate", () => {
@@ -171,22 +160,120 @@ describe("BaseProfileRoute Tests", () => {
                 (route as any).validateUpdate("me", obj, { uid: "user-1" }),
             ).resolves.toBeUndefined();
         });
+
+        // Regression: a client could PUT {contacts:[{contact:"victim@example.com", type:"email",
+        // verified:true}]} with no OTP round-trip, then create a matching Alias that auto-verifies itself
+        // off this fabricated "verified" contact - permanently pre-empting the real owner's registration.
+        // `verified` must only ever be settable via verifyContact()'s real OTP check.
+        describe("contacts[].verified reconciliation", () => {
+            it("Discards a client-supplied verified:true on an existing unverified contact.", async () => {
+                const route = new TestProfileRoute();
+                (route as any).repoUtils = {
+                    validate: vi.fn().mockResolvedValue(undefined),
+                    findOne: vi.fn().mockResolvedValue({
+                        uid: "user-1",
+                        contacts: [{ contact: "victim@example.com", type: ContactType.EMAIL, verified: false }],
+                    }),
+                };
+                const obj: any = {
+                    contacts: [{ contact: "victim@example.com", type: ContactType.EMAIL, verified: true }],
+                };
+
+                await (route as any).validateUpdate("user-1", obj, { uid: "user-1" });
+
+                expect(obj.contacts).toEqual([
+                    { contact: "victim@example.com", type: ContactType.EMAIL, verified: false },
+                ]);
+            });
+
+            it("Forces verified:false on a brand-new contact even if the client sent verified:true.", async () => {
+                const route = new TestProfileRoute();
+                (route as any).repoUtils = {
+                    validate: vi.fn().mockResolvedValue(undefined),
+                    findOne: vi.fn().mockResolvedValue({ uid: "user-1", contacts: [] }),
+                };
+                const obj: any = {
+                    contacts: [{ contact: "victim@example.com", type: ContactType.EMAIL, verified: true }],
+                };
+
+                await (route as any).validateUpdate("user-1", obj, { uid: "user-1" });
+
+                expect(obj.contacts).toEqual([
+                    { contact: "victim@example.com", type: ContactType.EMAIL, verified: false },
+                ]);
+            });
+
+            it("Preserves an already-verified contact's true value when echoed back unchanged.", async () => {
+                const route = new TestProfileRoute();
+                (route as any).repoUtils = {
+                    validate: vi.fn().mockResolvedValue(undefined),
+                    findOne: vi.fn().mockResolvedValue({
+                        uid: "user-1",
+                        contacts: [{ contact: "user@example.com", type: ContactType.EMAIL, verified: true }],
+                    }),
+                };
+                const obj: any = {
+                    contacts: [{ contact: "user@example.com", type: ContactType.EMAIL, verified: true }],
+                };
+
+                await (route as any).validateUpdate("user-1", obj, { uid: "user-1" });
+
+                expect(obj.contacts).toEqual([
+                    { contact: "user@example.com", type: ContactType.EMAIL, verified: true },
+                ]);
+            });
+
+            it("Does not touch obj.contacts when the update doesn't include contacts.", async () => {
+                const route = new TestProfileRoute();
+                (route as any).repoUtils = { validate: vi.fn().mockResolvedValue(undefined), findOne: vi.fn() };
+                const obj: any = { givenName: "John" };
+
+                await (route as any).validateUpdate("user-1", obj, { uid: "user-1" });
+
+                expect(obj.contacts).toBeUndefined();
+                expect((route as any).repoUtils.findOne).not.toHaveBeenCalled();
+            });
+        });
     });
 
     describe("updateProperty", () => {
-        // Regression test for a framework-level gap: CRUDRoute.updateProperty (PUT /:id/:property) used to
-        // call repoUtils.update() directly with no validation hook at all, bypassing validateUpdate's
-        // ownership check entirely. Fixed upstream in @rapidrest/service-core@1.0.0-rc.28 by having
-        // updateProperty invoke this.validateUpdate() first.
-        it("Rejects hijacking uid via the single-property update route without a trusted role.", async () => {
+        // Disabled outright: CRUDRoute.updateProperty (PUT /:id/:property) invokes validateUpdate() with a
+        // throwaway wrapper object ({[propertyName]: obj}), not the object that actually gets persisted, so
+        // the `contacts[].verified` reconciliation in validateUpdate() (see below) cannot protect this path -
+        // a client could otherwise self-verify an email/phone via PUT /profile/:id/contacts. Rather than
+        // special-case `contacts`, the whole endpoint is disabled, the same way BaseAliasRoute disables it.
+        // These throw synchronously (rather than returning a rejected Promise), so the call is wrapped in an
+        // async closure below to normalize both forms for `.rejects` (same pattern as BaseAliasRoute.test.ts).
+        it("Always rejects, regardless of caller or property.", async () => {
             const route = new TestProfileRoute();
 
             await expect(
-                (route as any).updateProperty("victim-uid", "uid", "third-party-uid", {
-                    uid: "attacker-uid",
-                    roles: [],
-                }),
-            ).rejects.toThrow(/does not have permission/);
+                (async () =>
+                    (route as any).updateProperty("victim-uid", "uid", "third-party-uid", {
+                        uid: "attacker-uid",
+                        roles: [],
+                    }))(),
+            ).rejects.toThrow(/no resource could be found/i);
+        });
+
+        it("Rejects even for the record's own owner.", async () => {
+            const route = new TestProfileRoute();
+
+            await expect(
+                (async () => (route as any).updateProperty("user-1", "contacts", [], { uid: "user-1" }))(),
+            ).rejects.toThrow(/no resource could be found/i);
+        });
+
+        it("Rejects even for a trusted (admin) caller.", async () => {
+            const route = new TestProfileRoute();
+
+            await expect(
+                (async () =>
+                    (route as any).updateProperty("victim-uid", "contacts", [], {
+                        uid: "admin-uid",
+                        roles: ["admin"],
+                    }))(),
+            ).rejects.toThrow(/no resource could be found/i);
         });
     });
 

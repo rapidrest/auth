@@ -18,6 +18,10 @@ const { Post, Response } = RouteDecorators;
  * a client that only ever used the `Authorization: Bearer` header has nothing here to clear, and simply
  * discards its own token locally.
  *
+ * This does not invalidate the JWT itself — a bearer token already issued remains valid until its natural
+ * expiry even after this call succeeds; deployments needing server-side revocation must add a token
+ * blocklist/short-lived-token strategy on top of this.
+ *
  * @example
  * ```ts
  * import { BaseAuthLogoutRoute } from "@rapidrest/auth";

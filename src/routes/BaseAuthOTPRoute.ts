@@ -202,7 +202,7 @@ export abstract class BaseAuthOTPRoute<U extends User, A extends Alias, S extend
         }
 
         // Filter aliases to only those that can be notified
-        aliases.filter((alias) => [AliasType.EMAIL, AliasType.PHONE].includes(alias.type));
+        aliases = aliases.filter((alias) => [AliasType.EMAIL, AliasType.PHONE].includes(alias.type));
 
         const results: OTPContact[] = [];
         for (const alias of aliases) {

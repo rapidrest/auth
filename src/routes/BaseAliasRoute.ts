@@ -52,36 +52,33 @@ export abstract class BaseAliasRoute<T extends Alias> extends CRUDRoute<T> {
         }
     }
 
-    protected async validateCreate(obj: Partial<T> | Partial<T>[], user?: JWTUser): Promise<void> {
+    protected async validateCreate(obj: Partial<T>, user?: JWTUser): Promise<void> {
         if (!user) {
             throw new ApiError(ApiErrors.AUTH_REQUIRED, 401, ApiErrorMessages.AUTH_REQUIRED);
         }
 
         await super.validateCreate(obj, user);
 
-        const objs: Partial<T>[] = Array.isArray(obj) ? obj : [obj];
-        for (const o of objs) {
-            if (!o.userUid) {
-                o.userUid = user.uid;
-            } else if (o.userUid !== user.uid && !UserUtils.hasRoles(user, this.trustedRoles)) {
-                throw new ApiError(ApiErrors.AUTH_PERMISSION_FAILURE, 403, ApiErrorMessages.AUTH_PERMISSION_FAILURE);
-            }
+        if (!obj.userUid) {
+            obj.userUid = user.uid;
+        } else if (obj.userUid !== user.uid && !UserUtils.hasRoles(user, this.trustedRoles)) {
+            throw new ApiError(ApiErrors.AUTH_PERMISSION_FAILURE, 403, ApiErrorMessages.AUTH_PERMISSION_FAILURE);
+        }
 
-            // If Alias is of type `name` we check for existing names and then automatically set as `verified`
-            if (o.type === AliasType.NAME) {
-                const existing: T[] | undefined = await this.repoUtils?.find({ alias: o.alias }, { ignoreACL: true });
-                if (existing && existing.length > 0) {
-                    throw new ApiError(ApiErrors.IDENTIFIER_EXISTS, 403, ApiErrorMessages.IDENTIFIER_EXISTS);
-                } else {
-                    o.verified = true;
-                }
+        // If Alias is of type `name` we check for existing names and then automatically set as `verified`
+        if (obj.type === AliasType.NAME) {
+            const existing: T[] | undefined = await this.repoUtils?.find({ alias: obj.alias }, { ignoreACL: true });
+            if (existing && existing.length > 0) {
+                throw new ApiError(ApiErrors.IDENTIFIER_EXISTS, 403, ApiErrorMessages.IDENTIFIER_EXISTS);
+            } else {
+                obj.verified = true;
             }
+        }
 
-            // An alias is always considered unverified unless it already exists as verified in the user's Profile
-            // contacts list.
-            if (o.type === AliasType.EMAIL || o.type === AliasType.PHONE) {
-                o.verified = await this.isVerifiedContact(user, o.alias!, o.type);
-            }
+        // An alias is always considered unverified unless it already exists as verified in the user's Profile
+        // contacts list.
+        if (obj.type === AliasType.EMAIL || obj.type === AliasType.PHONE) {
+            obj.verified = await this.isVerifiedContact(user, obj.alias!, obj.type);
         }
     }
 

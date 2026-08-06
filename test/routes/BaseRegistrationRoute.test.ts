@@ -212,6 +212,74 @@ describe("BaseRegistrationRoute Tests", () => {
             );
         });
 
+        it("Rate-limits by the e-mail address before sending an OTP.", async () => {
+            const route = new TestRegistrationRoute();
+            (route as any).aliasRepo = { find: vi.fn().mockResolvedValue([]) };
+            const checkAndIncrement = vi.fn().mockResolvedValue(undefined);
+            (route as any).rateLimiter = { checkAndIncrement };
+            (route as any).messagingUtils = { sendEmail: vi.fn().mockResolvedValue(undefined), sendSMS: vi.fn() };
+            (route as any).logger = { debug: vi.fn() };
+            const req = makeReq();
+
+            await (route as any).start({ email: "user@example.com" }, req);
+
+            expect(checkAndIncrement).toHaveBeenCalledWith("user@example.com");
+        });
+
+        it("Rate-limits by the phone number before sending an OTP.", async () => {
+            const route = new TestRegistrationRoute();
+            (route as any).aliasRepo = { find: vi.fn().mockResolvedValue([]) };
+            const checkAndIncrement = vi.fn().mockResolvedValue(undefined);
+            (route as any).rateLimiter = { checkAndIncrement };
+            (route as any).messagingUtils = { sendEmail: vi.fn(), sendSMS: vi.fn().mockResolvedValue(undefined) };
+            (route as any).logger = { debug: vi.fn() };
+            const req = makeReq();
+
+            await (route as any).start({ phone: "+14155552671" }, req);
+
+            expect(checkAndIncrement).toHaveBeenCalledWith("+14155552671");
+        });
+
+        it("Propagates the rate limiter's error and does not send an OTP once the limit is exceeded.", async () => {
+            const route = new TestRegistrationRoute();
+            (route as any).aliasRepo = { find: vi.fn().mockResolvedValue([]) };
+            const checkAndIncrement = vi.fn().mockRejectedValue(new Error("Too many attempts"));
+            (route as any).rateLimiter = { checkAndIncrement };
+            const sendEmail = vi.fn();
+            (route as any).messagingUtils = { sendEmail, sendSMS: vi.fn() };
+            (route as any).logger = { debug: vi.fn() };
+            const req = makeReq();
+
+            await expect((route as any).start({ email: "user@example.com" }, req)).rejects.toThrow(
+                /Too many attempts/,
+            );
+            expect(sendEmail).not.toHaveBeenCalled();
+        });
+
+        it("Does not rate-limit or send an OTP when a verified alias already exists.", async () => {
+            const route = new TestRegistrationRoute();
+            const find = vi.fn().mockResolvedValue([{ alias: "user@example.com", verified: true }]);
+            (route as any).aliasRepo = { find };
+            const checkAndIncrement = vi.fn();
+            (route as any).rateLimiter = { checkAndIncrement };
+            (route as any).messagingUtils = { sendEmail: vi.fn(), sendSMS: vi.fn() };
+            const req = makeReq();
+
+            await (route as any).start({ email: "user@example.com" }, req);
+
+            expect(checkAndIncrement).not.toHaveBeenCalled();
+        });
+
+        it("Does not throw when rateLimiter is unset.", async () => {
+            const route = new TestRegistrationRoute();
+            (route as any).aliasRepo = { find: vi.fn().mockResolvedValue([]) };
+            (route as any).messagingUtils = { sendEmail: vi.fn().mockResolvedValue(undefined), sendSMS: vi.fn() };
+            (route as any).logger = { debug: vi.fn() };
+            const req = makeReq();
+
+            await expect((route as any).start({ email: "user@example.com" }, req)).resolves.toEqual({});
+        });
+
         it("Does not throw when messagingUtils is unset.", async () => {
             const route = new TestRegistrationRoute();
             (route as any).aliasRepo = { find: vi.fn().mockResolvedValue([]) };
