@@ -122,7 +122,7 @@ export abstract class DefaultAccounts<
                 aliases.length > 0 ? await this.userRepo!.findOne(aliases[0].userUid, { ignoreACL: true }) : undefined;
             if (!user) {
                 // An account does not exist yet for this name. Let's create the user.
-                const newUser: U = new this.userClass({ roles: account.roles });
+                const newUser: U = new this.userClass({ roles: account.roles, verified: true });
                 user = await this.userRepo!.create(newUser, {
                     user: newUser,
                     acl: {
