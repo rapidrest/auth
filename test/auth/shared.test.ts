@@ -24,6 +24,7 @@ import {
     generateOTP,
     generatePasskeyChallenge,
     generatePasskeyRegistrationOptions,
+    generatePassword,
     generateTOTP,
     generateTOTPURI,
     getBasicData,
@@ -42,6 +43,7 @@ import {
 import {
     OTPContactType,
     PasskeyConfig,
+    PasswordConfig,
     StoredPasskeyCredential,
     TOTPConfig,
     TOTPSecret,
@@ -619,6 +621,81 @@ describe("verifyDummyPassword", () => {
 
         expect(DUMMY_ARGON2_HASH).toMatch(/^\$argon2id\$/);
         await expect(argon2.verify(DUMMY_ARGON2_HASH, "definitely-the-wrong-password")).resolves.toBe(false);
+    });
+});
+
+function makePasswordConfig(overrides: Partial<PasswordConfig> = {}): PasswordConfig {
+    return Object.assign(new PasswordConfig(), overrides);
+}
+
+describe("generatePassword", () => {
+    it("Generates a password of length max(min_length, recommended_length) by default.", () => {
+        const config = makePasswordConfig();
+        const pw = generatePassword(config);
+        expect(pw.length).toBe(Math.max(config.min_length, config.recommended_length));
+    });
+
+    it("Satisfies every default requirement (lowercase, uppercase, numeral, special).", () => {
+        const config = makePasswordConfig();
+        const pw = generatePassword(config);
+        expect(pw).toMatch(/[a-z]/);
+        expect(pw).toMatch(/[A-Z]/);
+        expect(pw).toMatch(/[0-9]/);
+        expect(pw).toMatch(new RegExp(`[${config.special_chars}]`));
+    });
+
+    it("Uses recommended_length when it is larger than min_length.", () => {
+        const config = makePasswordConfig({ min_length: 8, recommended_length: 40 });
+        expect(generatePassword(config).length).toBe(40);
+    });
+
+    it("Falls back to min_length when it is larger than recommended_length.", () => {
+        const config = makePasswordConfig({ min_length: 20, recommended_length: 10 });
+        expect(generatePassword(config).length).toBe(20);
+    });
+
+    it("Draws only from the numeral pool when it is the only required category.", () => {
+        const config = makePasswordConfig({
+            require_lowercase: false,
+            require_uppercase: false,
+            require_numeral: true,
+            require_special: false,
+            recommended_length: 16,
+        });
+        const pw = generatePassword(config);
+        expect(pw).toMatch(/^[0-9]+$/);
+        expect(pw.length).toBe(16);
+    });
+
+    it("Falls back to the lowercase pool when no character category is required.", () => {
+        const config = makePasswordConfig({
+            require_lowercase: false,
+            require_uppercase: false,
+            require_numeral: false,
+            require_special: false,
+            recommended_length: 12,
+        });
+        const pw = generatePassword(config);
+        expect(pw).toMatch(/^[a-z]+$/);
+        expect(pw.length).toBe(12);
+    });
+
+    it("Only draws from the configured special_chars set when it is the only required category.", () => {
+        const config = makePasswordConfig({
+            require_lowercase: false,
+            require_uppercase: false,
+            require_numeral: false,
+            require_special: true,
+            special_chars: "#$%",
+            recommended_length: 20,
+        });
+        const pw = generatePassword(config);
+        expect(pw).toMatch(/^[#$%]+$/);
+    });
+
+    it("Generates distinct passwords across calls.", () => {
+        const config = makePasswordConfig();
+        expect(generatePassword(config)).not.toBe(generatePassword(config));
     });
 });
 

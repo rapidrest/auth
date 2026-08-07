@@ -36,11 +36,6 @@ export abstract class BaseAccountRoute<U extends User, A extends Alias, P extend
     @Config("auth")
     protected jwtConfig?: any;
 
-    /**
-     * The set of roles that are trusted to access or delete another user's account data. Matches the
-     * `trusted_roles` convention used elsewhere in the framework (see `BaseProfileRoute`, `BaseSecretRoute`,
-     * `BaseUserRoute`, `@rapidrest/service-core`'s `ACLUtils`).
-     */
     @Config("trusted_roles", ["admin"])
     protected trustedRoles: string[] = ["admin"];
 

@@ -83,11 +83,6 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
     @Config("auth:password", new PasswordConfig())
     protected passwordConfig: PasswordConfig = new PasswordConfig();
 
-    /**
-     * The set of roles that are trusted to create a Secret on behalf of another user (i.e. specify a
-     * `userUid` that differs from their own). Matches the `trusted_roles` convention used elsewhere in the
-     * framework (see `@rapidrest/service-core`'s `ACLUtils`/`ModelRoute`/`RepoUtils`).
-     */
     @Config("trusted_roles", ["admin"])
     protected trustedRoles: string[] = ["admin"];
 

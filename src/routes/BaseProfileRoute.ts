@@ -23,11 +23,6 @@ const { Auth, Delete, Get, Param, Post, Put, Query, Request, User, Validate } = 
  * @author Jean-Philippe Steinmetz
  */
 export abstract class BaseProfileRoute<T extends Profile> extends CRUDRoute<T> {
-    /**
-     * The set of roles that are trusted to create an Alias on behalf of another user (i.e. specify a
-     * `userUid` that differs from their own). Matches the `trusted_roles` convention used elsewhere in the
-     * framework (see `@rapidrest/service-core`'s `ACLUtils`/`ModelRoute`/`RepoUtils`).
-     */
     @Config("trusted_roles", ["admin"])
     protected trustedRoles: string[] = ["admin"];
 

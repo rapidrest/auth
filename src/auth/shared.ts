@@ -1,11 +1,13 @@
 ////////////////////////////////////////////////////////////////////////////////
 // Copyright (C) 2026 Jean-Philippe Steinmetz
 ////////////////////////////////////////////////////////////////////////////////
+import * as crypto from "crypto";
 import { HttpRequest } from "@rapidrest/service-core";
 import {
     OTPContactType,
     PasskeyConfig,
     PasskeyTransport,
+    PasswordConfig,
     StoredPasskeyCredential,
     TOTPConfig,
     TOTPSecret,
@@ -280,6 +282,56 @@ export const verifyOTP = async function (req: HttpRequest, payload?: any): Promi
         token: payload.token,
     });
     return result.valid;
+};
+
+///////////////////////////////////////////////////////////////////////////////
+// PASSWORD
+///////////////////////////////////////////////////////////////////////////////
+
+const PASSWORD_LOWERCASE_CHARS = "abcdefghijklmnopqrstuvwxyz";
+const PASSWORD_UPPERCASE_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+const PASSWORD_NUMERAL_CHARS = "0123456789";
+
+/**
+ * Generates a cryptographically random password that satisfies the given password requirements.
+ * Used to provision a default account when no explicit password has been configured for it.
+ *
+ * @param config The password requirements the generated password must satisfy.
+ * @returns A randomly generated password meeting every requirement enabled in `config`.
+ */
+export const generatePassword = function (config: PasswordConfig): string {
+    const requiredCharSets: string[] = [];
+    if (config.require_lowercase) {
+        requiredCharSets.push(PASSWORD_LOWERCASE_CHARS);
+    }
+    if (config.require_uppercase) {
+        requiredCharSets.push(PASSWORD_UPPERCASE_CHARS);
+    }
+    if (config.require_numeral) {
+        requiredCharSets.push(PASSWORD_NUMERAL_CHARS);
+    }
+    if (config.require_special) {
+        requiredCharSets.push(config.special_chars);
+    }
+
+    // A password still needs characters to draw from even if no category is required.
+    const allChars: string = requiredCharSets.length > 0 ? requiredCharSets.join("") : PASSWORD_LOWERCASE_CHARS;
+    const length: number = Math.max(config.recommended_length, config.min_length);
+
+    // Guarantee at least one character from each required category first, then fill the remaining
+    // length randomly from the combined pool so the guaranteed characters don't skew the distribution.
+    const chars: string[] = requiredCharSets.map((set) => set[crypto.randomInt(set.length)]);
+    while (chars.length < length) {
+        chars.push(allChars[crypto.randomInt(allChars.length)]);
+    }
+
+    // Shuffle (Fisher-Yates) so the guaranteed category characters aren't always the leading ones.
+    for (let i = chars.length - 1; i > 0; i--) {
+        const j = crypto.randomInt(i + 1);
+        [chars[i], chars[j]] = [chars[j], chars[i]];
+    }
+
+    return chars.join("");
 };
 
 ///////////////////////////////////////////////////////////////////////////////
