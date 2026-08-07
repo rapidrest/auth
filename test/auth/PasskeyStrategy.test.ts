@@ -160,6 +160,38 @@ describe("PasskeyStrategy Tests", () => {
             const req = makeReq({ query: {} });
             await expect(strategy.authenticate(req, undefined as any)).rejects.toThrow(/response object/);
         });
+
+        it("Invokes checkRateLimit with the uid hint when one is given.", async () => {
+            const req = makeReq({ query: { uid: "user-uid-1" } });
+            const res = makeRes();
+            options.checkRateLimit = vi.fn().mockResolvedValue(undefined);
+            (options.getCredentials as any).mockResolvedValue([]);
+            mockGenerateAuthenticationOptions.mockResolvedValue({ challenge: "chal-123" });
+
+            await strategy.authenticate(req, res);
+
+            expect(options.checkRateLimit).toHaveBeenCalledWith("user-uid-1", req);
+        });
+
+        it("Does not invoke checkRateLimit for the discoverable/no-hint flow.", async () => {
+            const req = makeReq({ query: {} });
+            const res = makeRes();
+            options.checkRateLimit = vi.fn();
+            mockGenerateAuthenticationOptions.mockResolvedValue({ challenge: "chal-123" });
+
+            await strategy.authenticate(req, res);
+
+            expect(options.checkRateLimit).not.toHaveBeenCalled();
+        });
+
+        it("Aborts before getCredentials() when checkRateLimit throws.", async () => {
+            const req = makeReq({ query: { uid: "user-uid-1" } });
+            const res = makeRes();
+            options.checkRateLimit = vi.fn().mockRejectedValue(new Error("Too many attempts."));
+
+            await expect(strategy.authenticate(req, res)).rejects.toThrow(/Too many attempts/);
+            expect(options.getCredentials).not.toHaveBeenCalled();
+        });
     });
 
     describe("Finish (phase 2)", () => {
@@ -220,6 +252,29 @@ describe("PasskeyStrategy Tests", () => {
             await expect(strategy.authenticate(req, undefined as any)).rejects.toThrow(/Malformed/);
             expect(options.getCredentialById).not.toHaveBeenCalled();
             expect(mockVerifyAuthenticationResponse).not.toHaveBeenCalled();
+        });
+
+        it("Invokes checkRateLimit with the credential id after shape validation succeeds.", async () => {
+            const req = makeReq({ body: makeAssertionBody(), session: { challenge: "stored-challenge" } });
+            options.checkRateLimit = vi.fn().mockResolvedValue(undefined);
+            (options.getCredentialById as any).mockResolvedValue(storedCredential);
+            mockVerifyAuthenticationResponse.mockResolvedValue({
+                verified: true,
+                authenticationInfo: { newCounter: 6, credentialID: "cred-id-1" },
+            });
+            (options.getUser as any).mockResolvedValue({ uid: "user-uid-1", name: "test", roles: [] });
+
+            await strategy.authenticate(req, undefined as any);
+
+            expect(options.checkRateLimit).toHaveBeenCalledWith("cred-id-1", req);
+        });
+
+        it("Aborts before getCredentialById() when checkRateLimit throws.", async () => {
+            const req = makeReq({ body: makeAssertionBody(), session: { challenge: "stored-challenge" } });
+            options.checkRateLimit = vi.fn().mockRejectedValue(new Error("Too many attempts."));
+
+            await expect(strategy.authenticate(req, undefined as any)).rejects.toThrow(/Too many attempts/);
+            expect(options.getCredentialById).not.toHaveBeenCalled();
         });
 
         it("Throws a generic failure on an unknown credential ID without calling verifyAuthenticationResponse.", async () => {

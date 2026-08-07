@@ -11,12 +11,35 @@ vi.mock("@simplewebauthn/server", () => ({
 
 import type { JWTUser } from "@rapidrest/core";
 import type { HttpRequest, HttpResponse } from "@rapidrest/service-core";
-import { generateAuthenticationOptions } from "@simplewebauthn/server";
+import { generateAuthenticationOptions, verifyAuthenticationResponse } from "@simplewebauthn/server";
 import * as otplib from "otplib";
 import { MFAMethod, MFAMethodType, MFAStrategy, MFAStrategyOptions } from "../../src/auth/MFAStrategy.js";
-import { OTPContactType, PasskeyConfig } from "../../src/auth/types.js";
+import { OTPContactType, PasskeyConfig, StoredPasskeyCredential } from "../../src/auth/types.js";
 
 const mockGenerateAuthenticationOptions = generateAuthenticationOptions as any;
+const mockVerifyAuthenticationResponse = verifyAuthenticationResponse as any;
+
+function makeAssertionBody(overrides: any = {}): any {
+    return {
+        id: "cred-id-1",
+        response: {
+            clientDataJSON: "clientDataJSON-base64",
+            authenticatorData: "authenticatorData-base64",
+            signature: "signature-base64",
+        },
+        type: "public-key",
+        clientExtensionResults: {},
+        ...overrides,
+    };
+}
+
+const storedCredential: StoredPasskeyCredential = {
+    id: "cred-id-1",
+    uid: "user-uid-1",
+    publicKey: new Uint8Array([1, 2, 3]),
+    counter: 5,
+    transports: ["usb"],
+};
 
 function makeFidoConfig(overrides: Partial<PasskeyConfig> = {}): PasskeyConfig {
     return {
@@ -71,13 +94,16 @@ describe("MFAStrategy Tests", () => {
 
     beforeEach(() => {
         options = new MFAStrategyOptions();
+        options.getCredentialById = vi.fn();
         options.getMethod = vi.fn();
         options.getMethods = vi.fn();
         options.getUser = vi.fn();
         options.notifyContact = vi.fn();
+        options.updateCredentialCounter = vi.fn();
         options.verify = vi.fn();
         strategy = new MFAStrategy(options);
         mockGenerateAuthenticationOptions.mockReset();
+        mockVerifyAuthenticationResponse.mockReset();
     });
 
     it("authenticateSync throws 'Not supported'.", () => {
@@ -118,19 +144,13 @@ describe("MFAStrategy Tests", () => {
             expect(result).toBeUndefined();
         });
 
-        it("Routes a passkey-shaped payload to verifyFIDO, which is not yet implemented.", async () => {
-            const req = makeReq({
-                body: {
-                    id: "cred-id-1",
-                    response: {
-                        clientDataJSON: "x",
-                        authenticatorData: "y",
-                        signature: "z",
-                    },
-                },
-            });
+        it("Returns undefined for a passkey-shaped payload when there is no phase-2 session state (cold request).", async () => {
+            const req = makeReq({ body: makeAssertionBody() });
 
-            await expect(strategy.authenticate(req, makeRes())).rejects.toThrow(/Not implemented/);
+            const result = await strategy.authenticate(req, makeRes(), false);
+
+            expect(result).toBeUndefined();
+            expect(options.getCredentialById).not.toHaveBeenCalled();
         });
 
         it("Authenticates on a passkey-shaped payload once verifyFIDO resolves a user.", async () => {
@@ -277,21 +297,46 @@ describe("MFAStrategy Tests", () => {
             );
         });
 
-        it("Generates a FIDO2 challenge and writes it to the response when fidoConfig is configured.", async () => {
+        it("Generates a FIDO2 challenge scoped to the selected credential, writes it to the response, and records the method id.", async () => {
             options.fidoConfig = makeFidoConfig();
             const req = makeReq({
                 body: { id: "user-uid-1", methodId: "method-1" },
                 session: { userUid: "user-uid-1" },
             });
-            (options.getMethod as any).mockResolvedValue({ id: "method-1", type: MFAMethodType.FIDO2, data: {} });
+            (options.getMethod as any).mockResolvedValue({
+                id: "method-1",
+                type: MFAMethodType.FIDO2,
+                data: { id: "cred-id-1", transports: ["usb"] },
+            });
             mockGenerateAuthenticationOptions.mockResolvedValue({ challenge: "chal-123" });
             const res = makeRes();
 
             const result = await strategy.authenticate(req, res);
 
             expect(result).toBeUndefined();
+            expect(mockGenerateAuthenticationOptions).toHaveBeenCalledWith(
+                expect.objectContaining({ allowCredentials: [{ id: "cred-id-1", transports: ["usb"] }] }),
+            );
+            expect((req.session as any).mfaMethodId).toBe("method-1");
             expect(res.status).toHaveBeenCalledWith(200);
             expect(res.json).toHaveBeenCalledWith({ challenge: "chal-123" });
+        });
+
+        it("Acknowledges a TOTP method selection without sending a notification, and records the method id.", async () => {
+            const req = makeReq({
+                body: { id: "user-uid-1", methodId: "method-1" },
+                session: { userUid: "user-uid-1" },
+            });
+            (options.getMethod as any).mockResolvedValue({ id: "method-1", type: MFAMethodType.TOTP, data: {} });
+            const res = makeRes();
+
+            const result = await strategy.authenticate(req, res);
+
+            expect(result).toBeUndefined();
+            expect(options.notifyContact).not.toHaveBeenCalled();
+            expect((req.session as any).mfaMethodId).toBe("method-1");
+            expect(res.status).toHaveBeenCalledWith(200);
+            expect(res.json).toHaveBeenCalledWith({});
         });
 
         it("Throws for an unsupported method type.", async () => {
@@ -299,9 +344,9 @@ describe("MFAStrategy Tests", () => {
                 body: { id: "user-uid-1", methodId: "method-1" },
                 session: { userUid: "user-uid-1" },
             });
-            (options.getMethod as any).mockResolvedValue({ id: "method-1", type: MFAMethodType.TOTP, data: {} });
+            (options.getMethod as any).mockResolvedValue({ id: "method-1", type: "unknown", data: {} });
 
-            await expect(strategy.authenticate(req, makeRes())).rejects.toThrow(/Unsupported MFA method: totp/);
+            await expect(strategy.authenticate(req, makeRes())).rejects.toThrow(/Unsupported MFA method: unknown/);
         });
     });
 
@@ -323,7 +368,7 @@ describe("MFAStrategy Tests", () => {
             await expect(strategy.authenticate(req, makeRes())).rejects.toThrow(/Invalid user id or password/);
         });
 
-        it("Returns the list of 2FA methods and does not authenticate when methods are available.", async () => {
+        it("Returns the user's uid alongside the list of 2FA methods, and does not authenticate, when methods are available.", async () => {
             const req = makeReq({
                 headers: { authorization: basicHeader("user-uid-1", "password") },
                 body: { id: "user-uid-1", password: "password" },
@@ -337,7 +382,9 @@ describe("MFAStrategy Tests", () => {
 
             expect(result).toBeUndefined();
             expect(res.status).toHaveBeenCalledWith(200);
-            expect(res.json).toHaveBeenCalledWith(methods);
+            // `uid` lets a client that logged in with a non-uid identifier (email, alias, etc.) know
+            // what `id` to submit for phase 2/3 — the only point at which it's ever disclosed.
+            expect(res.json).toHaveBeenCalledWith({ uid: jwtUser.uid, methods });
         });
 
         it("Does not throw when req.session is missing on successful password verification.", async () => {
@@ -453,13 +500,227 @@ describe("MFAStrategy Tests", () => {
         });
     });
 
-    it("verifyTOTP is not yet implemented.", async () => {
-        const req = makeReq();
-        await expect((strategy as any).verifyTOTP({}, req, makeRes())).rejects.toThrow(/Not implemented/);
+    describe("verifyFIDO (phase 3)", () => {
+        function makeFidoSessionReq(overrides: any = {}): HttpRequest {
+            return makeReq({
+                body: makeAssertionBody(),
+                session: {
+                    userUid: "user-uid-1",
+                    mfaMethodId: "cred-id-1",
+                    challenge: "stored-challenge",
+                },
+                ...overrides,
+            });
+        }
+
+        beforeEach(() => {
+            options.fidoConfig = makeFidoConfig();
+        });
+
+        it("Verifies successfully, updates the counter, clears session state, and authenticates.", async () => {
+            const req = makeFidoSessionReq();
+            (options.getCredentialById as any).mockResolvedValue(storedCredential);
+            mockVerifyAuthenticationResponse.mockResolvedValue({
+                verified: true,
+                authenticationInfo: { newCounter: 6, credentialID: "cred-id-1" },
+            });
+            (options.getUser as any).mockResolvedValue(jwtUser);
+
+            const result = await strategy.authenticate(req, makeRes());
+
+            expect(options.getCredentialById).toHaveBeenCalledWith("cred-id-1");
+            expect(options.updateCredentialCounter).toHaveBeenCalledWith("cred-id-1", 6);
+            expect(options.getUser).toHaveBeenCalledWith("user-uid-1");
+            expect(result?.user).toEqual(jwtUser);
+            expect((req.session as any).userUid).toBeUndefined();
+            expect((req.session as any).mfaMethodId).toBeUndefined();
+            expect((req.session as any).challenge).toBeUndefined();
+        });
+
+        it("Throws if req.session is missing.", async () => {
+            const req = makeFidoSessionReq({ session: undefined });
+
+            await expect(strategy.authenticate(req, makeRes())).rejects.toThrow(/session support/);
+        });
+
+        it("Throws for a FIDO2 response when no fidoConfig is configured, once session state is otherwise valid.", async () => {
+            options.fidoConfig = undefined;
+            const req = makeFidoSessionReq();
+
+            await expect(strategy.authenticate(req, makeRes())).rejects.toThrow(
+                /No configuration exists for MFA method: FIDO2/,
+            );
+        });
+
+        it("Returns undefined when the credential id does not match the one selected during phase 2.", async () => {
+            const req = makeFidoSessionReq({
+                session: { userUid: "user-uid-1", mfaMethodId: "some-other-cred", challenge: "stored-challenge" },
+            });
+            (options.getCredentialById as any).mockResolvedValue(storedCredential);
+
+            const result = await strategy.authenticate(req, makeRes(), false);
+
+            expect(result).toBeUndefined();
+            expect(mockVerifyAuthenticationResponse).not.toHaveBeenCalled();
+        });
+
+        it("Returns undefined when the resolved credential belongs to a different user.", async () => {
+            const req = makeFidoSessionReq();
+            (options.getCredentialById as any).mockResolvedValue({ ...storedCredential, uid: "someone-else" });
+
+            const result = await strategy.authenticate(req, makeRes(), false);
+
+            expect(result).toBeUndefined();
+            expect(mockVerifyAuthenticationResponse).not.toHaveBeenCalled();
+        });
+
+        it("Returns undefined when the assertion fails verification.", async () => {
+            const req = makeFidoSessionReq();
+            (options.getCredentialById as any).mockResolvedValue(storedCredential);
+            mockVerifyAuthenticationResponse.mockResolvedValue({ verified: false });
+
+            const result = await strategy.authenticate(req, makeRes(), false);
+
+            expect(result).toBeUndefined();
+            expect(options.updateCredentialCounter).not.toHaveBeenCalled();
+        });
+
+        it("Returns undefined on a regressed (cloned authenticator) counter.", async () => {
+            const req = makeFidoSessionReq();
+            (options.getCredentialById as any).mockResolvedValue(storedCredential);
+            mockVerifyAuthenticationResponse.mockResolvedValue({
+                verified: true,
+                authenticationInfo: { newCounter: 5, credentialID: "cred-id-1" }, // did not increase
+            });
+
+            const result = await strategy.authenticate(req, makeRes(), false);
+
+            expect(result).toBeUndefined();
+            expect(options.updateCredentialCounter).not.toHaveBeenCalled();
+        });
+
+        it("Rate limits by the phase-1-verified identity before verifying.", async () => {
+            const req = makeFidoSessionReq();
+            options.checkRateLimit = vi.fn().mockResolvedValue(undefined);
+            (options.getCredentialById as any).mockResolvedValue(storedCredential);
+            mockVerifyAuthenticationResponse.mockResolvedValue({
+                verified: true,
+                authenticationInfo: { newCounter: 6, credentialID: "cred-id-1" },
+            });
+            (options.getUser as any).mockResolvedValue(jwtUser);
+
+            await strategy.authenticate(req, makeRes());
+
+            expect(options.checkRateLimit).toHaveBeenCalledWith("user-uid-1", req);
+        });
+    });
+
+    describe("verifyTOTP (phase 3)", () => {
+        function makeTotpSessionReq(body: any): HttpRequest {
+            return makeReq({
+                body,
+                session: { userUid: "user-uid-1", mfaMethodId: "secret-1" },
+            });
+        }
+
+        it("Routes an OTP-shaped payload to verifyTOTP instead of verifyOTP when a TOTP method was selected.", async () => {
+            const secret = otplib.generateSecret();
+            const token = await otplib.generate({ secret });
+            const req = makeTotpSessionReq({ id: "user-uid-1", token });
+            (options.getMethod as any).mockResolvedValue({ id: "secret-1", type: MFAMethodType.TOTP, data: { secret } });
+            (options.getUser as any).mockResolvedValue(jwtUser);
+
+            const result = await strategy.authenticate(req, makeRes());
+
+            expect(options.getMethod).toHaveBeenCalledWith("secret-1", "user-uid-1");
+            expect(options.getUser).toHaveBeenCalledWith("user-uid-1");
+            expect(result?.user).toEqual(jwtUser);
+            expect((req.session as any).userUid).toBeUndefined();
+            expect((req.session as any).mfaMethodId).toBeUndefined();
+        });
+
+        it("Invokes checkRateLimit with the claimed payload id.", async () => {
+            const secret = otplib.generateSecret();
+            const token = await otplib.generate({ secret });
+            const req = makeTotpSessionReq({ id: "user-uid-1", token });
+            (options.getMethod as any).mockResolvedValue({ id: "secret-1", type: MFAMethodType.TOTP, data: { secret } });
+            (options.getUser as any).mockResolvedValue(jwtUser);
+            options.checkRateLimit = vi.fn().mockResolvedValue(undefined);
+
+            await strategy.authenticate(req, makeRes());
+
+            expect(options.checkRateLimit).toHaveBeenCalledWith("user-uid-1", req);
+        });
+
+        it("Persists the matched time step for replay protection on success.", async () => {
+            const secret = otplib.generateSecret();
+            const token = await otplib.generate({ secret });
+            const req = makeTotpSessionReq({ id: "user-uid-1", token });
+            (options.getMethod as any).mockResolvedValue({ id: "secret-1", type: MFAMethodType.TOTP, data: { secret } });
+            (options.getUser as any).mockResolvedValue(jwtUser);
+            options.updateSecretTimeStep = vi.fn().mockResolvedValue(undefined);
+
+            await strategy.authenticate(req, makeRes());
+
+            expect(options.updateSecretTimeStep).toHaveBeenCalledWith("secret-1", expect.any(Number));
+        });
+
+        it("Returns undefined when the token is invalid.", async () => {
+            const secret = otplib.generateSecret();
+            const req = makeTotpSessionReq({ id: "user-uid-1", token: "000000" });
+            (options.getMethod as any).mockResolvedValue({ id: "secret-1", type: MFAMethodType.TOTP, data: { secret } });
+
+            const result = await strategy.authenticate(req, makeRes(), false);
+
+            expect(result).toBeUndefined();
+            expect(options.getUser).not.toHaveBeenCalled();
+        });
+
+        it("Returns undefined when the claimed payload id does not match the session-bound identity.", async () => {
+            const secret = otplib.generateSecret();
+            const token = await otplib.generate({ secret });
+            const req = makeTotpSessionReq({ id: "someone-else", token });
+
+            const result = await strategy.authenticate(req, makeRes(), false);
+
+            expect(result).toBeUndefined();
+            expect(options.getMethod).not.toHaveBeenCalled();
+        });
+
+        it("Returns undefined when the selected method is no longer a TOTP method.", async () => {
+            const req = makeTotpSessionReq({ id: "user-uid-1", token: "123456" });
+            (options.getMethod as any).mockResolvedValue({ id: "secret-1", type: MFAMethodType.OTP, data: {} });
+
+            const result = await strategy.authenticate(req, makeRes(), false);
+
+            expect(result).toBeUndefined();
+        });
+
+        it("Clears the session-bound identity and method even when verification fails.", async () => {
+            const req = makeTotpSessionReq({ id: "user-uid-1", token: "000000" });
+            (options.getMethod as any).mockResolvedValue(undefined);
+
+            await strategy.authenticate(req, makeRes(), false);
+
+            expect((req.session as any).userUid).toBeUndefined();
+            expect((req.session as any).mfaMethodId).toBeUndefined();
+        });
     });
 
     describe("Default MFAStrategyOptions", () => {
         const defaultOptions = new MFAStrategyOptions();
+
+        it("getCredentialById throws if the consumer forgot to override it.", () => {
+            expect(() => defaultOptions.getCredentialById("cred-id-1")).toThrow(
+                /Did you forget to override MFAStrategyOptions.getCredentialById/,
+            );
+        });
+
+        it("updateCredentialCounter throws if the consumer forgot to override it.", () => {
+            expect(() => defaultOptions.updateCredentialCounter("cred-id-1", 1)).toThrow(
+                /Did you forget to override MFAStrategyOptions.updateCredentialCounter/,
+            );
+        });
 
         it("getMethod throws if the consumer forgot to override it.", () => {
             expect(() => defaultOptions.getMethod("method-1", "user-uid-1")).toThrow(

@@ -22,6 +22,13 @@ export class FIDO2StrategyOptions {
     }
 
     /**
+     * Optional hook invoked with the claimed identifier before a challenge is issued or an
+     * assertion is verified. Implementations should throw to reject the request once a
+     * caller-defined attempt threshold has been exceeded (see `RateLimiter`). A no-op when not
+     * provided.
+     */
+    public checkRateLimit?(identifier: string, req: HttpRequest): Promise<void>;
+    /**
      * Retrieves a previously-registered credential by its ID. Returns `undefined` if no credential
      * with that ID is known.
      * NOTE: You must override this function when using this strategy.
@@ -127,6 +134,10 @@ export class FIDO2Strategy implements AuthStrategy {
         // no-hint case) rather than sent as an empty list. Otherwise the response shape would leak
         // whether a given uid has any passkeys registered, a user-enumeration side channel.
         const uidHint: string | undefined = req.query?.uid as string | undefined;
+        if (uidHint && this.options.checkRateLimit) {
+            await this.options.checkRateLimit(uidHint, req);
+        }
+
         let allowCredentials: { id: string; transports?: PasskeyTransport[] }[] | undefined = undefined;
         if (uidHint) {
             const credentials: StoredPasskeyCredential[] = await this.options.getCredentials(uidHint);
@@ -172,6 +183,10 @@ export class FIDO2Strategy implements AuthStrategy {
         // message below.
         if (!isPasskeyResponse(req.body)) {
             throw new Error("Malformed FIDO2 authentication response.");
+        }
+
+        if (this.options.checkRateLimit) {
+            await this.options.checkRateLimit(req.body.id, req);
         }
 
         // Every failure from here on is reported with the same generic message, regardless of

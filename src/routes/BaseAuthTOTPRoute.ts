@@ -90,6 +90,7 @@ export abstract class BaseAuthTOTPRoute<U extends User, A extends Alias, S exten
         options.checkRateLimit = (identifier: string) => this.rateLimiter!.checkAndIncrement(identifier);
         options.getSecrets = this.getSecrets.bind(this);
         options.getUser = this.getUser.bind(this);
+        options.updateSecretTimeStep = this.updateSecretTimeStep.bind(this);
         const strategy: TOTPStrategy = await this.objectFactory.newInstance(TOTPStrategy, {
             name: "default",
             args: [options],
@@ -131,7 +132,9 @@ export abstract class BaseAuthTOTPRoute<U extends User, A extends Alias, S exten
         );
 
         for (const secret of secrets) {
-            results.push(secret.data);
+            // The underlying secret's own uid is attached so a successful verification can be
+            // traced back to the specific record to persist replay-protection state onto.
+            results.push({ ...secret.data, uid: secret.uid });
         }
 
         return results;
@@ -147,5 +150,31 @@ export abstract class BaseAuthTOTPRoute<U extends User, A extends Alias, S exten
             throw new Error("userUtils is not set.");
         }
         return await this.userUtils.lookup(uid);
+    }
+
+    /**
+     * Persists the given time step as the last one successfully used for the identified TOTP
+     * secret, so a captured/replayed token can't be reused within its validity window.
+     * @param uid The unique id of the stored secret that was verified.
+     * @param timeStep The RFC 6238 time step at which the token was verified.
+     */
+    protected async updateSecretTimeStep(uid: string, timeStep: number): Promise<void> {
+        if (!this.secretRepo) {
+            throw new Error("secretRepo is not set.");
+        }
+
+        const secret: S | undefined = await this.secretRepo.findOne(uid, { ignoreACL: true });
+        if (secret) {
+            (secret.data as TOTPSecret).lastTimeStep = timeStep;
+            await this.secretRepo.update(
+                {
+                    uid: secret.uid,
+                    version: secret.version,
+                    data: secret.data,
+                } as S,
+                secret,
+                { ignoreACL: true, recordEvent: false },
+            );
+        }
     }
 }

@@ -12,7 +12,7 @@ import {
 } from "@rapidrest/service-core";
 import { Alias, AliasType, AuthResult, Secret, SecretType, User } from "../models/types.js";
 import { MFAMethod, MFAMethodType, MFAStrategy, MFAStrategyOptions } from "../auth/MFAStrategy.js";
-import { OTPContact, OTPContactType } from "../auth/types.js";
+import { OTPContact, OTPContactType, PasskeyConfig, StoredPasskeyCredential, TOTPSecret } from "../auth/types.js";
 import { RateLimiter } from "../auth/RateLimiter.js";
 import { importArgon2, verifyDummyPassword } from "../auth/shared.js";
 import { TokenUtils } from "../auth/TokenUtils.js";
@@ -40,6 +40,18 @@ export abstract class BaseAuthMFARoute<U extends User, S extends Secret, A exten
 
     @Config("auth:default_scopes", [])
     protected defaultScopes: string[] = [];
+
+    /**
+     * The relying party configuration to use for the FIDO2 secondary authentication method. See
+     * `BaseAuthFIDO2Route`/`BaseSecretRoute.fido2Config` for the primary-auth/registration
+     * counterparts of this configuration.
+     */
+    @Config("auth:fido2")
+    protected fido2Config: PasskeyConfig = {
+        rpName: "rapidrest",
+        rpID: "rapidrest",
+        origin: "http://localhost:3000",
+    };
 
     @Config("auth")
     protected jwtConfig?: any;
@@ -107,10 +119,14 @@ export abstract class BaseAuthMFARoute<U extends User, S extends Secret, A exten
 
         const options: MFAStrategyOptions = new MFAStrategyOptions();
         options.checkRateLimit = (identifier: string) => this.rateLimiter!.checkAndIncrement(identifier);
+        options.fidoConfig = this.fido2Config;
+        options.getCredentialById = this.getCredentialById.bind(this);
         options.getMethod = this.getMethod.bind(this);
         options.getMethods = this.getMethods.bind(this);
         options.getUser = this.getUser.bind(this);
         options.notifyContact = this.notifyContact.bind(this);
+        options.updateCredentialCounter = this.updateCredentialCounter.bind(this);
+        options.updateSecretTimeStep = this.updateSecretTimeStep.bind(this);
         options.verify = this.verify.bind(this);
         const strategy: MFAStrategy = await this.objectFactory.newInstance(MFAStrategy, {
             name: "default",
@@ -185,6 +201,28 @@ export abstract class BaseAuthMFARoute<U extends User, S extends Secret, A exten
         }
 
         return undefined;
+    }
+
+    /**
+     * Retrieves a previously-registered FIDO2 credential by its ID, for verifying a FIDO2 secondary
+     * authentication challenge response.
+     * @param credentialId The unique id of the FIDO2 credential to retrieve.
+     */
+    protected async getCredentialById(credentialId: string): Promise<StoredPasskeyCredential | undefined> {
+        if (!this.secretRepo) {
+            throw new Error("secretRepo is not set.");
+        }
+        if (typeof credentialId !== "string") {
+            return undefined;
+        }
+        const secret: S | undefined = await this.secretRepo.findOne(credentialId, { ignoreACL: true });
+        if (secret && secret.type !== SecretType.FIDO2) {
+            // A credential id is only meaningful for a FIDO2 secret - without this check, a
+            // credential id belonging to some other Secret type would be handed to WebAuthn
+            // verification here unchecked.
+            return undefined;
+        }
+        return secret?.data;
     }
 
     /**
@@ -327,6 +365,59 @@ export abstract class BaseAuthMFARoute<U extends User, S extends Secret, A exten
         }
 
         return result;
+    }
+
+    /**
+     * Persists the updated signature counter for the given FIDO2 credential after a successful MFA
+     * challenge. Called on every successful FIDO2 secondary authentication to guard against cloned
+     * authenticators.
+     * @param credentialId The unique id of the credential to update.
+     * @param newCounter The new signature counter value to persist.
+     */
+    protected async updateCredentialCounter(credentialId: string, newCounter: number): Promise<void> {
+        if (!this.secretRepo) {
+            throw new Error("secretRepo is not set.");
+        }
+
+        const secret: S | undefined = await this.secretRepo.findOne(credentialId, { ignoreACL: true });
+        if (secret) {
+            (secret.data as StoredPasskeyCredential).counter = newCounter;
+            await this.secretRepo.update(
+                {
+                    uid: secret.uid,
+                    version: secret.version,
+                    data: secret.data,
+                } as S,
+                secret,
+                { ignoreACL: true, recordEvent: false },
+            );
+        }
+    }
+
+    /**
+     * Persists the given time step as the last one successfully used for the identified TOTP
+     * secret, so a captured/replayed token can't be reused within its validity window.
+     * @param uid The unique id of the stored secret that was verified.
+     * @param timeStep The RFC 6238 time step at which the token was verified.
+     */
+    protected async updateSecretTimeStep(uid: string, timeStep: number): Promise<void> {
+        if (!this.secretRepo) {
+            throw new Error("secretRepo is not set.");
+        }
+
+        const secret: S | undefined = await this.secretRepo.findOne(uid, { ignoreACL: true });
+        if (secret) {
+            (secret.data as TOTPSecret).lastTimeStep = timeStep;
+            await this.secretRepo.update(
+                {
+                    uid: secret.uid,
+                    version: secret.version,
+                    data: secret.data,
+                } as S,
+                secret,
+                { ignoreACL: true, recordEvent: false },
+            );
+        }
     }
 
     protected async verify(name: string, password: string): Promise<JWTUser | undefined> {

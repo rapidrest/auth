@@ -156,4 +156,17 @@ export interface TOTPSecret {
      * tolerance, currentTime + tolerance]`. Default value is `[1, 0]`.
      */
     epochTolerance?: number | number[];
+    /**
+     * The RFC 6238 time step at which a token was last successfully verified for this secret, if
+     * any. Used for replay protection: a token that matches at or before this time step is
+     * rejected, so an intercepted request can't be replayed for as long as the code remains within
+     * its validity window. Populated and persisted by the consuming application.
+     */
+    lastTimeStep?: number;
+    /**
+     * The unique id of the underlying stored secret this data belongs to, if attached by the
+     * caller. Used internally to identify which specific secret to persist `lastTimeStep` onto when
+     * more than one TOTP secret is checked for a user in a single verification.
+     */
+    uid?: string;
 }

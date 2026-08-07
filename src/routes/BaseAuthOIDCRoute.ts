@@ -124,20 +124,50 @@ export abstract class BaseAuthOIDCRoute<U extends User, A extends Alias, P exten
             let user: U | undefined = await this.userUtils.lookup(oauthAlias);
             const foundByOAuthAlias: boolean = user !== undefined;
 
-            // Fall back to the (verified) email alias — this recognizes an account that either
-            // registered before this provider-id lookup existed, or was created via another method
-            // (e.g. password) and is now authenticating with this provider for the first time. Only
-            // trust the provider's email claim for this when it's actually asserted as verified —
-            // otherwise any provider that lets a user set an arbitrary, unverified email would let an
-            // attacker log into the account owning that email.
-            if (!user && profile.email && profile.email_verified) {
-                user = await this.userUtils.lookup(profile.email);
-            }
-
-            // Fall back to the provider-scoped profile id, which is safe to trust regardless of email
-            // verification since it's not attacker-choosable.
+            // Fall back to linking an existing account via a contact the provider itself asserts as
+            // verified — this recognizes an account that either registered before this provider-id
+            // lookup existed, or was created via another method (e.g. password) and is now
+            // authenticating with this provider for the first time. Only a contact the provider
+            // asserts as verified is considered — otherwise a provider that lets a user set an
+            // arbitrary, unverified email/phone would let an attacker log into the account owning
+            // that contact.
+            //
+            // Beyond that, the match is only trusted if the *local* alias record for that same value
+            // is itself verified: the provider only proved that this caller owns the contact value,
+            // not that whoever registered that value locally is the same person. Matching an
+            // unverified (self-claimed, unproven) local alias — including any `name` alias, which is
+            // never eligible for this kind of linking regardless of verification, since it is not a
+            // provable contact — would let an attacker who merely typed a victim's email/phone/handle
+            // into their own unverified profile capture the victim's real login. In that case we
+            // reject outright rather than silently falling through to account creation, since `alias`
+            // values are globally unique and creation would collide anyway.
             if (!user) {
-                user = await this.userUtils.lookup(profile.id);
+                const candidates: Array<{ value: string; type: AliasType }> = [];
+                if (profile.email && profile.email_verified) {
+                    candidates.push({ value: profile.email, type: AliasType.EMAIL });
+                }
+                if (profile.phone && profile.phone_verified) {
+                    candidates.push({ value: profile.phone, type: AliasType.PHONE });
+                }
+
+                for (const candidate of candidates) {
+                    const existingAlias: A | undefined = await this.aliasRepo.findOne(candidate.value, {
+                        ignoreACL: true,
+                    });
+                    if (!existingAlias) {
+                        continue;
+                    }
+                    if (existingAlias.type !== candidate.type || !existingAlias.verified) {
+                        throw new Error(
+                            `Unable to authenticate: an account already exists for this ${candidate.type}, but ` +
+                                "it has not been verified.",
+                        );
+                    }
+                    user = await this.userRepo.findOne(existingAlias.userUid, { ignoreACL: true });
+                    if (user) {
+                        break;
+                    }
+                }
             }
 
             if (!user) {

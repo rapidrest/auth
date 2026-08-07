@@ -13,6 +13,7 @@ import {
 import { Alias, AuthResult, Secret, SecretType, User } from "../models/types.js";
 import { PasskeyStrategy, PasskeyStrategyOptions } from "../auth/PasskeyStrategy.js";
 import { PasskeyConfig, StoredPasskeyCredential } from "../auth/types.js";
+import { RateLimiter } from "../auth/RateLimiter.js";
 import { TokenUtils } from "../auth/TokenUtils.js";
 import { UserUtils } from "./UserUtils.js";
 
@@ -47,6 +48,9 @@ export abstract class BaseAuthPasskeyRoute<U extends User, A extends Alias, S ex
 
     @Inject(MessagingUtils)
     protected messagingUtils?: MessagingUtils;
+
+    @Inject(RateLimiter)
+    protected rateLimiter?: RateLimiter;
 
     protected secretRepo?: RepoUtils<S>;
 
@@ -105,6 +109,7 @@ export abstract class BaseAuthPasskeyRoute<U extends User, A extends Alias, S ex
         }
 
         const options: PasskeyStrategyOptions = new PasskeyStrategyOptions(this.passkeyConfig);
+        options.checkRateLimit = (identifier: string) => this.rateLimiter!.checkAndIncrement(identifier);
         options.getCredentialById = this.getCredentialById.bind(this);
         options.getCredentials = this.getCredentials.bind(this);
         options.updateCredentialCounter = this.updateCredentialCounter.bind(this);

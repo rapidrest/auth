@@ -207,6 +207,10 @@ describe("BaseAuthOTPRoute Tests", () => {
 
             expect(find).toHaveBeenNthCalledWith(1, { alias: "user@example.com" }, { ignoreACL: true });
             expect(find).toHaveBeenNthCalledWith(2, { userUid: "user-1" }, { ignoreACL: true });
+            // Regression: this re-fetch of the user by the re-resolved userUid must bypass ACL like
+            // every other lookup in this unauthenticated, pre-login discovery path — omitting it
+            // throws a 403 instead of gracefully resolving.
+            expect(findOne).toHaveBeenNthCalledWith(2, "user-1", { ignoreACL: true });
             expect(result).toHaveLength(2);
         });
 

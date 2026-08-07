@@ -22,6 +22,13 @@ export class PasskeyStrategyOptions {
     }
 
     /**
+     * Optional hook invoked with the claimed identifier before a challenge is issued or an
+     * assertion is verified. Implementations should throw to reject the request once a
+     * caller-defined attempt threshold has been exceeded (see `RateLimiter`). A no-op when not
+     * provided.
+     */
+    public checkRateLimit?(identifier: string, req: HttpRequest): Promise<void>;
+    /**
      * Retrieves a previously-registered credential by its ID. Returns `undefined` if no credential
      * with that ID is known.
      * NOTE: You must override this function when using this strategy.
@@ -131,8 +138,13 @@ export class PasskeyStrategy implements AuthStrategy {
         // remains distinguishable from one that doesn't by design. Callers that need to avoid this
         // entirely (e.g. a public-facing login form) should not wire a client-suppliable uid hint
         // through to this endpoint at all — rely purely on the discoverable/"usernameless" flow by
-        // omitting the hint, and consider rate-limiting this endpoint regardless.
+        // omitting the hint. `checkRateLimit` below (keyed on the hint) throttles repeated probing
+        // when a hint is supplied.
         const uidHint: string | undefined = req.query?.uid as string | undefined;
+        if (uidHint && this.options.checkRateLimit) {
+            await this.options.checkRateLimit(uidHint, req);
+        }
+
         let allowCredentials: { id: string; transports?: PasskeyTransport[] }[] | undefined = undefined;
         if (uidHint) {
             const credentials: StoredPasskeyCredential[] = await this.options.getCredentials(uidHint);
@@ -178,6 +190,10 @@ export class PasskeyStrategy implements AuthStrategy {
         // message below.
         if (!isPasskeyResponse(req.body)) {
             throw new Error("Malformed passkey authentication response.");
+        }
+
+        if (this.options.checkRateLimit) {
+            await this.options.checkRateLimit(req.body.id, req);
         }
 
         // Every failure from here on is reported with the same generic message, regardless of

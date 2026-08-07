@@ -3,7 +3,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 import type { JWTUser } from "@rapidrest/core";
 import { AuthResult, AuthStrategy, HttpRequest, HttpResponse } from "@rapidrest/service-core";
-import { getRequestData, verifyTOTP } from "./shared.js";
+import { getRequestData, verifyDummyTOTP, verifyTOTP } from "./shared.js";
 import { TOTPSecret } from "./types.js";
 
 /**
@@ -46,6 +46,15 @@ export class TOTPStrategyOptions {
     public getUser(id: string): Promise<JWTUser | undefined> {
         throw new Error("Did you forget to override TOTPStrategyOptions.getUser?");
     }
+    /**
+     * Persists the given time step as the last one successfully used for the identified secret, so
+     * a captured/replayed token within its validity window can't be used to authenticate a second
+     * time. Optional — when omitted, successfully-verified TOTP codes remain valid for reuse until
+     * they naturally expire.
+     * @param uid The unique id of the stored secret (as attached by `getSecrets()`) that was verified.
+     * @param timeStep The RFC 6238 time step at which the token was verified.
+     */
+    public updateSecretTimeStep?(uid: string, timeStep: number): Promise<void>;
 }
 
 /**
@@ -97,16 +106,22 @@ export class TOTPStrategy implements AuthStrategy {
 
     protected async verify(payload: any, req?: HttpRequest): Promise<JWTUser | undefined> {
         const user: JWTUser | undefined = await this.options.getUser(payload.id);
+        const secrets: TOTPSecret[] = (user ? await this.options.getSecrets(user.uid) : []) ?? [];
 
-        if (user) {
-            const secret: TOTPSecret[] = await this.options.getSecrets(user.uid);
+        if (!user || secrets.length === 0) {
+            // Burn an equivalent amount of time to the real verification path below so a
+            // nonexistent user, or one with no registered TOTP secret, can't be distinguished from
+            // a wrong code via response timing.
+            await verifyDummyTOTP(payload.token);
+            return undefined;
+        }
 
-            if (secret) {
-                let result: any = await verifyTOTP(payload.token, secret);
-                if (result && result.valid) {
-                    return user;
-                }
+        const result: any = await verifyTOTP(payload.token, secrets);
+        if (result && result.valid) {
+            if (result.uid && this.options.updateSecretTimeStep) {
+                await this.options.updateSecretTimeStep(result.uid, result.timeStep);
             }
+            return user;
         }
 
         return undefined;

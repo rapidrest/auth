@@ -214,13 +214,17 @@ describe("Route:AuthOTPSQL Tests", () => {
         expect(result.status).toBe(401);
     });
 
-    it("Cannot request a challenge for an unknown contact id.", async () => {
+    it("Responds identically for an unknown contact id as for a real one, without sending a notification.", async () => {
+        // The response must not let an attacker distinguish a real contact id from an unknown one
+        // via status/body — see the "Generates and sends a token" test above for the real-contact
+        // response this must match.
         const result = await request(server.getApplication())
             .post(baseUrl)
             .send({ id: uuid.v4() });
 
         expect(result).toBeDefined();
-        expect(result.status).toBe(401);
+        expect(result.status).toBeGreaterThanOrEqual(200);
+        expect(result.status).toBeLessThan(300);
         expect(messagingUtils.sendEmail).not.toHaveBeenCalled();
     });
 

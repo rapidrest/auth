@@ -156,14 +156,19 @@ describe("OTPStrategy Tests", () => {
             await expect(strategy.authenticate(req, makeRes())).rejects.toThrow(/session support/);
         });
 
-        it("Falls through to the required check when the contact id is unknown.", async () => {
+        it("Commits the exact same response as a real contact when the contact id is unknown, without sending a notification.", async () => {
             (options.getContact as any).mockResolvedValue(undefined);
             const req = makeReq({ body: { id: "unknown-contact" } });
+            const res = makeRes();
 
-            const result = await strategy.authenticate(req, makeRes(), false);
+            const result = await strategy.authenticate(req, res, false);
 
             expect(result).toBeUndefined();
             expect(options.notifyContact).not.toHaveBeenCalled();
+            // Same response as the "contact exists" case below — an unknown contact must not be
+            // distinguishable via response shape/status.
+            expect(res.status).toHaveBeenCalledWith(200);
+            expect(res.json).toHaveBeenCalledWith({});
         });
 
         it("Generates and sends a token, then completes the response.", async () => {

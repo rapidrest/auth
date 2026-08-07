@@ -3,7 +3,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 import type { JWTUser } from "@rapidrest/core";
 import { AuthStrategy, HttpRequest, HttpResponse, AuthResult } from "@rapidrest/service-core";
-import { OTPContact, PasskeyConfig } from "./types.js";
+import { OTPContact, PasskeyConfig, StoredPasskeyCredential } from "./types.js";
 import {
     generateOTP,
     generatePasskeyChallenge,
@@ -12,6 +12,7 @@ import {
     isOTPResponse,
     isPasskeyResponse,
     verifyOTP,
+    verifyPasskeyChallenge,
     verifyTOTP,
 } from "./shared.js";
 
@@ -62,6 +63,14 @@ export class MFAStrategyOptions {
      */
     public checkRateLimit?(identifier: string, req: HttpRequest): Promise<void>;
     /**
+     * Retrieves a previously-registered FIDO2 credential by its ID, for verifying a FIDO2 secondary
+     * authentication challenge response. Returns `undefined` if no credential with that ID is known.
+     * NOTE: You must override this function to support the `FIDO2` secondary authentication method.
+     */
+    public getCredentialById(credentialId: string): Promise<StoredPasskeyCredential | undefined> {
+        throw new Error("Did you forget to override MFAStrategyOptions.getCredentialById?");
+    }
+    /**
      * Retrieves the user's secondary authentication method for a given id. Implementations must only return a
      * method that actually belongs to `uid` — this is the authorization boundary that prevents one user's 2FA
      * challenge from being triggered/consumed using another user's authentication method.
@@ -88,6 +97,24 @@ export class MFAStrategyOptions {
     public getUser(uid: string): Promise<JWTUser | undefined> {
         throw new Error("Did you forget to override MFAStrategyOptions.getUsers?");
     }
+    /**
+     * Persists the updated signature counter for the given FIDO2 credential after a successful
+     * challenge. Must be called on every successful FIDO2 secondary authentication to guard against
+     * cloned authenticators.
+     * NOTE: You must override this function to support the `FIDO2` secondary authentication method.
+     */
+    public updateCredentialCounter(credentialId: string, newCounter: number): Promise<void> {
+        throw new Error("Did you forget to override MFAStrategyOptions.updateCredentialCounter?");
+    }
+    /**
+     * Persists the given time step as the last one successfully used for the identified TOTP
+     * secret, so a captured/replayed token within its validity window can't be used to authenticate
+     * a second time. Optional — when omitted, successfully-verified TOTP codes remain valid for
+     * reuse until they naturally expire.
+     * @param uid The unique id of the secondary auth method (== the underlying secret's id) that was verified.
+     * @param timeStep The RFC 6238 time step at which the token was verified.
+     */
+    public updateSecretTimeStep?(uid: string, timeStep: number): Promise<void>;
     /**
      * Sends a notification to the specified contact with the provided MFA code.
      * NOTE: You must override this function when using this strategy.
@@ -123,10 +150,15 @@ export class MFAStrategyOptions {
  * The login flow has three phases:
  *
  * 1. Verify Basic - The client sends a request with `Authorization` header containing the user's id and password. The
- * server returns with a list of available secondary authentication methods.
- * 2. Challenge - The client requests a selected 2FA challenge. If a `TOTP` 2FA method is chosen, the request is
- * processed as phase 3. For all others, a challenge is generated and stored in the session. If `OTP` is selected,
- * a notification containing the challenge token is sent to the selected verified contact.
+ * server returns `{ uid, methods }`: the user's internal uid (needed to identify subsequent phase 2/3 requests as
+ * this session's, regardless of what login identifier — email, alias, etc. — was used for phase 1) and the list of
+ * available secondary authentication methods.
+ * 2. Challenge - The client requests a selected 2FA challenge, submitting the `uid` from phase 1 as `id` and
+ * identifying the method by `methodId`. If `FIDO2` is selected, a WebAuthn challenge scoped to that credential is
+ * generated and stored in the session. If `OTP` is selected, a challenge token is generated, stored in the
+ * session, and sent to the selected verified contact. If `TOTP` is selected, no challenge/notification is
+ * generated or sent — the client's authenticator app already has the current code — but the selection is still
+ * recorded in the session so phase 3 knows which secret to verify against.
  * 3. Verify - The client submits the completed 2FA challenge. The challenge is verified against the one stored in the
  * session, and the associated user is resolved using the `getUser()` callback.
  *
@@ -148,7 +180,11 @@ export class MFAStrategy implements AuthStrategy {
         const { data, payload } = getRequestData(req);
 
         if (isOTPResponse(payload)) {
-            const user: JWTUser | undefined = await this.verifyOTP(payload, req, res);
+            // OTP and TOTP submissions share the exact same `{id, token}` shape — route based on
+            // which method was selected during phase 2's challenge(), recorded in the session.
+            const user: JWTUser | undefined = req.session?.mfaMethodId
+                ? await this.verifyTOTP(payload, req, res)
+                : await this.verifyOTP(payload, req, res);
             if (user) {
                 return {
                     data,
@@ -227,7 +263,16 @@ export class MFAStrategy implements AuthStrategy {
                     if (!this.options.fidoConfig) {
                         throw new Error("No configuration exists for MFA method: FIDO2");
                     }
-                    const result = await generatePasskeyChallenge(this.options.fidoConfig, req);
+                    // Scope the challenge to only the specific credential the client selected — this
+                    // also means an authenticator holding a different (unselected) registered
+                    // credential for the same user will be refused by the client itself.
+                    const credential = method.data as StoredPasskeyCredential;
+                    const result = await generatePasskeyChallenge(this.options.fidoConfig, req, [
+                        { id: credential.id, transports: credential.transports },
+                    ]);
+                    // Recorded so phase 3 can confirm the submitted assertion is for this same
+                    // credential, not some other one belonging to the same user.
+                    req.session.mfaMethodId = method.id;
                     res.status(200);
                     res.json(result);
                 }
@@ -236,6 +281,17 @@ export class MFAStrategy implements AuthStrategy {
                 {
                     const totp: string = await generateOTP(req, payload);
                     await this.options.notifyContact(method.data, totp);
+                    res.status(200);
+                    res.json({});
+                }
+                break;
+            case MFAMethodType.TOTP:
+                {
+                    // No challenge or notification is needed — the client's authenticator app already
+                    // has the current code. Record which secret was selected so phase 3 knows which
+                    // one to verify the submitted code against, and so a `{id, token}` submission can
+                    // be routed to TOTP verification instead of OTP (both share the same shape).
+                    req.session.mfaMethodId = method.id;
                     res.status(200);
                     res.json({});
                 }
@@ -268,9 +324,12 @@ export class MFAStrategy implements AuthStrategy {
             // Now retrieve the user's list of available 2FA methods
             const methods: MFAMethod[] = await this.options.getMethods(user.uid);
             if (methods.length > 0) {
-                // Send the list of 2FA methods back to the client to select from
+                // Send the list of 2FA methods back to the client to select from. `uid` is included
+                // because phase 2/3 require it as the request's `id` — the internal uid, not
+                // whatever login identifier (email, alias, etc.) the client used for phase 1 — and
+                // this is the only point at which the client ever learns it.
                 res.status(200);
-                res.json(methods);
+                res.json({ uid: user.uid, methods });
                 return undefined;
             } else if (this.options.require2FA) {
                 throw new Error("No secondary authentication methods available.");
@@ -283,7 +342,57 @@ export class MFAStrategy implements AuthStrategy {
     }
 
     protected async verifyFIDO(payload: any, req: HttpRequest, res: HttpResponse): Promise<JWTUser | undefined> {
-        throw new Error("Not implemented");
+        if (!req.session) {
+            throw new Error(
+                "MFAStrategy requires session support. Configure the `session` config block so the " +
+                    "session middleware is registered.",
+            );
+        }
+
+        // The phase-1-verified identity, phase-2-selected credential, and challenge are all
+        // single-use — cleared once phase 3 completes, regardless of outcome, mirroring verifyOTP().
+        const userUid: string | undefined = req.session.userUid;
+        const methodId: string | undefined = req.session.mfaMethodId;
+        const expectedChallenge: string | undefined = req.session.challenge;
+        delete req.session.userUid;
+        delete req.session.mfaMethodId;
+        delete req.session.challenge;
+
+        // Rate limited by the phase-1-verified identity rather than `payload.id` — unlike OTP/TOTP,
+        // a FIDO2 assertion's `id` is the credential id, not something an attacker-controlled value
+        // can be reasonably bucketed on.
+        if (this.options.checkRateLimit && userUid) {
+            await this.options.checkRateLimit(userUid, req);
+        }
+
+        if (!userUid || !methodId || !expectedChallenge || !isPasskeyResponse(payload)) {
+            return undefined;
+        }
+        if (!this.options.fidoConfig) {
+            throw new Error("No configuration exists for MFA method: FIDO2");
+        }
+
+        const credential: StoredPasskeyCredential | undefined = await this.options.getCredentialById(payload.id);
+        // Only the specific credential selected during phase 2, and only if it belongs to the
+        // phase-1-verified identity, may complete this challenge.
+        if (!credential || credential.id !== methodId || credential.uid !== userUid) {
+            return undefined;
+        }
+
+        const result = await verifyPasskeyChallenge(credential, this.options.fidoConfig, expectedChallenge, payload);
+        if (!result.verified) {
+            return undefined;
+        }
+
+        // Counter regression check — see PasskeyStrategy/FIDO2Strategy for the same guard against
+        // cloned authenticators.
+        const newCounter: number = result.authenticationInfo.newCounter;
+        if (newCounter !== 0 && newCounter <= credential.counter) {
+            return undefined;
+        }
+        await this.options.updateCredentialCounter(credential.id, newCounter);
+
+        return await this.options.getUser(userUid);
     }
 
     protected async verifyOTP(payload: any, req: HttpRequest, res: HttpResponse): Promise<JWTUser | undefined> {
@@ -306,6 +415,37 @@ export class MFAStrategy implements AuthStrategy {
     }
 
     protected async verifyTOTP(payload: any, req: HttpRequest, res: HttpResponse): Promise<JWTUser | undefined> {
-        throw new Error("Not implemented");
+        if (this.options.checkRateLimit) {
+            await this.options.checkRateLimit(payload.id, req);
+        }
+
+        // The phase-1-verified identity and the phase-2-selected secret are both single-use —
+        // cleared once phase 3 completes, regardless of outcome, mirroring verifyOTP().
+        const userUid: string | undefined = req.session?.userUid;
+        const methodId: string | undefined = req.session?.mfaMethodId;
+        delete req.session?.userUid;
+        delete req.session?.mfaMethodId;
+
+        if (!userUid || !methodId || payload.id !== userUid) {
+            return undefined;
+        }
+
+        // Re-fetch the specific secret selected during phase 2 — this also re-confirms it still
+        // belongs to the phase-1-verified identity and is actually a TOTP method.
+        const method: MFAMethod | undefined = await this.options.getMethod(methodId, userUid);
+        if (!method || method.type !== MFAMethodType.TOTP) {
+            return undefined;
+        }
+
+        const result: any = await verifyTOTP(payload.token, method.data);
+        if (!result || !result.valid) {
+            return undefined;
+        }
+
+        if (this.options.updateSecretTimeStep) {
+            await this.options.updateSecretTimeStep(methodId, result.timeStep);
+        }
+
+        return await this.options.getUser(userUid);
     }
 }

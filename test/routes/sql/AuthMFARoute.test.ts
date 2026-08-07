@@ -209,9 +209,10 @@ describe("Route:AuthMFASQL Tests", () => {
         expect(result).toBeDefined();
         expect(result.status).toBeGreaterThanOrEqual(200);
         expect(result.status).toBeLessThan(300);
-        expect(Array.isArray(result.body)).toBe(true);
-        expect(result.body).toHaveLength(1);
-        expect(result.body[0]).toMatchObject({ id: alias.uid, type: "otp" });
+        expect(result.body.uid).toBe(user.uid);
+        expect(Array.isArray(result.body.methods)).toBe(true);
+        expect(result.body.methods).toHaveLength(1);
+        expect(result.body.methods[0]).toMatchObject({ id: alias.uid, type: "otp" });
     });
 
     it("Cannot authenticate phase 1 with an invalid password.", async () => {
@@ -238,10 +239,12 @@ describe("Route:AuthMFASQL Tests", () => {
             .set("Authorization", `basic ${Buffer.from(user.uid + ":password").toString("base64")}`);
         expect(phase1.status).toBeGreaterThanOrEqual(200);
         expect(phase1.status).toBeLessThan(300);
-        expect(phase1.body[0].id).toBe(alias.uid);
+        expect(phase1.body.uid).toBe(user.uid);
+        expect(phase1.body.methods[0].id).toBe(alias.uid);
 
-        // Phase 2: Request the challenge be sent to the selected method's contact.
-        const phase2 = await client.post(baseUrl).send({ id: user.uid, methodId: alias.uid });
+        // Phase 2: Request the challenge be sent to the selected method's contact, using the uid
+        // returned from phase 1 (not necessarily the same identifier used to log in).
+        const phase2 = await client.post(baseUrl).send({ id: phase1.body.uid, methodId: alias.uid });
         expect(phase2.status).toBeGreaterThanOrEqual(200);
         expect(phase2.status).toBeLessThan(300);
 

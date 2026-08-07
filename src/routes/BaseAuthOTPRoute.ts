@@ -198,7 +198,7 @@ export abstract class BaseAuthOTPRoute<U extends User, A extends Alias, S extend
         });
         if (!user && aliases.length > 0) {
             aliases = await this.aliasRepo.find({ userUid: aliases[0].userUid }, { ignoreACL: true });
-            user = aliases.length > 0 ? await this.userRepo.findOne(aliases[0].userUid) : undefined;
+            user = aliases.length > 0 ? await this.userRepo.findOne(aliases[0].userUid, { ignoreACL: true }) : undefined;
         }
 
         // Filter aliases to only those that can be notified

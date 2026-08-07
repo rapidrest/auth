@@ -162,21 +162,29 @@ describe("BaseAuthOIDCRoute Tests", () => {
             expect(create).not.toHaveBeenCalled();
         });
 
-        it("Falls back to email alias lookup, then persists the oauth alias since it wasn't found by it.", async () => {
+        it("Falls back to a verified email alias lookup, then persists the oauth alias since it wasn't found by it.", async () => {
             const aliasCreate = vi.fn();
-            const lookup = vi.fn().mockResolvedValueOnce(undefined).mockResolvedValueOnce({ uid: "existing-user" });
+            const lookup = vi.fn().mockResolvedValue(undefined);
+            const aliasFindOne = vi.fn().mockResolvedValue({
+                type: AliasType.EMAIL,
+                verified: true,
+                userUid: "existing-user",
+            });
+            const userFindOne = vi.fn().mockResolvedValue({ uid: "existing-user" });
             const { getUser } = await setupRoute(
-                { create: aliasCreate },
+                { create: aliasCreate, findOne: aliasFindOne },
                 { create: vi.fn() },
-                { create: vi.fn() },
+                { create: vi.fn(), findOne: userFindOne },
                 { lookup },
             );
             const profile: OIDCProfile = { ...baseProfile, email: "user@example.com", email_verified: true };
 
             const user = await getUser("token", profile);
 
-            expect(lookup).toHaveBeenNthCalledWith(1, "test-provider:provider-user-1");
-            expect(lookup).toHaveBeenNthCalledWith(2, "user@example.com");
+            expect(lookup).toHaveBeenCalledWith("test-provider:provider-user-1");
+            expect(lookup).toHaveBeenCalledTimes(1);
+            expect(aliasFindOne).toHaveBeenCalledWith("user@example.com", { ignoreACL: true });
+            expect(userFindOne).toHaveBeenCalledWith("existing-user", { ignoreACL: true });
             expect(user).toEqual({ uid: "existing-user" });
             expect(aliasCreate).toHaveBeenCalledWith(
                 expect.objectContaining({ alias: "test-provider:provider-user-1", type: AliasType.OAUTH }),
@@ -184,35 +192,102 @@ describe("BaseAuthOIDCRoute Tests", () => {
             );
         });
 
-        it("Does not link to an existing account via an unverified email claim.", async () => {
-            // Neither the oauth-alias lookup nor the profile.id fallback find anyone, and the email
-            // lookup must never be attempted since the provider didn't assert it as verified — an
-            // attacker asserting a victim's email with an unverified provider must not be able to log
-            // into the victim's account.
+        it("Falls back to a verified phone alias lookup when no email is present.", async () => {
+            const aliasFindOne = vi.fn().mockResolvedValue({
+                type: AliasType.PHONE,
+                verified: true,
+                userUid: "existing-user",
+            });
+            const userFindOne = vi.fn().mockResolvedValue({ uid: "existing-user" });
+            const { getUser } = await setupRoute(
+                { create: vi.fn(), findOne: aliasFindOne },
+                { create: vi.fn() },
+                { create: vi.fn(), findOne: userFindOne },
+                { lookup: vi.fn().mockResolvedValue(undefined) },
+            );
+            const profile: OIDCProfile = { ...baseProfile, phone: "+15551234567", phone_verified: true };
+
+            const user = await getUser("token", profile);
+
+            expect(aliasFindOne).toHaveBeenCalledWith("+15551234567", { ignoreACL: true });
+            expect(user).toEqual({ uid: "existing-user" });
+        });
+
+        it("Does not attempt to link an existing account via an unverified email claim.", async () => {
+            // The oauth-alias lookup finds no one, and the alias-lookup fallback must never even be
+            // attempted since the provider didn't assert the email as verified — an attacker
+            // asserting a victim's email with an unverified provider must not be able to log into the
+            // victim's account.
             const lookup = vi.fn().mockResolvedValue(undefined);
+            const aliasFindOne = vi.fn();
             const userRepo = { create: vi.fn().mockResolvedValue({ uid: "new-user" }) };
             const profileRepo = { create: vi.fn() };
-            const aliasRepo = { create: vi.fn() };
+            const aliasRepo = { create: vi.fn(), findOne: aliasFindOne };
             const { getUser } = await setupRoute(aliasRepo, profileRepo, userRepo, { lookup });
             const profile: OIDCProfile = { ...baseProfile, email: "victim@example.com", email_verified: false };
 
             const user = await getUser("token", profile);
 
-            expect(lookup).not.toHaveBeenCalledWith("victim@example.com");
+            expect(aliasFindOne).not.toHaveBeenCalled();
             expect(user).toEqual({ uid: "new-user" });
             expect(userRepo.create).toHaveBeenCalled();
         });
 
-        it("Falls back to profile.id when no email is present on the fallback lookup.", async () => {
-            const lookup = vi.fn().mockResolvedValueOnce(undefined).mockResolvedValueOnce(undefined);
+        it("Rejects authentication when a verified email claim matches an existing but unverified local alias.", async () => {
+            // The provider proved this caller owns the email, but the local alias record for that
+            // same value was never itself verified — it could belong to an attacker who merely typed
+            // the victim's email into their own unverified profile. Linking here would hand the real
+            // owner's login to whoever registered that unverified alias first.
+            const aliasFindOne = vi.fn().mockResolvedValue({
+                type: AliasType.EMAIL,
+                verified: false,
+                userUid: "someone-else",
+            });
+            const userFindOne = vi.fn();
+            const { getUser } = await setupRoute(
+                { create: vi.fn(), findOne: aliasFindOne },
+                { create: vi.fn() },
+                { create: vi.fn(), findOne: userFindOne },
+                { lookup: vi.fn().mockResolvedValue(undefined) },
+            );
+            const profile: OIDCProfile = { ...baseProfile, email: "user@example.com", email_verified: true };
+
+            await expect(getUser("token", profile)).rejects.toThrow(/has not been verified/);
+            expect(userFindOne).not.toHaveBeenCalled();
+        });
+
+        it("Rejects authentication when a verified email claim collides with a same-valued alias of a different type.", async () => {
+            // `alias` values are globally unique regardless of type, so a verified email claim could
+            // in principle collide with a `name` (or other) alias holding the same string. That must
+            // never be trusted for linking, verified or not.
+            const aliasFindOne = vi.fn().mockResolvedValue({
+                type: AliasType.NAME,
+                verified: true,
+                userUid: "someone-else",
+            });
+            const { getUser } = await setupRoute(
+                { create: vi.fn(), findOne: aliasFindOne },
+                { create: vi.fn() },
+                { create: vi.fn(), findOne: vi.fn() },
+                { lookup: vi.fn().mockResolvedValue(undefined) },
+            );
+            const profile: OIDCProfile = { ...baseProfile, email: "user@example.com", email_verified: true };
+
+            await expect(getUser("token", profile)).rejects.toThrow(/has not been verified/);
+        });
+
+        it("Creates a new account when no verified email/phone is present, without attempting any alias-value lookup.", async () => {
+            const lookup = vi.fn().mockResolvedValue(undefined);
+            const aliasFindOne = vi.fn();
             const userRepo = { create: vi.fn().mockResolvedValue({ uid: "new-user" }) };
             const profileRepo = { create: vi.fn() };
-            const aliasRepo = { create: vi.fn() };
+            const aliasRepo = { create: vi.fn(), findOne: aliasFindOne };
             const { getUser } = await setupRoute(aliasRepo, profileRepo, userRepo, { lookup });
 
-            await getUser("token", baseProfile);
+            const user = await getUser("token", baseProfile);
 
-            expect(lookup).toHaveBeenNthCalledWith(2, "provider-user-1");
+            expect(aliasFindOne).not.toHaveBeenCalled();
+            expect(user).toEqual({ uid: "new-user" });
         });
 
         it("Creates a new user and minimal profile when no existing user is found.", async () => {
@@ -271,7 +346,7 @@ describe("BaseAuthOIDCRoute Tests", () => {
         });
 
         it("Adds a verified email contact and email alias when the provider verifies the email.", async () => {
-            const aliasRepo = { create: vi.fn() };
+            const aliasRepo = { create: vi.fn(), findOne: vi.fn().mockResolvedValue(undefined) };
             const profileRepo = { create: vi.fn() };
             const { getUser } = await setupRoute(
                 aliasRepo,
@@ -361,7 +436,7 @@ describe("BaseAuthOIDCRoute Tests", () => {
         });
 
         it("Adds a verified phone contact and phone alias when the provider verifies the phone.", async () => {
-            const aliasRepo = { create: vi.fn() };
+            const aliasRepo = { create: vi.fn(), findOne: vi.fn().mockResolvedValue(undefined) };
             const profileRepo = { create: vi.fn() };
             const { getUser } = await setupRoute(
                 aliasRepo,

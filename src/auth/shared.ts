@@ -512,10 +512,18 @@ export const generateTOTP = async function (req: HttpRequest, requestData?: any)
 };
 
 /**
- * Validates the provided token against the specified TOTP secret.
+ * Validates the provided token against the specified TOTP secret(s).
+ *
+ * Enforces replay protection: a token that matches at or before the secret's `lastTimeStep` is
+ * rejected, so an intercepted request (proxy, malicious extension, server logs) can't be replayed
+ * to authenticate a second time for as long as the code remains within its validity window. The
+ * caller is responsible for persisting the returned `timeStep` back onto the matched secret (via
+ * its `uid`, if supplied) after a successful verification.
+ *
  * @param token The OTP token to validate.
- * @param secret The stored TOTP secret to validate the token against.
- * @returns The otplib verification result if successful, otherwise `undefined`.
+ * @param secret The stored TOTP secret(s) to validate the token against.
+ * @returns The otplib verification result (plus the matched secret's `uid`, if any) if successful,
+ * otherwise `undefined`.
  */
 export const verifyTOTP = async function (token: string, secret: TOTPSecret | TOTPSecret[]): Promise<any> {
     const otplib = await importOTPLib();
@@ -524,17 +532,46 @@ export const verifyTOTP = async function (token: string, secret: TOTPSecret | TO
     // secrets is valid then we return success.
     const secrets: TOTPSecret[] = Array.isArray(secret) ? secret : [secret];
     for (const secret of secrets) {
+        const { uid, lastTimeStep, ...otpOptions } = secret;
+
+        // otplib throws (rather than returning `{valid: false}`) for a token that isn't exactly the
+        // expected number of digits — a malformed/empty client-supplied token must fail cleanly like
+        // any other wrong code, not surface as an unhandled error.
+        const expectedDigits: number = otpOptions.digits ?? 6;
+        if (typeof token !== "string" || !new RegExp(`^\\d{${expectedDigits}}$`).test(token)) {
+            continue;
+        }
+
         const result = await otplib.verify({
-            ...secret,
+            ...otpOptions,
             token,
+            afterTimeStep: lastTimeStep,
         });
 
         if (result.valid) {
-            return result;
+            return { ...result, uid };
         }
     }
 
     return undefined;
+};
+
+/**
+ * A fixed, non-secret TOTP secret used only to burn an equivalent amount of CPU time as a real
+ * TOTP verification via `verifyDummyTOTP()`. Never derived from any real credential.
+ */
+export const DUMMY_TOTP_SECRET: TOTPSecret = {
+    secret: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+};
+
+/**
+ * Performs a TOTP verification against a fixed dummy secret, discarding the result. Used to
+ * equalize the response time of a "user/secret not found" path with a "secret found, code
+ * checked" path so that an attacker can't enumerate valid accounts by measuring response latency.
+ * @param token The value to verify against the dummy secret. Never actually a real code of anyone.
+ */
+export const verifyDummyTOTP = async function (token: string): Promise<void> {
+    await verifyTOTP(token, DUMMY_TOTP_SECRET);
 };
 
 /**

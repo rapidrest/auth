@@ -21,6 +21,7 @@ import {
 } from "@simplewebauthn/server";
 import {
     DUMMY_ARGON2_HASH,
+    DUMMY_TOTP_SECRET,
     generateOTP,
     generatePasskeyChallenge,
     generatePasskeyRegistrationOptions,
@@ -35,6 +36,7 @@ import {
     isValidTOTPSecret,
     obfuscateContact,
     verifyDummyPassword,
+    verifyDummyTOTP,
     verifyOTP,
     verifyPasskeyChallenge,
     verifyPasskeyRegistrationResponse,
@@ -561,6 +563,52 @@ describe("TOTP helpers", () => {
             const result = await verifyTOTP("000000", secret);
             expect(result).toBeUndefined();
         });
+
+        it("Returns the matched secret's uid alongside the verification result.", async () => {
+            const secret: TOTPSecret = { secret: otplib.generateSecret(), uid: "secret-uid-1" };
+            const token = await otplib.generate(secret);
+            const result = await verifyTOTP(token, secret);
+            expect(result?.uid).toBe("secret-uid-1");
+        });
+
+        it("Rejects a token whose time step is at or before the secret's lastTimeStep (replay protection).", async () => {
+            const base: TOTPSecret = { secret: otplib.generateSecret() };
+            const token = await otplib.generate(base);
+            const first = await verifyTOTP(token, base);
+            expect(first?.valid).toBe(true);
+
+            // Replaying the exact same token against a secret that already recorded this time step
+            // as used must fail, even though the code itself is still within its validity window.
+            const replayed = await verifyTOTP(token, { ...base, lastTimeStep: first.timeStep });
+            expect(replayed).toBeUndefined();
+        });
+
+        it("Still accepts a token generated at a time step after lastTimeStep.", async () => {
+            const base: TOTPSecret = { secret: otplib.generateSecret() };
+            const token = await otplib.generate(base);
+            const first = await verifyTOTP(token, base);
+
+            const result = await verifyTOTP(token, { ...base, lastTimeStep: first.timeStep - 1 });
+            expect(result?.valid).toBe(true);
+        });
+
+        it("Fails cleanly (rather than throwing) for a malformed token, e.g. wrong length or non-numeric.", async () => {
+            const secret: TOTPSecret = { secret: otplib.generateSecret() };
+
+            await expect(verifyTOTP("", secret)).resolves.toBeUndefined();
+            await expect(verifyTOTP("12345", secret)).resolves.toBeUndefined();
+            await expect(verifyTOTP("abcdef", secret)).resolves.toBeUndefined();
+        });
+
+        it("Validates token length against the secret's own digits override, not the otplib default.", async () => {
+            const secret: TOTPSecret = { secret: otplib.generateSecret(), digits: 8 };
+            const token = await otplib.generate(secret);
+
+            expect(token).toHaveLength(8);
+            // A well-formed 6-digit token must not even reach otplib for an 8-digit secret.
+            await expect(verifyTOTP("123456", secret)).resolves.toBeUndefined();
+            await expect(verifyTOTP(token, secret)).resolves.toMatchObject({ valid: true });
+        });
     });
 
     describe("isValidTOTPSecret", () => {
@@ -621,6 +669,18 @@ describe("verifyDummyPassword", () => {
 
         expect(DUMMY_ARGON2_HASH).toMatch(/^\$argon2id\$/);
         await expect(argon2.verify(DUMMY_ARGON2_HASH, "definitely-the-wrong-password")).resolves.toBe(false);
+    });
+});
+
+describe("verifyDummyTOTP", () => {
+    it("Resolves without throwing regardless of the input, since the secret is never a real credential.", async () => {
+        await expect(verifyDummyTOTP("123456")).resolves.toBeUndefined();
+        await expect(verifyDummyTOTP("")).resolves.toBeUndefined();
+        await expect(verifyDummyTOTP("not-a-code")).resolves.toBeUndefined();
+    });
+
+    it("DUMMY_TOTP_SECRET is a real, valid Base32 TOTP secret (not a placeholder string).", async () => {
+        expect(await isValidTOTPSecret(DUMMY_TOTP_SECRET.secret)).toBe(true);
     });
 });
 

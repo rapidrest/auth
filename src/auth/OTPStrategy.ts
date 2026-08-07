@@ -166,13 +166,16 @@ export class OTPStrategy implements AuthStrategy {
         }
 
         const contact: OTPContact | undefined = await this.options.getContact(payload.id);
-        if (!contact) {
-            return undefined;
+        if (contact) {
+            const token: string = await generateOTP(req, payload);
+            await this.options.notifyContact(contact, token);
         }
 
-        const token: string = await generateOTP(req, payload);
-        await this.options.notifyContact(contact, token);
-
+        // Always commit the exact same response, whether or not the contact exists — an unknown
+        // contact must not be distinguishable (via response shape, status, or an uncommitted
+        // response falling through to different framework-default handling) from a real one that
+        // was just notified. Matches the anti-enumeration pattern used elsewhere (e.g.
+        // BaseAuthDiscoverRoute, BaseRegistrationRoute.start()).
         res.status(200);
         res.json({});
         return undefined;

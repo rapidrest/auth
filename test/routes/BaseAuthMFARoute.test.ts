@@ -192,6 +192,55 @@ describe("BaseAuthMFARoute Tests", () => {
         });
     });
 
+    describe("getCredentialById", () => {
+        it("Throws if secretRepo is not set.", async () => {
+            const route = new TestAuthMFARoute();
+            await expect((route as any).getCredentialById("cred-1")).rejects.toThrow(/secretRepo is not set/);
+        });
+
+        it("Returns undefined if no matching secret exists.", async () => {
+            const route = new TestAuthMFARoute();
+            const findOne = vi.fn().mockResolvedValue(undefined);
+            (route as any).secretRepo = { findOne };
+
+            const result = await (route as any).getCredentialById("cred-1");
+
+            expect(findOne).toHaveBeenCalledWith("cred-1", { ignoreACL: true });
+            expect(result).toBeUndefined();
+        });
+
+        it("Returns undefined without querying the repo when credentialId is not a string (NoSQL operator injection guard).", async () => {
+            const route = new TestAuthMFARoute();
+            const findOne = vi.fn();
+            (route as any).secretRepo = { findOne };
+
+            const result = await (route as any).getCredentialById({ $ne: null });
+
+            expect(result).toBeUndefined();
+            expect(findOne).not.toHaveBeenCalled();
+        });
+
+        it("Returns the .data of a matching secret of type FIDO2.", async () => {
+            const route = new TestAuthMFARoute();
+            const findOne = vi.fn().mockResolvedValue({ type: SecretType.FIDO2, data: { id: "cred-1" } });
+            (route as any).secretRepo = { findOne };
+
+            const result = await (route as any).getCredentialById("cred-1");
+
+            expect(result).toEqual({ id: "cred-1" });
+        });
+
+        it("Returns undefined for a matching secret of a different type (e.g. PASSKEY).", async () => {
+            const route = new TestAuthMFARoute();
+            const findOne = vi.fn().mockResolvedValue({ type: SecretType.PASSKEY, data: { id: "cred-1" } });
+            (route as any).secretRepo = { findOne };
+
+            const result = await (route as any).getCredentialById("cred-1");
+
+            expect(result).toBeUndefined();
+        });
+    });
+
     describe("getMethod", () => {
         it("Throws if aliasRepo is not set.", async () => {
             const route = new TestAuthMFARoute();
@@ -420,6 +469,80 @@ describe("BaseAuthMFARoute Tests", () => {
             const route = new TestAuthMFARoute();
             const result = (route as any).obfuscateAlias("something", "unknown-type");
             expect(result).toBe("something");
+        });
+    });
+
+    describe("updateCredentialCounter", () => {
+        it("Throws if secretRepo is not set.", async () => {
+            const route = new TestAuthMFARoute();
+            await expect((route as any).updateCredentialCounter("cred-1", 5)).rejects.toThrow(
+                /secretRepo is not set/,
+            );
+        });
+
+        it("Does nothing if no matching secret is found.", async () => {
+            const route = new TestAuthMFARoute();
+            const findOne = vi.fn().mockResolvedValue(undefined);
+            const update = vi.fn();
+            (route as any).secretRepo = { findOne, update };
+
+            await (route as any).updateCredentialCounter("cred-1", 5);
+
+            expect(update).not.toHaveBeenCalled();
+        });
+
+        it("Updates the secret's counter when a matching secret is found.", async () => {
+            const route = new TestAuthMFARoute();
+            const secret = { uid: "secret-1", version: 1, data: { id: "cred-1", counter: 1 } };
+            const findOne = vi.fn().mockResolvedValue(secret);
+            const update = vi.fn();
+            (route as any).secretRepo = { findOne, update };
+
+            await (route as any).updateCredentialCounter("cred-1", 5);
+
+            expect(secret.data.counter).toBe(5);
+            expect(update).toHaveBeenCalledWith(
+                { uid: "secret-1", version: 1, data: secret.data },
+                secret,
+                { ignoreACL: true, recordEvent: false },
+            );
+        });
+    });
+
+    describe("updateSecretTimeStep", () => {
+        it("Throws if secretRepo is not set.", async () => {
+            const route = new TestAuthMFARoute();
+            await expect((route as any).updateSecretTimeStep("secret-1", 42)).rejects.toThrow(
+                /secretRepo is not set/,
+            );
+        });
+
+        it("Does nothing if no matching secret is found.", async () => {
+            const route = new TestAuthMFARoute();
+            const findOne = vi.fn().mockResolvedValue(undefined);
+            const update = vi.fn();
+            (route as any).secretRepo = { findOne, update };
+
+            await (route as any).updateSecretTimeStep("secret-1", 42);
+
+            expect(update).not.toHaveBeenCalled();
+        });
+
+        it("Updates the secret's lastTimeStep when a matching secret is found.", async () => {
+            const route = new TestAuthMFARoute();
+            const secret = { uid: "secret-1", version: 1, data: { secret: "abc" } };
+            const findOne = vi.fn().mockResolvedValue(secret);
+            const update = vi.fn();
+            (route as any).secretRepo = { findOne, update };
+
+            await (route as any).updateSecretTimeStep("secret-1", 42);
+
+            expect(secret.data.lastTimeStep).toBe(42);
+            expect(update).toHaveBeenCalledWith(
+                { uid: "secret-1", version: 1, data: secret.data },
+                secret,
+                { ignoreACL: true, recordEvent: false },
+            );
         });
     });
 

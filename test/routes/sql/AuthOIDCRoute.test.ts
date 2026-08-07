@@ -294,6 +294,42 @@ describe("Route:AuthOIDCSQL Tests", () => {
         expect(oauthAlias?.userUid).toBe(existingUser.uid);
     });
 
+    it("Rejects the callback when a verified email claim matches an existing but unverified local alias.", async () => {
+        // An unrelated account previously claimed this email but never verified it. A provider that
+        // now asserts a *different*, real owner of that email must not be silently merged into that
+        // unverified (and potentially attacker-controlled) account.
+        const existingUser = await userRepo.save(new UserSQL({ uid: uuid.v4(), roles: [], scopes: [], verified: true }));
+        await aliasRepo.save(
+            new AliasSQL({
+                uid: uuid.v4(),
+                alias: "contested@example.com",
+                type: AliasType.EMAIL,
+                userUid: existingUser.uid,
+                verified: false,
+            }),
+        );
+
+        const client = agent(server.getApplication());
+        const beginResult = await client.get(baseUrl);
+        const state: string = extractState(beginResult.headers["location"]);
+        mockPost.mockResolvedValue({
+            status: 200,
+            data: { access_token: "test-access-token", token_type: "Bearer", expires_in: 3600 },
+        });
+        mockGet.mockResolvedValue({
+            status: 200,
+            data: { id: "ext-user-contested", username: "contested", email: "contested@example.com", verified: true },
+        });
+
+        const result = await client.get(`${baseUrl}?code=auth-code-1&state=${encodeURIComponent(state)}`);
+
+        expect(result.status).toBeGreaterThanOrEqual(400);
+        // No new account should have been provisioned, and the existing (unverified) alias untouched.
+        const users = await userRepo.find();
+        expect(users.length).toBe(1);
+        expect(users[0].uid).toBe(existingUser.uid);
+    });
+
     it("Rejects the callback when the state parameter does not match the session (CSRF).", async () => {
         const client = agent(server.getApplication());
         await client.get(baseUrl);
