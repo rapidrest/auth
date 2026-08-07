@@ -118,7 +118,7 @@ export abstract class DefaultAccounts<
             account.roles = account.roles !== undefined ? account.roles : this.trustedRoles;
 
             // First check if there is an existing account for the given name
-            const aliases: A[] = (await this.aliasRepo!.find({ alias: account.name })) ?? [];
+            const aliases: A[] = (await this.aliasRepo!.find({ alias: account.name }, { ignoreACL: true })) ?? [];
             let user: U | undefined =
                 aliases.length > 0 ? await this.userRepo!.findOne(aliases[0].userUid, { ignoreACL: true }) : undefined;
             if (!user) {

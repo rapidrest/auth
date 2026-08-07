@@ -179,13 +179,15 @@ describe("BaseUserRoute Tests", () => {
             const route = new TestUserRoute();
             const findOne = vi.fn();
             (route as any).repoUtils = { findOne };
-            const obj: any = { uid: "user-1", verified: true };
+            // `verified: false` here (rather than `true`) is deliberate: it proves the absence of `roles`
+            // alone skips the lookup, without also tripping the separate verified-escalation check below.
+            const obj: any = { uid: "user-1", verified: false };
 
             await (route as any).validateUpdate("user-1", obj, { uid: "user-1", roles: [] });
 
             expect(findOne).not.toHaveBeenCalled();
             expect("roles" in obj).toBe(false);
-        });
+        };);
 
         it("Allows a trusted (admin) caller to change another user's roles.", async () => {
             vi.spyOn(CRUDRoute.prototype as any, "validateUpdate").mockResolvedValue(undefined);
@@ -198,6 +200,57 @@ describe("BaseUserRoute Tests", () => {
 
             expect(findOne).not.toHaveBeenCalled();
             expect(obj.roles).toEqual(["admin"]);
+        });
+
+        it("Resets verified to false when a non-trusted caller attempts to set it to true and it isn't already verified.", async () => {
+            vi.spyOn(CRUDRoute.prototype as any, "validateUpdate").mockResolvedValue(undefined);
+            const route = new TestUserRoute();
+            const findOne = vi.fn().mockResolvedValue({ uid: "user-1", verified: false });
+            (route as any).repoUtils = { findOne };
+            const obj: any = { uid: "user-1", verified: true };
+
+            await (route as any).validateUpdate("user-1", obj, { uid: "user-1", roles: [] });
+
+            expect(findOne).toHaveBeenCalledWith("user-1", { ignoreACL: true });
+            expect(obj.verified).toBe(false);
+        });
+
+        it("Allows a non-trusted caller to lower their own verified status without a lookup (no false-positive block).", async () => {
+            vi.spyOn(CRUDRoute.prototype as any, "validateUpdate").mockResolvedValue(undefined);
+            const route = new TestUserRoute();
+            const findOne = vi.fn();
+            (route as any).repoUtils = { findOne };
+            const obj: any = { uid: "user-1", verified: false };
+
+            await (route as any).validateUpdate("user-1", obj, { uid: "user-1", roles: [] });
+
+            expect(findOne).not.toHaveBeenCalled();
+            expect(obj.verified).toBe(false);
+        });
+
+        it("Allows verified:true to pass through unchanged when the persisted record is already verified (no false-positive block on a no-op resubmission).", async () => {
+            vi.spyOn(CRUDRoute.prototype as any, "validateUpdate").mockResolvedValue(undefined);
+            const route = new TestUserRoute();
+            const findOne = vi.fn().mockResolvedValue({ uid: "user-1", verified: true });
+            (route as any).repoUtils = { findOne };
+            const obj: any = { uid: "user-1", verified: true };
+
+            await (route as any).validateUpdate("user-1", obj, { uid: "user-1", roles: [] });
+
+            expect(obj.verified).toBe(true);
+        });
+
+        it("Allows a trusted (admin) caller to verify another user without a lookup.", async () => {
+            vi.spyOn(CRUDRoute.prototype as any, "validateUpdate").mockResolvedValue(undefined);
+            const route = new TestUserRoute();
+            const findOne = vi.fn();
+            (route as any).repoUtils = { findOne };
+            const obj: any = { uid: "victim-uid", verified: true };
+
+            await (route as any).validateUpdate("victim-uid", obj, { uid: "admin-uid", roles: ["admin"] });
+
+            expect(findOne).not.toHaveBeenCalled();
+            expect(obj.verified).toBe(true);
         });
     });
 

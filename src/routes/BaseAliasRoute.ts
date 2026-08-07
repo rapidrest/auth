@@ -12,7 +12,7 @@ import {
     RouteDecorators,
     UpdateObject,
 } from "@rapidrest/service-core";
-import { ApiError, JWTUser, MessagingUtils, ObjectDecorators, UserUtils } from "@rapidrest/core";
+import { ApiError, JWTUser, MessagingUtils, ObjectDecorators, UserUtils, ValidationUtils } from "@rapidrest/core";
 import { Alias, AliasType, ContactType, Profile } from "../models/types.js";
 import { generateOTP, verifyOTP } from "../auth/shared.js";
 import { RateLimiter } from "../auth/RateLimiter.js";

@@ -245,7 +245,7 @@ describe("DefaultAccounts Tests", () => {
 
                 await route.start();
 
-                expect((route as any).aliasRepo.find).toHaveBeenCalledWith({ alias: "admin" });
+                expect((route as any).aliasRepo.find).toHaveBeenCalledWith({ alias: "admin" }, { ignoreACL: true });
             });
 
             it("Reuses the existing user found via alias lookup instead of creating a new one.", async () => {

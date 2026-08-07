@@ -209,6 +209,13 @@ export class MFAStrategy implements AuthStrategy {
             throw new Error("Invalid authentication request.");
         }
 
+        // Rate limit challenge issuance itself, not just phase-1/3 credential verification — otherwise an
+        // attacker who already knows the account's password could repeatedly trigger this phase to spam a
+        // victim's contact with OTP notifications at no cost.
+        if (this.options.checkRateLimit) {
+            await this.options.checkRateLimit(payload.id, req);
+        }
+
         const method: MFAMethod | undefined = await this.options.getMethod(payload.methodId, req.session.userUid);
         if (!method) {
             throw new Error("Invalid secondary authentication method.");

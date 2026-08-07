@@ -29,6 +29,16 @@ export class BasicStrategyOptions {
      * A no-op when not provided.
      */
     public checkRateLimit?(identifier: string, req: HttpRequest): Promise<void>;
+    /**
+     * The synchronous counterpart to `checkRateLimit`, invoked with the claimed identifier before
+     * `verifySync` runs. This exists because `authenticateSync`/`verifySync` are used from contexts (e.g.
+     * a WebSocket upgrade handshake) that cannot await a promise, so the normal Redis/async-backed
+     * `RateLimiter` can't be used here — implementations that supply `verifySync` should also supply this
+     * hook (e.g. backed by an in-memory counter) if brute-force protection is required on this path.
+     * Implementations should throw to reject the request once an attempt threshold has been exceeded. A
+     * no-op when not provided.
+     */
+    public checkRateLimitSync?(identifier: string, req: HttpRequest): void;
     /** Override this function to handle asynchronous (non-blocking) verification of the login info. */
     public verify(uid: string, secret: string): JWTUser | Promise<JWTUser | undefined> | undefined {
         throw new Error("Did you forget to override BasicStrategyOptions.verify?");
@@ -89,6 +99,9 @@ export class BasicStrategy implements AuthStrategy {
 
         // If the login info has been found, verify it.
         if (payload.id && payload.password) {
+            if (this.options.checkRateLimitSync) {
+                this.options.checkRateLimitSync(payload.id, req);
+            }
             const user: JWTUser | undefined = this.options.verifySync(payload.id, payload.password);
             if (user) {
                 return {

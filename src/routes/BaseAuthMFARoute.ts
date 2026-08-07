@@ -251,7 +251,7 @@ export abstract class BaseAuthMFARoute<U extends User, S extends Secret, A exten
         }
 
         // Now search for the user's aliases that serve as OTP contacts
-        const aliases: A[] = await this.aliasRepo.find(
+        const allAliases: A[] = await this.aliasRepo.find(
             { userUid: uid },
             {
                 ignoreACL: true,
@@ -259,7 +259,7 @@ export abstract class BaseAuthMFARoute<U extends User, S extends Secret, A exten
         );
 
         // Filter aliases to only those that can be notified
-        aliases.filter((alias) => [AliasType.EMAIL, AliasType.PHONE].includes(alias.type));
+        const aliases = allAliases.filter((alias) => [AliasType.EMAIL, AliasType.PHONE].includes(alias.type));
 
         // Now add all eligible aliases to our list of methods (e.g. email, phone).
         for (const alias of aliases) {
@@ -357,11 +357,17 @@ export abstract class BaseAuthMFARoute<U extends User, S extends Secret, A exten
 
         // Try all known passwords until at least one succeeds
         let success: boolean = false;
-        for (const secret of secrets) {
-            const argon = await importArgon2();
-            success = await argon.verify(secret.data, password);
-            if (success) {
-                break;
+        if (secrets.length === 0) {
+            // No password secret to check against — burn the same amount of time as a real
+            // verification so this case isn't distinguishable via timing from a wrong password.
+            await verifyDummyPassword(password);
+        } else {
+            for (const secret of secrets) {
+                const argon = await importArgon2();
+                success = await argon.verify(secret.data, password);
+                if (success) {
+                    break;
+                }
             }
         }
         if (!success) {

@@ -94,6 +94,16 @@ export abstract class BaseAccountRoute<U extends User, A extends Alias, P extend
         }
     }
 
+    /**
+     * Removes the `data` property from the secret(s) to protect sensitive information.
+     */
+    protected cleanSecretData(obj: S | S[]) {
+        const objs: Array<S> = Array.isArray(obj) ? obj : [obj];
+        for (const obj of objs) {
+            delete obj.data;
+        }
+    }
+
     @Summary("Delete Account Data")
     @Description("Deletes all account data associated with the user, or any user's if the caller holds a trusted role.")
     @Auth(["jwt"])
@@ -101,7 +111,7 @@ export abstract class BaseAccountRoute<U extends User, A extends Alias, P extend
     public async delete(@Param("id") id: string, @AuthUser user: JWTUser): Promise<any> {
         const targetId = this.resolveOwnedUid(id, user);
 
-        const eUser: User | undefined = await this.userRepo?.findOne(targetId, { user });
+        const eUser: U | undefined = await this.userRepo?.findOne(targetId, { user });
         if (!eUser) {
             throw new ApiError(ApiErrors.AUTH_PERMISSION_FAILURE, 403, ApiErrorMessages.AUTH_PERMISSION_FAILURE);
         }
@@ -125,7 +135,7 @@ export abstract class BaseAccountRoute<U extends User, A extends Alias, P extend
     public async get(@Param("id") id: string, @AuthUser user: JWTUser): Promise<any> {
         const targetId = this.resolveOwnedUid(id, user);
 
-        const eUser: User | undefined = await this.userRepo?.findOne(targetId, { user });
+        const eUser: U | undefined = await this.userRepo?.findOne(targetId, { user });
         if (!eUser) {
             throw new ApiError(ApiErrors.AUTH_PERMISSION_FAILURE, 403, ApiErrorMessages.AUTH_PERMISSION_FAILURE);
         }
@@ -138,9 +148,10 @@ export abstract class BaseAccountRoute<U extends User, A extends Alias, P extend
         // `profileRepo.findOne()` needs it for a different reason: a `Profile`'s `uid` is intentionally the
         // same value as its owning `User`'s `uid` (see `BaseProfileRoute`'s doc comments), so its per-record
         // ACL check would instead evaluate against whichever of the two documents happens to share that uid.
-        const aliases: Alias[] = (await this.aliasRepo?.find({ userUid: eUser.uid }, { user, ignoreACL: true })) ?? [];
-        const profile: Profile | undefined = await this.profileRepo?.findOne(eUser.uid, { user, ignoreACL: true });
-        const secrets: Secret[] = (await this.secretRepo?.find({ userUid: eUser.uid }, { user, ignoreACL: true })) ?? [];
+        const aliases: A[] = (await this.aliasRepo?.find({ userUid: eUser.uid }, { user, ignoreACL: true })) ?? [];
+        const profile: P | undefined = await this.profileRepo?.findOne(eUser.uid, { user, ignoreACL: true });
+        const secrets: S[] = (await this.secretRepo?.find({ userUid: eUser.uid }, { user, ignoreACL: true })) ?? [];
+        this.cleanSecretData(secrets);
 
         return {
             user: eUser,

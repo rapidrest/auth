@@ -110,11 +110,17 @@ export abstract class BaseAuthBasicRoute<U extends User, S extends Secret, A ext
 
             // Try all known passwords until at least one succeeds
             let success: boolean = false;
-            for (const secret of secrets) {
-                const argon = await importArgon2();
-                success = await argon.verify(secret.data, password);
-                if (success) {
-                    break;
+            if (secrets.length === 0) {
+                // No password secret to check against — burn the same amount of time as a real
+                // verification so this case isn't distinguishable via timing from a wrong password.
+                await verifyDummyPassword(password);
+            } else {
+                for (const secret of secrets) {
+                    const argon = await importArgon2();
+                    success = await argon.verify(secret.data, password);
+                    if (success) {
+                        break;
+                    }
                 }
             }
             if (!success) {

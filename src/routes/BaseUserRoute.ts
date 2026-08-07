@@ -71,16 +71,35 @@ export abstract class BaseUserRoute<T extends User> extends CRUDRoute<T> {
         if ("roles" in obj && !UserUtils.hasRoles(user, this.trustedRoles)) {
             obj.roles = [];
         }
+
+        // Only trusted users can modify a user's verified status
+        if ("verified" in obj && !UserUtils.hasRoles(user, this.trustedRoles)) {
+            obj.verified = false;
+        }
     }
 
     protected async validateUpdate(id: string, obj: UpdateObject<T>, user?: JWTUser): Promise<void> {
         await super.validateUpdate(id, obj, user);
 
-        // Only trusted users can modify a user's roles
-        if ("roles" in obj && !UserUtils.hasRoles(user, this.trustedRoles)) {
+        const isTrusted = UserUtils.hasRoles(user, this.trustedRoles);
+        const needsRolesCheck = "roles" in obj && !isTrusted;
+        const needsVerifiedCheck = "verified" in obj && !isTrusted && !!obj.verified;
+
+        if (needsRolesCheck || needsVerifiedCheck) {
             const targetUid = user && id.toLowerCase() === "me" ? user.uid : id;
-            const existing = await this.repoUtils?.findOne(targetUid, { ignoreACL: true });
-            obj.roles = existing?.roles;
+            const existing = await this.repoUtils!.findOne(targetUid, { ignoreACL: true });
+
+            // Only trusted users can modify a user's roles
+            if (needsRolesCheck) {
+                obj.roles = existing?.roles ?? [];
+            }
+
+            // Only trusted users can flip a user's verified status from false to true. Lowering it (or
+            // resubmitting a value that already matches what's persisted) isn't privilege-escalating and is
+            // left alone.
+            if (needsVerifiedCheck && !existing?.verified) {
+                obj.verified = false;
+            }
         }
     }
 
