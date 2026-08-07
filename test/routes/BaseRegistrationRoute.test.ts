@@ -19,6 +19,9 @@ class FakeAliasClass {
 }
 class FakeUserClass {
     static readonly name = "FakeUser";
+    // Mirrors `BaseEntity`, whose constructor generates `uid` client-side, before the record is ever
+    // persisted — the pre-instantiated user's `uid` is what the alias creation calls key off of.
+    uid: string = "new-user-uid";
     verified?: boolean;
     constructor(other?: any) {
         if (other) {
@@ -395,9 +398,16 @@ describe("BaseRegistrationRoute Tests", () => {
             const token = await generateOTP(req, { id: "user@example.com" });
 
             const route = new TestRegistrationRoute();
-            const aliasCreate = vi.fn().mockResolvedValue(undefined);
-            const user = { uid: "user-1", roles: [], scopes: [] };
-            const userCreate = vi.fn().mockResolvedValue(user);
+            const callOrder: string[] = [];
+            const aliasCreate = vi.fn().mockImplementation(() => {
+                callOrder.push("alias");
+                return Promise.resolve(undefined);
+            });
+            const user = { uid: "new-user-uid", roles: [], scopes: [] };
+            const userCreate = vi.fn().mockImplementation(() => {
+                callOrder.push("user");
+                return Promise.resolve(user);
+            });
             (route as any).aliasRepo = { create: aliasCreate };
             (route as any).userRepo = { create: userCreate };
             (route as any).jwtConfig = { secret: "test-secret" };
@@ -415,14 +425,43 @@ describe("BaseRegistrationRoute Tests", () => {
             expect(passedUser).toBeInstanceOf(FakeUserClass);
             expect(passedUser.verified).toBe(true);
             expect(passedOptions).toEqual({ ignoreACL: true, user: passedUser });
+            // Regression: the alias is created *before* the user (keyed off the pre-instantiated user's own
+            // `uid`, not the not-yet-created record's), so a collision on the alias fails before any `User`
+            // row is ever written — see the dedicated orphan-prevention test below.
             expect(aliasCreate).toHaveBeenCalledWith(
-                { alias: "user@example.com", type: AliasType.EMAIL, userUid: "user-1", verified: true },
-                { ignoreACL: true, user },
+                { alias: "user@example.com", type: AliasType.EMAIL, userUid: passedUser.uid, verified: true },
+                { ignoreACL: true, user: passedUser },
             );
+            expect(callOrder).toEqual(["alias", "user"]);
             expect(result.user).toEqual(user);
             expect(typeof result.token).toBe("string");
             // Cookie issuance is disabled by default (`auth:cookie.enabled` defaults to `false`).
             expect(res.setHeader).not.toHaveBeenCalled();
+        });
+
+        // Regression: the alias used to be created *after* the user, so a collision on the alias's unique
+        // value (e.g. a squatted `name` alias planted ahead of time, per the alias-squatting fix in
+        // BaseAliasRoute) would leave an orphaned, unusable `User` row behind — and the victim permanently
+        // unable to complete registration with that identifier. Creating the alias first means the failure
+        // happens before any `User` row exists at all.
+        it("Does not create a User when alias creation fails (no orphaned user row left behind).", async () => {
+            const req = makeReq();
+            const token = await generateOTP(req, { id: "user@example.com" });
+
+            const route = new TestRegistrationRoute();
+            const aliasCreate = vi.fn().mockRejectedValue(new Error("IDENTIFIER_EXISTS"));
+            const userCreate = vi.fn();
+            (route as any).aliasRepo = { create: aliasCreate };
+            (route as any).userRepo = { create: userCreate };
+            (route as any).jwtConfig = { secret: "test-secret" };
+            (route as any).tokenUtils = new TokenUtils();
+
+            await expect((route as any).verify({ email: "user@example.com", token }, req)).rejects.toThrow(
+                /IDENTIFIER_EXISTS/,
+            );
+
+            expect(aliasCreate).toHaveBeenCalledTimes(1);
+            expect(userCreate).not.toHaveBeenCalled();
         });
 
         it("Sets a `Set-Cookie` header when cookie issuance is enabled.", async () => {
@@ -450,7 +489,7 @@ describe("BaseRegistrationRoute Tests", () => {
 
             const route = new TestRegistrationRoute();
             const aliasCreate = vi.fn().mockResolvedValue(undefined);
-            const user = { uid: "user-1", roles: [], scopes: [] };
+            const user = { uid: "new-user-uid", roles: [], scopes: [] };
             const userCreate = vi.fn().mockResolvedValue(user);
             (route as any).aliasRepo = { create: aliasCreate };
             (route as any).userRepo = { create: userCreate };
@@ -460,8 +499,8 @@ describe("BaseRegistrationRoute Tests", () => {
             const result = await (route as any).verify({ phone: "+15551234567", token }, req);
 
             expect(aliasCreate).toHaveBeenCalledWith(
-                { alias: "+15551234567", type: AliasType.PHONE, userUid: "user-1", verified: true },
-                { ignoreACL: true, user },
+                { alias: "+15551234567", type: AliasType.PHONE, userUid: "new-user-uid", verified: true },
+                { ignoreACL: true, user: expect.any(FakeUserClass) },
             );
             expect(result.user).toEqual(user);
         });

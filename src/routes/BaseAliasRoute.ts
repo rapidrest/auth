@@ -52,6 +52,34 @@ export abstract class BaseAliasRoute<T extends Alias> extends CRUDRoute<T> {
         }
     }
 
+    /**
+     * Validates that the given string is a `name`. This is a variation of `ValidationUtils.checkName` as it
+     * rejects any value that looks like an e-mail address or phone number.
+     */
+    private checkName(value: string) {
+        ValidationUtils.checkName(value);
+
+        const passesFormatCheck = function (value: string, check: (val: string) => string): boolean {
+            try {
+                check(value);
+                return true;
+            } catch {
+                return false;
+            }
+        };
+
+        // Each format check must live in its own try/catch, separate from the `throw` that acts on its
+        // result — `ValidationUtils.checkEmail`/`checkPhone` throw on invalid input rather than returning a
+        // boolean, so a `throw` placed inside the same `try` as a *successful* check would immediately be
+        // swallowed by that block's own `catch`, silently defeating the rejection entirely.
+        if (passesFormatCheck(value, ValidationUtils.checkEmail)) {
+            throw new ApiError(ApiErrors.INVALID_REQUEST, 400, "A 'name' may not resemble an e-mail address.");
+        }
+        if (passesFormatCheck(value, ValidationUtils.checkPhone)) {
+            throw new ApiError(ApiErrors.INVALID_REQUEST, 400, "A 'name' may not resemble a phone number.");
+        }
+    }
+
     protected async validateCreate(obj: Partial<T>, user?: JWTUser): Promise<void> {
         if (!user) {
             throw new ApiError(ApiErrors.AUTH_REQUIRED, 401, ApiErrorMessages.AUTH_REQUIRED);
@@ -65,19 +93,27 @@ export abstract class BaseAliasRoute<T extends Alias> extends CRUDRoute<T> {
             throw new ApiError(ApiErrors.AUTH_PERMISSION_FAILURE, 403, ApiErrorMessages.AUTH_PERMISSION_FAILURE);
         }
 
-        // If Alias is of type `name` we check for existing names and then automatically set as `verified`
-        if (obj.type === AliasType.NAME) {
-            const existing: T[] | undefined = await this.repoUtils?.find({ alias: obj.alias }, { ignoreACL: true });
-            if (existing && existing.length > 0) {
-                throw new ApiError(ApiErrors.IDENTIFIER_EXISTS, 403, ApiErrorMessages.IDENTIFIER_EXISTS);
-            } else {
-                obj.verified = true;
-            }
+        // Make sure the alias is unique
+        const existing: T[] | undefined = await this.repoUtils?.find({ alias: obj.alias }, { ignoreACL: true });
+        if (existing && existing.length > 0) {
+            throw new ApiError(ApiErrors.IDENTIFIER_EXISTS, 403, ApiErrorMessages.IDENTIFIER_EXISTS);
         }
 
-        // An alias is always considered unverified unless it already exists as verified in the user's Profile
-        // contacts list.
-        if (obj.type === AliasType.EMAIL || obj.type === AliasType.PHONE) {
+        if (obj.type === AliasType.NAME) {
+            // A `name` alias is a free-form, self-verified identifier. We reject anything that could pass as an
+            // e-mail address or phone number. The uniqueness constraint on `alias` spans all types, so without
+            // this an attacker could squat a victim's future e-mail/phone as a `name` alias before the victim
+            // ever registers it, blocking their registration and colliding with the `email`/`phone` alias
+            // record `BaseRegistrationRoute` later tries to create for them.
+            if (typeof obj.alias === "string") {
+                this.checkName(obj.alias);
+            }
+
+            // Names are always considered verified
+            obj.verified = true;
+        } else if (obj.type === AliasType.EMAIL || obj.type === AliasType.PHONE) {
+            // An alias is always considered unverified unless it already exists as verified in the user's Profile
+            // contacts list.
             obj.verified = await this.isVerifiedContact(user, obj.alias!, obj.type);
         }
     }

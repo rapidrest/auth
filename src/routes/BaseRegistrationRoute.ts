@@ -213,26 +213,33 @@ export abstract class BaseRegistrationRoute<U extends User, A extends Alias> {
         // doesn't exist as an authenticatable principal until this call returns. Passing plain `{verified:
         // true}` would leave the per-record ACL grant with nobody in it, locking the new user out of their
         // own account. `uid` is generated client-side in the entity constructor (see `BaseEntity`), so it's
-        // known before `create()` is ever called — pre-instantiate the object and pass it as `options.user`
-        // too, exactly like the alias creation below does, so the new user is recognized as their own owner.
+        // known before either `create()` call below is made — pre-instantiate the object and pass it as
+        // `options.user` for both, so the new user is recognized as their own owner.
+        //
+        // The alias is created *before* the user (rather than after, as it more naturally reads) so that a
+        // uniqueness collision on the alias - whether from a squatted `name` alias planted ahead of time, or a
+        // genuine race between two concurrent registration attempts for the same identifier - fails before any
+        // `User` row is ever written. Creating the user first would leave that row orphaned (unusable, and
+        // permanently blocking this identifier from ever completing registration) whenever the alias creation
+        // that follows it fails.
         const newUser = new this.userClass({ verified: true });
-        const user = await this.userRepo.create(newUser, {
-            ignoreACL: true,
-            user: newUser,
-        });
-        const options = { ignoreACL: true, user };
+        const options = { ignoreACL: true, user: newUser };
         if (email) {
             await this.aliasRepo.create(
-                { alias: email, type: AliasType.EMAIL, userUid: user.uid, verified: true } as any,
+                { alias: email, type: AliasType.EMAIL, userUid: newUser.uid, verified: true } as any,
                 options,
             );
         }
         if (phone) {
             await this.aliasRepo.create(
-                { alias: phone, type: AliasType.PHONE, userUid: user.uid, verified: true } as any,
+                { alias: phone, type: AliasType.PHONE, userUid: newUser.uid, verified: true } as any,
                 options,
             );
         }
+        const user = await this.userRepo.create(newUser, {
+            ignoreACL: true,
+            user: newUser,
+        });
 
         const result = new AuthResult({
             token: await this.tokenUtils!.createToken(this.jwtConfig, user, this.defaultScopes, res),

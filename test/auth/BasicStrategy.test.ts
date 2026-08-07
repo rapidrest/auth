@@ -178,5 +178,34 @@ describe("BasicStrategy Tests", () => {
                 /Did you forget to override BasicStrategyOptions.verifySync/,
             );
         });
+
+        it("Invokes checkRateLimitSync with the claimed identifier when configured.", () => {
+            const req = makeReq({ body: { id: "user-uid-1", password: "secret" } });
+            options.checkRateLimitSync = vi.fn();
+            (options.verifySync as any).mockReturnValue(jwtUser);
+
+            strategy.authenticateSync(req, makeRes());
+
+            expect(options.checkRateLimitSync).toHaveBeenCalledWith("user-uid-1", req);
+        });
+
+        it("Aborts before verifySync() when checkRateLimitSync throws.", () => {
+            const req = makeReq({ body: { id: "user-uid-1", password: "secret" } });
+            options.checkRateLimitSync = vi.fn().mockImplementation(() => {
+                throw new Error("Too many attempts.");
+            });
+
+            expect(() => strategy.authenticateSync(req, makeRes())).toThrow(/Too many attempts/);
+            expect(options.verifySync).not.toHaveBeenCalled();
+        });
+
+        it("Behaves exactly as before when checkRateLimitSync is not configured.", () => {
+            const req = makeReq({ body: { id: "user-uid-1", password: "secret" } });
+            (options.verifySync as any).mockReturnValue(jwtUser);
+
+            const result = strategy.authenticateSync(req, makeRes());
+
+            expect(result?.user).toEqual(jwtUser);
+        });
     });
 });

@@ -402,6 +402,40 @@ describe("Route:AliasMongo Tests", () => {
         expect(count).toBe(1);
     });
 
+    // Regression (anti-squatting): a `name` alias is free-form and instantly self-verified, and the
+    // uniqueness index on `alias` spans all types — without this restriction, an attacker could squat a
+    // victim's future e-mail/phone as a `name` alias before the victim ever registers it, permanently
+    // blocking their registration (see the dedicated orphan-prevention test in RegistrationRoute.test.ts).
+    it("Cannot create a 'name' alias that resembles an e-mail address (with user token).", async () => {
+        const email = `${uuid.v4()}@example.com`;
+
+        const result = await request(server.getApplication())
+            .post(baseUrl)
+            .set("Authorization", "jwt " + userToken)
+            .send({ alias: email, type: AliasType.NAME, userUid: user.uid });
+
+        // The real error is 400 INVALID_REQUEST from validateCreate() — already the expected flattened code
+        // here (see the CRUDRoute.validateCreateBulk comment above), so nothing extra is being masked.
+        expect(result.status).toBe(400);
+
+        const count: number = await repo.count({ alias: email });
+        expect(count).toBe(0);
+    });
+
+    it("Cannot create a 'name' alias that resembles a phone number (with user token).", async () => {
+        const phone = "+14155552671";
+
+        const result = await request(server.getApplication())
+            .post(baseUrl)
+            .set("Authorization", "jwt " + userToken)
+            .send({ alias: phone, type: AliasType.NAME, userUid: user.uid });
+
+        expect(result.status).toBe(400);
+
+        const count: number = await repo.count({ alias: phone });
+        expect(count).toBe(0);
+    });
+
     it("Can delete their own alias (with user token).", async () => {
         const obj: AliasMongo = await createAliasMongo({ userUid: user.uid });
         const url = baseUrl + "/" + obj.uid;

@@ -187,7 +187,7 @@ describe("BaseUserRoute Tests", () => {
 
             expect(findOne).not.toHaveBeenCalled();
             expect("roles" in obj).toBe(false);
-        };);
+        });
 
         it("Allows a trusted (admin) caller to change another user's roles.", async () => {
             vi.spyOn(CRUDRoute.prototype as any, "validateUpdate").mockResolvedValue(undefined);

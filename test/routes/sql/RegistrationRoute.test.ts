@@ -186,6 +186,45 @@ describe("Route:RegistrationSQL Tests", () => {
         expect(messagingUtils.sendEmail).not.toHaveBeenCalled();
     });
 
+    it(
+        "Does not leave an orphaned User row when the e-mail alias collides during verify() " +
+            "(regression: alias creation now happens before user creation, so a collision — whether from a " +
+            "pre-existing/squatted alias or a genuine registration race — fails before any User row is " +
+            "written; previously the User was created first and left behind, permanently unusable, whenever " +
+            "the alias creation that followed it failed).",
+        async () => {
+            const client = agent(server.getApplication());
+            const email = `${uuid.v4()}@example.com`;
+
+            // Simulate a collision at the exact moment verify() tries to create the alias — e.g. a race
+            // between two concurrent registration attempts for the same address, or (absent the separate
+            // anti-squatting fix in BaseAliasRoute) an attacker-planted `name` alias. The alias is left
+            // unverified, so start()'s verified-only pre-check doesn't short-circuit and a real OTP still
+            // gets sent, reaching the actual collision inside verify().
+            const otherUser: UserSQL = await userRepo.save(new UserSQL({ roles: [], scopes: [], verified: false }));
+            await aliasRepo.save(
+                new AliasSQL({ alias: email, type: AliasType.EMAIL, userUid: otherUser.uid, verified: false }),
+            );
+
+            const startResult = await client.post(`${baseUrl}/start`).send({ email });
+            expect(startResult.status).toBeGreaterThanOrEqual(200);
+            expect(startResult.status).toBeLessThan(300);
+
+            const sendEmailMock = messagingUtils.sendEmail as any;
+            const lastCall = sendEmailMock.mock.calls[sendEmailMock.mock.calls.length - 1];
+            const token: string = lastCall[1].totp;
+
+            const verifyResult = await client.post(`${baseUrl}/verify`).send({ email, token });
+
+            expect(verifyResult.status).toBeGreaterThanOrEqual(400);
+
+            // No new User row was created for this failed attempt — only the pre-existing `otherUser` remains.
+            const allUsers: UserSQL[] = await userRepo.find();
+            expect(allUsers).toHaveLength(1);
+            expect(allUsers[0].uid).toBe(otherUser.uid);
+        },
+    );
+
     it("Rejects starting registration without a valid e-mail address or phone number.", async () => {
         const result = await request(server.getApplication()).post(`${baseUrl}/start`).send({ email: "not-an-email" });
 

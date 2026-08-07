@@ -460,6 +460,22 @@ describe("BaseAuthMFARoute Tests", () => {
             expect(verifyDummySpy).toHaveBeenCalledWith("pass1");
         });
 
+        // Regression: the dummy-Argon2 timing equalization above only covered the "no such user" case —
+        // when the user exists but has zero password-type secrets (e.g. an OIDC-only/passkey-only account),
+        // the verify loop used to never execute at all, returning near-instantly and creating a third,
+        // faster timing class an attacker could use to distinguish this case via response latency.
+        it("Performs a dummy Argon2 verification when the user has no password secret, to equalize response timing.", async () => {
+            const route = new TestAuthMFARoute();
+            (route as any).secretRepo = { find: vi.fn().mockResolvedValue([]) };
+            (route as any).userUtils = { lookup: vi.fn().mockResolvedValue({ uid: "user-uid-1" }) };
+            const shared = await import("../../src/auth/shared.js");
+            const verifyDummySpy = vi.spyOn(shared, "verifyDummyPassword");
+
+            await expect((route as any).verify("user1", "pass1")).rejects.toThrow(/Invalid authorization request/);
+
+            expect(verifyDummySpy).toHaveBeenCalledWith("pass1");
+        });
+
         it("Throws when none of the user's stored passwords match.", async () => {
             const route = new TestAuthMFARoute();
             const argon2 = await import("argon2");

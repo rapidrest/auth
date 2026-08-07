@@ -197,7 +197,12 @@ describe("BaseAliasRoute Tests", () => {
             });
         });
 
-        describe("name uniqueness check", () => {
+        // Regression: email/phone creation used to rely entirely on the datastore's unique-index constraint to
+        // reject a collision, surfacing as a raw/uncaught error instead of a clean, expected response — and
+        // relying on it alone is also what let the alias-squatting bug (see "name format restriction" below)
+        // leave an orphaned `User` row behind in `BaseRegistrationRoute`, since the collision wasn't detected
+        // until the insert itself. The check now runs once, up front, for every alias type.
+        describe("uniqueness check (all types)", () => {
             it("Throws IDENTIFIER_EXISTS when a name alias with the same value already exists.", async () => {
                 vi.spyOn(CRUDRoute.prototype as any, "validateCreate").mockResolvedValue(undefined);
                 const route = new TestAliasRoute();
@@ -216,6 +221,101 @@ describe("BaseAliasRoute Tests", () => {
                 const route = new TestAliasRoute();
                 (route as any).repoUtils = { find: vi.fn().mockResolvedValue([]) };
                 const obj: any = { type: AliasType.NAME, alias: "unique-name" };
+
+                await (route as any).validateCreate(obj, { uid: "user-1" });
+
+                expect(obj.verified).toBe(true);
+            });
+
+            it("Throws IDENTIFIER_EXISTS when an email alias with the same value already exists.", async () => {
+                vi.spyOn(CRUDRoute.prototype as any, "validateCreate").mockResolvedValue(undefined);
+                const route = new TestAliasRoute();
+                const find = vi.fn().mockResolvedValue([{ uid: "existing-alias" }]);
+                (route as any).repoUtils = { find };
+                const findOne = vi.fn();
+                (route as any).profileRepo = { findOne };
+                const obj: any = { type: AliasType.EMAIL, alias: "taken@example.com" };
+
+                await expect((route as any).validateCreate(obj, { uid: "user-1" })).rejects.toThrow(
+                    /already exists/i,
+                );
+                expect(find).toHaveBeenCalledWith({ alias: "taken@example.com" }, { ignoreACL: true });
+                // The collision check short-circuits before the (unnecessary) verified-contact lookup.
+                expect(findOne).not.toHaveBeenCalled();
+            });
+
+            it("Throws IDENTIFIER_EXISTS when a phone alias with the same value already exists.", async () => {
+                vi.spyOn(CRUDRoute.prototype as any, "validateCreate").mockResolvedValue(undefined);
+                const route = new TestAliasRoute();
+                (route as any).repoUtils = { find: vi.fn().mockResolvedValue([{ uid: "existing-alias" }]) };
+                const obj: any = { type: AliasType.PHONE, alias: "+14155552671" };
+
+                await expect((route as any).validateCreate(obj, { uid: "user-1" })).rejects.toThrow(
+                    /already exists/i,
+                );
+            });
+
+            it("Proceeds to the verified-contact check when no colliding alias exists.", async () => {
+                vi.spyOn(CRUDRoute.prototype as any, "validateCreate").mockResolvedValue(undefined);
+                const route = new TestAliasRoute();
+                (route as any).repoUtils = { find: vi.fn().mockResolvedValue([]) };
+                (route as any).profileRepo = {
+                    findOne: vi.fn().mockResolvedValue({
+                        contacts: [{ contact: "user@example.com", type: ContactType.EMAIL, verified: true }],
+                    }),
+                };
+                const obj: any = { type: AliasType.EMAIL, alias: "user@example.com", verified: true };
+
+                await (route as any).validateCreate(obj, { uid: "user-1" });
+
+                expect(obj.verified).toBe(true);
+            });
+        });
+
+        // Regression: a `name` alias is free-form and instantly self-verified, and the uniqueness index on
+        // `alias` spans all types - without this restriction, an attacker could squat a victim's future
+        // e-mail/phone as a `name` alias before the victim ever registers it, blocking their registration and
+        // colliding with the `email`/`phone` alias `BaseRegistrationRoute` later tries to create for them.
+        describe("name format restriction (anti-squatting)", () => {
+            it("Rejects a name alias that looks like an e-mail address.", async () => {
+                vi.spyOn(CRUDRoute.prototype as any, "validateCreate").mockResolvedValue(undefined);
+                const route = new TestAliasRoute();
+                (route as any).repoUtils = { find: vi.fn().mockResolvedValue([]) };
+                const obj: any = { type: AliasType.NAME, alias: "victim@example.com" };
+
+                await expect((route as any).validateCreate(obj, { uid: "attacker-1" })).rejects.toThrow(
+                    /may not resemble/i,
+                );
+            });
+
+            it("Rejects a name alias that looks like a phone number.", async () => {
+                vi.spyOn(CRUDRoute.prototype as any, "validateCreate").mockResolvedValue(undefined);
+                const route = new TestAliasRoute();
+                (route as any).repoUtils = { find: vi.fn().mockResolvedValue([]) };
+                // "+15551234567" (used elsewhere in this file) is a reserved 555-prefixed number that this
+                // validator library doesn't actually recognize as valid, so a real mobile-format number is
+                // needed here to exercise the phone branch of checkName().
+                const obj: any = { type: AliasType.NAME, alias: "+14155552671" };
+
+                await expect((route as any).validateCreate(obj, { uid: "attacker-1" })).rejects.toThrow(
+                    /may not resemble/i,
+                );
+            });
+
+            it("Rejects a name alias containing characters outside the allowed charset.", async () => {
+                vi.spyOn(CRUDRoute.prototype as any, "validateCreate").mockResolvedValue(undefined);
+                const route = new TestAliasRoute();
+                (route as any).repoUtils = { find: vi.fn().mockResolvedValue([]) };
+                const obj: any = { type: AliasType.NAME, alias: "bad name!" };
+
+                await expect((route as any).validateCreate(obj, { uid: "attacker-1" })).rejects.toThrow();
+            });
+
+            it("Allows a name alias that doesn't resemble an e-mail address or phone number.", async () => {
+                vi.spyOn(CRUDRoute.prototype as any, "validateCreate").mockResolvedValue(undefined);
+                const route = new TestAliasRoute();
+                (route as any).repoUtils = { find: vi.fn().mockResolvedValue([]) };
+                const obj: any = { type: AliasType.NAME, alias: "coolname" };
 
                 await (route as any).validateCreate(obj, { uid: "user-1" });
 
