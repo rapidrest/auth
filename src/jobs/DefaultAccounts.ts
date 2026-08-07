@@ -101,7 +101,6 @@ export abstract class DefaultAccounts<
         }
     }
 
-    @Inject(RepoUtils)
     public get schedule(): string | undefined {
         return undefined;
     }
