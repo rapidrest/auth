@@ -87,15 +87,60 @@ describe("BaseAuthTOTPRoute Tests", () => {
             await expect((route as any).getSecrets("user-1")).rejects.toThrow(/secretRepo is not set/);
         });
 
-        it("Returns the .data of each matching secret.", async () => {
+        it("Returns the .data of each matching secret, with the secret's own uid attached.", async () => {
             const route = new TestAuthTOTPRoute();
-            const find = vi.fn().mockResolvedValue([{ data: { secret: "AAAA" } }, { data: { secret: "BBBB" } }]);
+            const find = vi.fn().mockResolvedValue([
+                { uid: "secret-1", data: { secret: "AAAA" } },
+                { uid: "secret-2", data: { secret: "BBBB" } },
+            ]);
             (route as any).secretRepo = { find };
 
             const result = await (route as any).getSecrets("user-1");
 
             expect(find).toHaveBeenCalledWith({ type: SecretType.TOTP, userUid: "user-1" }, { ignoreACL: true });
-            expect(result).toEqual([{ secret: "AAAA" }, { secret: "BBBB" }]);
+            // `uid` is attached so a successful verification can be traced back to the specific
+            // record to persist replay-protection state onto (see updateSecretTimeStep).
+            expect(result).toEqual([
+                { secret: "AAAA", uid: "secret-1" },
+                { secret: "BBBB", uid: "secret-2" },
+            ]);
+        });
+    });
+
+    describe("updateSecretTimeStep", () => {
+        it("Throws if secretRepo is not set.", async () => {
+            const route = new TestAuthTOTPRoute();
+            await expect((route as any).updateSecretTimeStep("secret-1", 42)).rejects.toThrow(
+                /secretRepo is not set/,
+            );
+        });
+
+        it("Does nothing if no matching secret is found.", async () => {
+            const route = new TestAuthTOTPRoute();
+            const findOne = vi.fn().mockResolvedValue(undefined);
+            const update = vi.fn();
+            (route as any).secretRepo = { findOne, update };
+
+            await (route as any).updateSecretTimeStep("secret-1", 42);
+
+            expect(update).not.toHaveBeenCalled();
+        });
+
+        it("Updates the secret's lastTimeStep when a matching secret is found.", async () => {
+            const route = new TestAuthTOTPRoute();
+            const secret = { uid: "secret-1", version: 1, data: { secret: "AAAA" } };
+            const findOne = vi.fn().mockResolvedValue(secret);
+            const update = vi.fn();
+            (route as any).secretRepo = { findOne, update };
+
+            await (route as any).updateSecretTimeStep("secret-1", 42);
+
+            expect(secret.data.lastTimeStep).toBe(42);
+            expect(update).toHaveBeenCalledWith(
+                { uid: "secret-1", version: 1, data: secret.data },
+                secret,
+                { ignoreACL: true, recordEvent: false },
+            );
         });
     });
 
