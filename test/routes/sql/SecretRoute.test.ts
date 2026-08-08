@@ -688,6 +688,157 @@ describe("Route:SecretSQL Tests", () => {
         expect(result.status).toBe(403);
     });
 
+    it("Can update their own secret's hint (with user token), with data stripped from the response.", async () => {
+        const obj: SecretSQL = await createSecretSQL({ userUid: user.uid, hint: "old hint" });
+        const url = baseUrl + "/" + obj.uid;
+
+        const result = await request(server.getApplication())
+            .put(url)
+            .set("Authorization", "jwt " + userToken)
+            .send({ uid: obj.uid, version: obj.version, hint: "new hint" });
+
+        expect(result.status).toBeGreaterThanOrEqual(200);
+        expect(result.status).toBeLessThan(300);
+        expect(result.body.hint).toBe("new hint");
+        expect(result.body.data).toBeUndefined();
+
+        const existing: SecretSQL | null = await repo.findOne({ where: { uid: obj.uid } });
+        expect(existing?.hint).toBe("new hint");
+    });
+
+    it("Rotates a PASSWORD secret's data, hashing the new plaintext value (with user token).", async () => {
+        const obj: SecretSQL = await createSecretSQL({ userUid: user.uid });
+        const url = baseUrl + "/" + obj.uid;
+
+        const result = await request(server.getApplication())
+            .put(url)
+            .set("Authorization", "jwt " + userToken)
+            .send({ uid: obj.uid, version: obj.version, data: "NewValidPassw0rd!", type: SecretType.PASSWORD });
+
+        expect(result.status).toBeGreaterThanOrEqual(200);
+        expect(result.status).toBeLessThan(300);
+        expect(result.body.data).toBeUndefined();
+
+        const existing: SecretSQL | null = await repo.findOne({ where: { uid: obj.uid } });
+        expect(existing?.data).not.toBe("NewValidPassw0rd!");
+        expect(await argon2.verify(existing!.data, "NewValidPassw0rd!")).toBe(true);
+    });
+
+    it("Regression: rotates a PASSWORD secret's data and enforces complexity even when `type` is omitted from the request body (previously fell through validateUpdate()'s switch unvalidated since it keyed off obj.type instead of existing.type).", async () => {
+        const obj: SecretSQL = await createSecretSQL({ userUid: user.uid });
+        const url = baseUrl + "/" + obj.uid;
+
+        const result = await request(server.getApplication())
+            .put(url)
+            .set("Authorization", "jwt " + userToken)
+            .send({ uid: obj.uid, version: obj.version, data: "NewValidPassw0rd!" });
+
+        expect(result.status).toBeGreaterThanOrEqual(200);
+        expect(result.status).toBeLessThan(300);
+
+        const existing: SecretSQL | null = await repo.findOne({ where: { uid: obj.uid } });
+        expect(existing?.data).not.toBe("NewValidPassw0rd!");
+        expect(await argon2.verify(existing!.data, "NewValidPassw0rd!")).toBe(true);
+    });
+
+    it("Rejects an updated PASSWORD secret that doesn't meet complexity requirements.", async () => {
+        const obj: SecretSQL = await createSecretSQL({ userUid: user.uid });
+        const url = baseUrl + "/" + obj.uid;
+
+        const result = await request(server.getApplication())
+            .put(url)
+            .set("Authorization", "jwt " + userToken)
+            .send({ uid: obj.uid, version: obj.version, data: "weak" });
+
+        expect(result.status).toBe(400);
+    });
+
+    it("Cannot modify a FIDO2 secret's data, even when `type` is omitted from the request body.", async () => {
+        const obj: SecretSQL = await createSecretSQL({
+            userUid: user.uid,
+            type: SecretType.FIDO2,
+            data: { id: "cred-1", uid: user.uid, publicKey: new Uint8Array([1, 2, 3]), counter: 0 },
+        });
+        const url = baseUrl + "/" + obj.uid;
+
+        const result = await request(server.getApplication())
+            .put(url)
+            .set("Authorization", "jwt " + userToken)
+            .send({ uid: obj.uid, version: obj.version, data: { tampered: true } });
+
+        expect(result.status).toBe(400);
+
+        const existing: SecretSQL | null = await repo.findOne({ where: { uid: obj.uid } });
+        expect((existing?.data as StoredPasskeyCredential)?.id).toBe("cred-1");
+    });
+
+    it("Cannot change the `type` of a secret.", async () => {
+        const obj: SecretSQL = await createSecretSQL({ userUid: user.uid });
+        const url = baseUrl + "/" + obj.uid;
+
+        const result = await request(server.getApplication())
+            .put(url)
+            .set("Authorization", "jwt " + userToken)
+            .send({ uid: obj.uid, version: obj.version, type: SecretType.TOTP });
+
+        expect(result.status).toBe(400);
+    });
+
+    it("Cannot re-assign a secret to a different owner.", async () => {
+        const obj: SecretSQL = await createSecretSQL({ userUid: user.uid });
+        const url = baseUrl + "/" + obj.uid;
+
+        const result = await request(server.getApplication())
+            .put(url)
+            .set("Authorization", "jwt " + userToken)
+            .send({ uid: obj.uid, version: obj.version, userUid: uuid.v4() });
+
+        expect(result.status).toBe(400);
+
+        const existing: SecretSQL | null = await repo.findOne({ where: { uid: obj.uid } });
+        expect(existing?.userUid).toBe(user.uid);
+    });
+
+    it("Cannot update another user's secret (with user token).", async () => {
+        const obj: SecretSQL = await createSecretSQL();
+        const url = baseUrl + "/" + obj.uid;
+
+        const result = await request(server.getApplication())
+            .put(url)
+            .set("Authorization", "jwt " + userToken)
+            .send({ uid: obj.uid, version: obj.version, hint: "hijacked" });
+
+        expect(result.status).toBe(403);
+    });
+
+    it("Regression: a trusted (admin) caller can update another user's secret without the omitted userUid being treated as a re-assignment attempt, and ownership is not silently transferred to the admin.", async () => {
+        const obj: SecretSQL = await createSecretSQL({ userUid: user.uid, hint: "old hint" });
+        const url = baseUrl + "/" + obj.uid;
+
+        const result = await request(server.getApplication())
+            .put(url)
+            .set("Authorization", "jwt " + adminToken)
+            .send({ uid: obj.uid, version: obj.version, hint: "updated by admin" });
+
+        expect(result.status).toBeGreaterThanOrEqual(200);
+        expect(result.status).toBeLessThan(300);
+
+        const existing: SecretSQL | null = await repo.findOne({ where: { uid: obj.uid } });
+        expect(existing?.hint).toBe("updated by admin");
+        expect(existing?.userUid).toBe(user.uid);
+    });
+
+    it("Returns 404 when updating a secret that does not exist.", async () => {
+        const url = baseUrl + "/" + uuid.v4();
+
+        const result = await request(server.getApplication())
+            .put(url)
+            .set("Authorization", "jwt " + adminToken)
+            .send({ uid: uuid.v4(), hint: "nope" });
+
+        expect(result.status).toBe(404);
+    });
+
     it("Can delete their own secret (with user token).", async () => {
         const obj: SecretSQL = await createSecretSQL({ userUid: user.uid });
         const url = baseUrl + "/" + obj.uid;

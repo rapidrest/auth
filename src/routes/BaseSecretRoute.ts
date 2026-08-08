@@ -10,6 +10,7 @@ import {
     ModelRoute,
     RepoUtils,
     RouteDecorators,
+    UpdateObject,
 } from "@rapidrest/service-core";
 import { Secret, SecretType } from "../models/types.js";
 import { ApiError, JWTUser, ObjectDecorators, UserUtils } from "@rapidrest/core";
@@ -26,7 +27,7 @@ import { PasskeyConfig, PasswordConfig, StoredPasskeyCredential, TOTPConfig, TOT
 
 const { Config, Init } = ObjectDecorators;
 const { Description, Returns, Summary } = DocDecorators;
-const { Delete, Get, Head, Param, Post, Query, Request, Response, User, Validate } = RouteDecorators;
+const { Auth, Delete, Get, Head, Param, Post, Put, Query, Request, Response, User, Validate } = RouteDecorators;
 
 const REGEX_LOWERCASE = new RegExp("^.*[a-z]+.*$");
 const REGEX_NUMERAL = new RegExp("^.*[0-9]+.*$");
@@ -118,6 +119,7 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
         }
     }
 
+    @Auth(["jwt"])
     @Summary("Count secrets")
     @Description(
         "Returns the total count of secrets in the datastore based on the given criteria " +
@@ -129,7 +131,7 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
         @Param() params: any,
         @Query() query: any,
         @Response res: HttpResponse,
-        @User user?: JWTUser,
+        @User user: JWTUser,
     ): Promise<any> {
         return super.doCount({ params, query, res, user });
     }
@@ -352,6 +354,7 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
         );
     }
 
+    @Auth(["jwt"])
     @Summary("Generate Passkey Registration Options")
     @Description(
         "Begins a WebAuthn passkey registration ceremony for the authenticated user and returns the " +
@@ -360,7 +363,7 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
     )
     @Returns([Object])
     @Get("/passkey/register")
-    public async passkeyRegistrationOptions(@Request req: HttpRequest, @User user?: JWTUser): Promise<any> {
+    public async passkeyRegistrationOptions(@Request req: HttpRequest, @User user: JWTUser): Promise<any> {
         if (!user) {
             throw new ApiError(ApiErrors.AUTH_REQUIRED, 401, "Authentication is required to register a passkey.");
         }
@@ -376,6 +379,7 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
         return this.passwordConfig;
     }
 
+    @Auth(["jwt"])
     @Summary("Generate FIDO2 Registration Options")
     @Description(
         "Begins a WebAuthn registration ceremony for the authenticated user's FIDO2 hardware security key and " +
@@ -384,7 +388,7 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
     )
     @Returns([Object])
     @Get("/fido2/register")
-    public async fido2RegistrationOptions(@Request req: HttpRequest, @User user?: JWTUser): Promise<any> {
+    public async fido2RegistrationOptions(@Request req: HttpRequest, @User user: JWTUser): Promise<any> {
         if (!user) {
             throw new ApiError(
                 ApiErrors.AUTH_REQUIRED,
@@ -396,34 +400,46 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
         return this.beginWebAuthnRegistration(req, user, SecretType.FIDO2, this.fido2Config);
     }
 
+    @Auth(["jwt"])
     @Summary("Create Secret(s)")
     @Description("Create a new Secret.")
     @Returns([Object])
     @Post()
     @Validate("validateCreate")
-    public async create(obj: T | T[], @Request req: HttpRequest, @User user?: JWTUser): Promise<T | Array<T>> {
+    public async create(obj: T | T[], @Request req: HttpRequest, @User user: JWTUser): Promise<T | Array<T>> {
         const result: T | Array<T> = await super.doCreate(obj, { req, user });
 
         // Selectively clean data from certain types of secrets. Some secret types require the data needs to be
         // returned back to the client.
         const objs: Array<T> = Array.isArray(result) ? result : [result];
         for (const obj of objs) {
-            if ([SecretType.FIDO2, SecretType.PASSKEY, SecretType.PASSWORD].includes(obj.type)) {
-                delete obj.data;
-            } else if (obj.type === SecretType.TOTP && obj.data) {
-                // The `otpauth://` provisioning URI is derived from the persisted secret rather than
-                // stored itself, so it's computed fresh here for the response only.
-                (obj.data as TOTPSecret & { uri: string }).uri = await generateTOTPURI(
-                    this.totpConfig,
-                    obj.userUid,
-                    obj.data as TOTPSecret,
-                );
-            }
+            await this.sanitizeSecretForResponse(obj);
         }
 
         return result;
     }
 
+    /**
+     * Strips or augments the `data` field of a persisted secret before it is returned to the client. Shared
+     * by `create()` and `update()` so that a response for either operation never leaks a `password` hash or
+     * raw WebAuthn/TOTP credential material back over the wire.
+     */
+    private async sanitizeSecretForResponse(obj: T): Promise<T> {
+        if ([SecretType.FIDO2, SecretType.PASSKEY, SecretType.PASSWORD].includes(obj.type)) {
+            delete obj.data;
+        } else if (obj.type === SecretType.TOTP && obj.data) {
+            // The `otpauth://` provisioning URI is derived from the persisted secret rather than
+            // stored itself, so it's computed fresh here for the response only.
+            (obj.data as TOTPSecret & { uri: string }).uri = await generateTOTPURI(
+                this.totpConfig,
+                obj.userUid,
+                obj.data as TOTPSecret,
+            );
+        }
+        return obj;
+    }
+
+    @Auth(["jwt"])
     @Summary("Delete secret by ID")
     @Description("Deletes the secret from the service.")
     @Returns([null])
@@ -433,11 +449,12 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
         @Query("version") version: string | undefined,
         @Query("purge") purge: string | undefined,
         @Request req: HttpRequest,
-        @User user?: JWTUser,
+        @User user: JWTUser,
     ): Promise<void> {
         return super.doDelete(id, { user, req, version, purge: purge === "true" });
     }
 
+    @Auth(["jwt"])
     @Summary("Exists")
     @Description(
         "Returns the total count of secrets in the datastore based on the given criteria " +
@@ -449,7 +466,7 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
         @Param("id") id: string,
         @Query() query: any,
         @Response res: HttpResponse,
-        @User user?: JWTUser,
+        @User user: JWTUser,
     ): Promise<any> {
         return super.doExists(id, { query, res, user });
     }
@@ -465,11 +482,12 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
      * same pattern already used internally by `beginWebAuthnRegistration()` above. A trusted role keeps the
      * normal, unscoped behavior.
      */
+    @Auth(["jwt"])
     @Summary("Find All Secrets")
     @Description("Returns all Secrets the caller owns, or all Secrets if the caller holds a trusted role.")
     @Returns([[Array, Object]])
     @Get()
-    public async find(@Param() params: any, @Query() query: any, @User user?: JWTUser): Promise<Array<T>> {
+    public async find(@Param() params: any, @Query() query: any, @User user: JWTUser): Promise<Array<T>> {
         if (!this.repoUtils) {
             throw new ApiError(ApiErrors.INTERNAL_ERROR, 500, ApiErrorMessages.INTERNAL_ERROR);
         }
@@ -487,11 +505,12 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
         return results;
     }
 
+    @Auth(["jwt"])
     @Summary("Find Secret by ID")
     @Description("Returns a single Secret from the system that the user has access to.")
     @Returns([Object])
     @Get("/:id")
-    public async findById(@Param("id") id: string, @Query() query: any, @User user?: JWTUser): Promise<T | null> {
+    public async findById(@Param("id") id: string, @Query() query: any, @User user: JWTUser): Promise<T | null> {
         const result: T | null = await super.doFindById(id, { query, user });
         if (result) {
             this.cleanData(result);
@@ -499,11 +518,94 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
         return result;
     }
 
+    @Auth(["jwt"])
     @Summary("Truncate Secrets")
     @Description("Deletes all Secrets from the datastore that the user has access to.")
     @Returns([null])
     @Delete()
-    public async truncate(@Param() params: any, @Query() query: any, @User user?: JWTUser): Promise<void> {
+    public async truncate(@Param() params: any, @Query() query: any, @User user: JWTUser): Promise<void> {
         return super.doTruncate({ params, query, user });
+    }
+
+    protected async validateUpdate(obj: UpdateObject<T>, existing: T, user: JWTUser) {
+        await this.validate(obj, { user });
+
+        // Do not allow changing of a secret type
+        if ("type" in obj && obj.type !== existing.type) {
+            throw new ApiError(ApiErrors.INVALID_REQUEST, 400, "Cannot modify the `type` of a secret.");
+        }
+
+        // Do not allow re-assignment of a secret
+        if ("userUid" in obj && obj.userUid !== existing.userUid) {
+            throw new ApiError(ApiErrors.INVALID_REQUEST, 400, "Cannot re-assign secrets to a different owner.");
+        }
+
+        if ("data" in obj) {
+            // Switches on `existing.type` rather than `obj.type`: a client updating only `data` is not
+            // required to also send `type`, and falling back to `obj.type` here would leave it `undefined`
+            // for such a request, silently skipping every type-specific check below (password hashing,
+            // FIDO2/Passkey immutability, TOTP secret validation) and persisting `obj.data` completely
+            // unvalidated.
+            switch (existing.type) {
+                case SecretType.FIDO2:
+                    // Do not allow changing FIDO2 data. FIDO2 secrets must be re-created.
+                    throw new ApiError(
+                        ApiErrors.INVALID_REQUEST,
+                        400,
+                        "FIDO2 secrets cannot be modified. Create a new secret.",
+                    );
+                case SecretType.PASSKEY:
+                    // Do not allow changing Passkey data. Passkey secrets must be re-created.
+                    throw new ApiError(
+                        ApiErrors.INVALID_REQUEST,
+                        400,
+                        "Passkey secrets cannot be modified. Create a new secret.",
+                    );
+                case SecretType.PASSWORD:
+                    {
+                        if (typeof obj.data === "string") {
+                            this.validatePassword(obj.data);
+                            const argon = await importArgon2();
+                            obj.data = await argon.hash(obj.data);
+                        } else {
+                            throw new ApiError(
+                                ApiErrors.INVALID_REQUEST,
+                                400,
+                                "A secret of type 'password' must specify string data.",
+                            );
+                        }
+                    }
+                    break;
+                case SecretType.TOTP:
+                    await this.validateTOTPCreate(obj);
+                    break;
+            }
+        }
+    }
+
+    @Auth(["jwt"])
+    @Summary("Update Secret by ID")
+    @Description("Updates a single Secret.")
+    @Returns([Object])
+    @Put("/:id")
+    public async update(
+        @Param("id") id: string,
+        obj: UpdateObject<T>,
+        @Request req: HttpRequest,
+        @User user: JWTUser,
+    ): Promise<T> {
+        if (!this.repoUtils) {
+            throw new ApiError(ApiErrors.INTERNAL_ERROR, 500, ApiErrorMessages.INTERNAL_ERROR);
+        }
+
+        const existing: T | undefined = await this.repoUtils.findOne(id, { skipCache: true, user });
+        if (!existing) {
+            throw new ApiError(ApiErrors.NOT_FOUND, 404, ApiErrorMessages.NOT_FOUND);
+        }
+
+        await this.validateUpdate(obj, existing, user);
+
+        const result: T = await super.doUpdate(id, obj, { user });
+        return await this.sanitizeSecretForResponse(result);
     }
 }

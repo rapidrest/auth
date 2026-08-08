@@ -568,6 +568,192 @@ describe("BaseSecretRoute Tests", () => {
         });
     });
 
+    describe("update", () => {
+        it("Throws INTERNAL_ERROR when repoUtils is not set.", async () => {
+            const route = new TestSecretRoute();
+
+            await expect(
+                route.update("id-1", { uid: "id-1" } as any, {} as any, { uid: "u1" } as any),
+            ).rejects.toThrow(/internal error/i);
+        });
+
+        it("Throws NOT_FOUND when the secret does not exist.", async () => {
+            const findOne = vi.fn().mockResolvedValue(undefined);
+            const route = new TestSecretRoute();
+            (route as any).repoUtils = { findOne };
+
+            await expect(
+                route.update("id-1", { uid: "id-1" } as any, {} as any, { uid: "u1" } as any),
+            ).rejects.toThrow(/no resource could be found/i);
+            expect(findOne).toHaveBeenCalledWith("id-1", { skipCache: true, user: { uid: "u1" } });
+        });
+
+        it("Validates against the existing record before delegating to ModelRoute.doUpdate().", async () => {
+            const existing = { uid: "id-1", type: SecretType.PASSWORD, userUid: "u1" };
+            const findOne = vi.fn().mockResolvedValue(existing);
+            const doUpdateSpy = vi
+                .spyOn(ModelRoute.prototype as any, "doUpdate")
+                .mockResolvedValue({ uid: "id-1", type: SecretType.PASSWORD, userUid: "u1", data: "hash" });
+            const route = new TestSecretRoute();
+            (route as any).repoUtils = { findOne, validate: vi.fn().mockResolvedValue(undefined) };
+            const validateUpdateSpy = vi.spyOn(route as any, "validateUpdate");
+            const obj: any = { uid: "id-1", name: "renamed" };
+
+            const result = await route.update("id-1", obj, {} as any, { uid: "u1" } as any);
+
+            expect(validateUpdateSpy).toHaveBeenCalledWith(obj, existing, { uid: "u1" });
+            expect(doUpdateSpy).toHaveBeenCalledWith("id-1", obj, { user: { uid: "u1" } });
+            // The response is sanitized the same way create() is - a PASSWORD secret never returns `data`.
+            expect(result.data).toBeUndefined();
+        });
+
+        it("Does not default a missing userUid onto the update payload (no enforceOwnership side effect).", async () => {
+            const existing = { uid: "id-1", type: SecretType.PASSWORD, userUid: "someone-else" };
+            const findOne = vi.fn().mockResolvedValue(existing);
+            vi.spyOn(ModelRoute.prototype as any, "doUpdate").mockResolvedValue(existing);
+            const route = new TestSecretRoute();
+            (route as any).repoUtils = { findOne, validate: vi.fn().mockResolvedValue(undefined) };
+            // A trusted role editing another user's secret without specifying userUid must not be treated
+            // as a re-assignment attempt.
+            const obj: any = { uid: "id-1", name: "renamed" };
+
+            await route.update("id-1", obj, {} as any, { uid: "admin-1", roles: ["admin"] } as any);
+
+            expect(obj.userUid).toBeUndefined();
+        });
+
+        it("Computes a fresh provisioning URI for an updated TOTP secret's response.", async () => {
+            const existing = { uid: "id-1", type: SecretType.TOTP, userUid: "u1" };
+            const findOne = vi.fn().mockResolvedValue(existing);
+            vi.spyOn(ModelRoute.prototype as any, "doUpdate").mockResolvedValue({
+                uid: "id-1",
+                type: SecretType.TOTP,
+                userUid: "u1",
+                data: { secret: "JBSWY3DPEHPK3PXP", digits: 6, period: 30, algorithm: "sha1" },
+            });
+            const route = new TestSecretRoute();
+            (route as any).repoUtils = { findOne };
+            vi.spyOn(route as any, "validateUpdate").mockResolvedValue(undefined);
+
+            const result: any = await route.update("id-1", { uid: "id-1" } as any, {} as any, {
+                uid: "u1",
+            } as any);
+
+            expect(result.data.uri).toMatch(/^otpauth:\/\/totp\//);
+        });
+    });
+
+    describe("validateUpdate", () => {
+        it("Runs base validation via this.validate().", async () => {
+            const route = new TestSecretRoute();
+            const validateSpy = vi.spyOn(route as any, "validate").mockResolvedValue(undefined);
+            const existing: any = { uid: "id-1", type: SecretType.PASSWORD, userUid: "u1" };
+            const obj: any = { uid: "id-1" };
+
+            await (route as any).validateUpdate(obj, existing, { uid: "u1" });
+
+            expect(validateSpy).toHaveBeenCalledWith(obj, { user: { uid: "u1" } });
+        });
+
+        it("Throws when attempting to change the secret's type.", async () => {
+            const route = new TestSecretRoute();
+            const existing: any = { uid: "id-1", type: SecretType.PASSWORD, userUid: "u1" };
+            const obj: any = { uid: "id-1", type: SecretType.TOTP };
+
+            await expect((route as any).validateUpdate(obj, existing, { uid: "u1" })).rejects.toThrow(
+                /Cannot modify the `type`/,
+            );
+        });
+
+        it("Throws when attempting to re-assign the secret to a different owner.", async () => {
+            const route = new TestSecretRoute();
+            const existing: any = { uid: "id-1", type: SecretType.PASSWORD, userUid: "u1" };
+            const obj: any = { uid: "id-1", userUid: "someone-else" };
+
+            await expect((route as any).validateUpdate(obj, existing, { uid: "u1" })).rejects.toThrow(
+                /Cannot re-assign secrets/,
+            );
+        });
+
+        it("Allows re-sending the same userUid the secret already belongs to.", async () => {
+            const route = new TestSecretRoute();
+            const existing: any = { uid: "id-1", type: SecretType.PASSWORD, userUid: "u1" };
+            const obj: any = { uid: "id-1", userUid: "u1", data: VALID_PASSWORD };
+
+            await expect((route as any).validateUpdate(obj, existing, { uid: "u1" })).resolves.toBeUndefined();
+        });
+
+        it("Hashes and validates string data for a PASSWORD secret using existing.type, even when obj.type is omitted.", async () => {
+            const route = new TestSecretRoute();
+            const existing: any = { uid: "id-1", type: SecretType.PASSWORD, userUid: "u1" };
+            const obj: any = { uid: "id-1", data: VALID_PASSWORD };
+
+            await (route as any).validateUpdate(obj, existing, { uid: "u1" });
+
+            expect(obj.data).not.toBe(VALID_PASSWORD);
+            expect(typeof obj.data).toBe("string");
+        });
+
+        it("Rejects a weak password for a PASSWORD secret even when obj.type is omitted.", async () => {
+            const route = new TestSecretRoute();
+            const existing: any = { uid: "id-1", type: SecretType.PASSWORD, userUid: "u1" };
+            const obj: any = { uid: "id-1", data: "weak" };
+
+            await expect((route as any).validateUpdate(obj, existing, { uid: "u1" })).rejects.toThrow(
+                /minimum length of: 8/,
+            );
+        });
+
+        it("Throws for a PASSWORD secret update with non-string data.", async () => {
+            const route = new TestSecretRoute();
+            const existing: any = { uid: "id-1", type: SecretType.PASSWORD, userUid: "u1" };
+            const obj: any = { uid: "id-1", data: { not: "a string" } };
+
+            await expect((route as any).validateUpdate(obj, existing, { uid: "u1" })).rejects.toThrow(
+                /must specify string data/,
+            );
+        });
+
+        it("Rejects modifying a FIDO2 secret's data, even when obj.type is omitted.", async () => {
+            const route = new TestSecretRoute();
+            const existing: any = { uid: "id-1", type: SecretType.FIDO2, userUid: "u1" };
+            const obj: any = { uid: "id-1", data: { tampered: true } };
+
+            await expect((route as any).validateUpdate(obj, existing, { uid: "u1" })).rejects.toThrow(
+                /FIDO2 secrets cannot be modified/,
+            );
+        });
+
+        it("Rejects modifying a Passkey secret's data, even when obj.type is omitted.", async () => {
+            const route = new TestSecretRoute();
+            const existing: any = { uid: "id-1", type: SecretType.PASSKEY, userUid: "u1" };
+            const obj: any = { uid: "id-1", data: { tampered: true } };
+
+            await expect((route as any).validateUpdate(obj, existing, { uid: "u1" })).rejects.toThrow(
+                /Passkey secrets cannot be modified/,
+            );
+        });
+
+        it("Delegates TOTP data updates to validateTOTPCreate(), even when obj.type is omitted.", async () => {
+            const route = new TestSecretRoute();
+            const spy = vi.spyOn(route as any, "validateTOTPCreate").mockResolvedValue(undefined);
+            const existing: any = { uid: "id-1", type: SecretType.TOTP, userUid: "u1" };
+            const obj: any = { uid: "id-1", data: "JBSWY3DPEHPK3PXP" };
+
+            await (route as any).validateUpdate(obj, existing, { uid: "u1" });
+
+            expect(spy).toHaveBeenCalledWith(obj);
+        });
+
+        it("Skips type-specific data validation entirely when obj has no `data` field.", async () => {
+            const route = new TestSecretRoute();
+            const existing: any = { uid: "id-1", type: SecretType.FIDO2, userUid: "u1" };
+            const obj: any = { uid: "id-1", name: "renamed" };
+
+            await expect((route as any).validateUpdate(obj, existing, { uid: "u1" })).resolves.toBeUndefined();
+        });
+    });
+
     describe("passkeyRegistrationOptions / fido2RegistrationOptions", () => {
         it("Throws 401 when no user is authenticated (passkey).", async () => {
             const route = new TestSecretRoute();
