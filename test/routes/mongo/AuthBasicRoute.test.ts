@@ -206,4 +206,17 @@ describe("Route:AuthBasicMongo Tests", () => {
         expect(result).toBeDefined();
         expect(result.status).toBe(401);
     });
+
+    it("Cannot authenticate via basic auth when the account requires MFA, even with the correct password.", async () => {
+        const user: UserMongo = await createUserMongo({ requireMFA: true });
+        await createSecretMongo({
+            userUid: user.uid,
+        });
+
+        const result = await request(server.getApplication())
+            .get(baseUrl)
+            .set("Authorization", `basic ${Buffer.from(user.uid + ":password").toString("base64")}`);
+
+        expect(result.status).toBe(401);
+    });
 });

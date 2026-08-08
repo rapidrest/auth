@@ -5,42 +5,102 @@ import {
     ACLAction,
     ApiErrorMessages,
     ApiErrors,
-    CRUDRoute,
     DocDecorators,
     HttpRequest,
+    HttpResponse,
+    ModelRoute,
     RouteDecorators,
     UpdateObject,
 } from "@rapidrest/service-core";
-import { ApiError, JWTUser, UserUtils } from "@rapidrest/core";
-import { User } from "../models/types.js";
+import { ApiError, JWTUser, ObjectDecorators, UserUtils } from "@rapidrest/core";
+import { AuthResult, User } from "../models/types.js";
+import { TokenUtils } from "../auth/TokenUtils.js";
 
-const { Param, Request, User: AuthUser } = RouteDecorators;
+const { Description, Returns, Summary } = DocDecorators;
+const { Config, Inject } = ObjectDecorators;
+const {
+    Auth,
+    Delete,
+    Get,
+    Head,
+    Param,
+    Post,
+    Put,
+    Query,
+    Request,
+    Response,
+    User: AuthUser,
+    Validate,
+} = RouteDecorators;
 
 /**
  * @author Jean-Philippe Steinmetz
  */
-export abstract class BaseUserRoute<T extends User> extends CRUDRoute<T> {
-    // This function is overridden because `RepoUtils.create()`'s automatic per-record owner grant is keyed
-    // off the *acting* caller (`options.user`) and is deliberately skipped whenever that caller holds a
-    // trusted role. That's fine for Alias/Secret/Profile, which are normally self-service created by their
-    // own eventual owner, but a `User` provisioned by an admin has no such self-service creator: the acting
-    // admin is (correctly) excluded from the grant, but nobody else ever gets one either, so the newly
-    // provisioned user would be locked out of their own account until an admin manually fixed their ACL.
-    public async create(obj: T | T[], @Request req: HttpRequest, @AuthUser user?: JWTUser): Promise<T | Array<T>> {
+export abstract class BaseUserRoute<T extends User> extends ModelRoute<T> {
+    @Config("auth:default_scopes", [])
+    protected defaultScopes: string[] = [];
+
+    @Config("auth")
+    protected authConfig?: any;
+
+    @Inject(TokenUtils)
+    protected tokenUtils?: TokenUtils;
+
+    @Summary("Count Users")
+    @Description(
+        "Returns the total count of Users in the datastore based on the given criteria " +
+            "in the header as `Content-Length`.",
+    )
+    @Returns([null])
+    @Auth(["jwt"])
+    @Head()
+    public async count(
+        @Param() params: any,
+        @Query() query: any,
+        @Response res: HttpResponse,
+        @AuthUser user?: JWTUser,
+    ): Promise<any> {
+        return await super.doCount({ params, query, res, user });
+    }
+
+    protected async validateCreate(obj: Partial<T>, user?: JWTUser): Promise<void> {
+        await super.validate(obj, { user });
+
+        // Only trusted users can set a user's roles
+        if ("roles" in obj && !UserUtils.hasRoles(user, this.trustedRoles)) {
+            obj.roles = [];
+        }
+
+        // Only trusted users can modify a user's verified status
+        if ("verified" in obj && !UserUtils.hasRoles(user, this.trustedRoles)) {
+            obj.verified = false;
+        }
+
+        // If the server requires MFA for all accounts, make sure it is set/enforced
+        obj.requireMFA = this.authConfig.require_mfa ?? obj.requireMFA;
+    }
+
+    @Summary("Create User")
+    @Description("Create a new User.")
+    @Returns([Object])
+    @Post()
+    public async create(
+        obj: T,
+        @Request req: HttpRequest,
+        @Response res: HttpResponse,
+        @AuthUser user?: JWTUser,
+    ): Promise<AuthResult> {
         if (!this.repoUtils) {
             throw new ApiError(ApiErrors.INTERNAL_ERROR, 500, ApiErrorMessages.INTERNAL_ERROR);
         }
-
-        if (Array.isArray(obj)) {
-            const results: T[] = [];
-            for (const o of obj) {
-                results.push((await this.create(o, req, user)) as T);
-            }
-            return results;
+        if (!this.tokenUtils) {
+            throw new ApiError(ApiErrors.INTERNAL_ERROR, 500, ApiErrorMessages.INTERNAL_ERROR);
         }
 
+        await this.validateCreate(obj, user);
+
         const newUser: T = this.repoUtils.instantiateObject(obj);
-        return await super.doCreate(newUser, {
+        const result: T = (await super.doCreate(newUser, {
             req,
             user,
             acl: {
@@ -61,55 +121,132 @@ export abstract class BaseUserRoute<T extends User> extends CRUDRoute<T> {
                     },
                 ],
             },
-        });
+        })) as T;
+
+        // `res` is only forwarded when this is a self-registration (no caller was already authenticated).
+        // `TokenUtils.createToken()` writes the issued token as a `Set-Cookie` header on `res` when cookie
+        // auth is enabled - correct for self-registration, which is meant to establish a new session. But
+        // when an already-authenticated caller (e.g. an admin) provisions a User on someone else's behalf,
+        // `res` is the *caller's own* response; forwarding it would silently clobber the caller's own
+        // session cookie with a session for the account they just created for someone else. The token is
+        // still returned in the response body either way, just never written to `res` in that case.
+        const token: string = await this.tokenUtils.createToken(
+            this.authConfig,
+            result,
+            this.defaultScopes,
+            user ? undefined : res,
+        );
+
+        return {
+            token,
+            user: result,
+        };
     }
 
-    protected async validateCreate(obj: Partial<T>, user?: JWTUser): Promise<void> {
-        await super.validateCreate(obj, user);
-
-        // Only trusted users can set a user's roles
-        if ("roles" in obj && !UserUtils.hasRoles(user, this.trustedRoles)) {
-            obj.roles = [];
-        }
-
-        // Only trusted users can modify a user's verified status
-        if ("verified" in obj && !UserUtils.hasRoles(user, this.trustedRoles)) {
-            obj.verified = false;
-        }
+    @Summary("Delete {{name}} by ID")
+    @Description("Deletes the {{name}} from the service.")
+    @Returns([null])
+    @Auth(["jwt"])
+    @Delete("/:id")
+    public async delete(
+        @Param("id") id: string,
+        @Query("version") version: string | undefined,
+        @Query("purge") purge: string | undefined,
+        @Request req: HttpRequest,
+        @AuthUser user?: JWTUser,
+    ): Promise<void> {
+        return await super.doDelete(id, { user, req, version, purge: purge === "true" });
     }
 
-    protected async validateUpdate(id: string, obj: UpdateObject<T>, user?: JWTUser): Promise<void> {
-        await super.validateUpdate(id, obj, user);
+    @Summary("Exists")
+    @Description(
+        "Returns the total count of {{name}}s in the datastore based on the given criteria " +
+            "in the header as `Content-Length`.",
+    )
+    @Returns([null])
+    @Auth(["jwt"])
+    @Head("/:id")
+    public async exists(
+        @Param("id") id: string,
+        @Query() query: any,
+        @Response res: HttpResponse,
+        @AuthUser user?: JWTUser,
+    ): Promise<any> {
+        return await super.doExists(id, { query, res, user });
+    }
+
+    @Summary("Find All Users")
+    @Description("Returns all Users from the system that the user has access to.")
+    @Returns([[Array, Object]])
+    @Auth(["jwt"])
+    @Get()
+    public async find(@Param() params: any, @Query() query: any, @AuthUser user?: JWTUser): Promise<Array<T>> {
+        return await super.doFind({ params, query, user });
+    }
+
+    @Summary("Find User by ID")
+    @Description("Returns a single User from the system that the user has access to.")
+    @Returns([Object])
+    @Auth(["jwt"])
+    @Get("/:id")
+    public async findById(@Param("id") id: string, @Query() query: any, @AuthUser user?: JWTUser): Promise<T | null> {
+        return await super.doFindById(id, { query, user });
+    }
+
+    @Summary("Truncate Users")
+    @Description("Deletes all Users from the datastore that the user has access to.")
+    @Returns([null])
+    @Auth(["jwt"])
+    @Delete()
+    public async truncate(@Param() params: any, @Query() query: any, @AuthUser user?: JWTUser): Promise<void> {
+        return await super.doTruncate({ params, query, user });
+    }
+
+    protected async validateUpdate(
+        @Param("id") id: string,
+        obj: UpdateObject<T>,
+        @AuthUser user?: JWTUser,
+    ): Promise<void> {
+        await this.validate(obj, { user });
 
         const isTrusted = UserUtils.hasRoles(user, this.trustedRoles);
-        const needsRolesCheck = "roles" in obj && !isTrusted;
-        const needsVerifiedCheck = "verified" in obj && !isTrusted && !!obj.verified;
+        const targetUid = user && id.toLowerCase() === "me" ? user.uid : id;
+        const existing = await this.repoUtils!.findOne(targetUid, { ignoreACL: true });
 
-        if (needsRolesCheck || needsVerifiedCheck) {
-            const targetUid = user && id.toLowerCase() === "me" ? user.uid : id;
-            const existing = await this.repoUtils!.findOne(targetUid, { ignoreACL: true });
+        // Only trusted users can modify a user's roles
+        if ("roles" in obj && !isTrusted) {
+            obj.roles = existing?.roles ?? [];
+        }
 
-            // Only trusted users can modify a user's roles
-            if (needsRolesCheck) {
-                obj.roles = existing?.roles ?? [];
-            }
+        // Only trusted users can flip a user's verified status from false to true. Lowering it (or
+        // resubmitting a value that already matches what's persisted) isn't privilege-escalating and is
+        // left alone.
+        if ("verified" in obj && !isTrusted && !!obj.verified && !existing?.verified) {
+            obj.verified = false;
+        }
 
-            // Only trusted users can flip a user's verified status from false to true. Lowering it (or
-            // resubmitting a value that already matches what's persisted) isn't privilege-escalating and is
-            // left alone.
-            if (needsVerifiedCheck && !existing?.verified) {
-                obj.verified = false;
+        if ("requireMFA" in obj) {
+            if (existing && obj.requireMFA !== existing.requireMFA) {
+                // If the server requires MFA for all accounts, don't allow this to be changed, unless its by an admin
+                if (this.authConfig.require_mfa) {
+                    obj.requireMFA = isTrusted ? obj.requireMFA : existing.requireMFA;
+                }
             }
         }
     }
 
-    // Note: We intentionallty do not allow updating properties directly.
-    public updateProperty(
+    @Summary("Update User by ID")
+    @Description("Updates a single User.")
+    @Returns([Object])
+    @Auth(["jwt"])
+    @Put("/:id")
+    @Validate("validateUpdate")
+    public async update(
         @Param("id") id: string,
-        @Param("propertyName") propertyName: string,
-        obj: any,
+        obj: UpdateObject<T>,
+        @Request req: HttpRequest,
         @AuthUser user?: JWTUser,
     ): Promise<T> {
-        throw new ApiError(ApiErrors.NOT_FOUND, 404, ApiErrorMessages.NOT_FOUND);
+        return await super.doUpdate(id, obj, { user });
     }
 }

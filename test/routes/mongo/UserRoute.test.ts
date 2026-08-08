@@ -159,7 +159,7 @@ describe("Route:UserMongo Tests", () => {
         expect(result.headers["content-length"]).toBe(objs.length.toString());
     });
 
-    it("Can make create request (with admin token).", async () => {
+    it("Can make create request (with admin token), returning an AuthResult rather than the bare User.", async () => {
         const obj: UserMongo = new UserMongo({
             roles: ["test"],
             scopes: ["profile"],
@@ -175,7 +175,9 @@ describe("Route:UserMongo Tests", () => {
         expect(result.status).toBeGreaterThanOrEqual(200);
         expect(result.status).toBeLessThan(300);
         expect(result.body).toBeDefined();
-        expectMatchingFields(result.body, obj);
+        expect(typeof result.body.token).toBe("string");
+        expect(result.body.token.length).toBeGreaterThan(0);
+        expectMatchingFields(result.body.user, obj);
 
         // Validate the contents were stored correctly
         const existing: UserMongo | null = await repo.findOne({ uid: obj.uid } as any);
@@ -184,6 +186,32 @@ describe("Route:UserMongo Tests", () => {
             expectMatchingFields(existing, obj);
         }
     });
+
+    it("Cannot self-register anonymously (no Authorization header) - UserMongo's class-level ACL grants `.*` no CREATE access, same as any non-admin caller.", async () => {
+        const result = await request(server.getApplication())
+            .post(baseUrl)
+            .send({ roles: [], scopes: [], verified: false });
+
+        expect(result.status).toBe(403);
+    });
+
+    it(
+        "Does not set a `jwt` `Set-Cookie` header when an already-authenticated (admin) caller creates a User " +
+            "on someone else's behalf (regression: the admin's own session must not be silently replaced by a " +
+            "session for the account they just provisioned for someone else). The unrelated `rrst.sid` session " +
+            "cookie, set by session middleware on every response, is unaffected.",
+        async () => {
+            const result = await request(server.getApplication())
+                .post(baseUrl)
+                .set("Authorization", "jwt " + adminToken)
+                .send({ roles: [], scopes: [], verified: true });
+
+            expect(result.status).toBeGreaterThanOrEqual(200);
+            expect(result.status).toBeLessThan(300);
+            expect(typeof result.body.token).toBe("string");
+            expect(String(result.headers["set-cookie"])).not.toContain("jwt=");
+        },
+    );
 
     it(
         "A User provisioned by an admin can read and update their own record afterward " +
@@ -201,7 +229,7 @@ describe("Route:UserMongo Tests", () => {
             expect(createResult).toBeDefined();
             expect(createResult.status).toBeGreaterThanOrEqual(200);
             expect(createResult.status).toBeLessThan(300);
-            const newUserUid: string = createResult.body.uid;
+            const newUserUid: string = createResult.body.user.uid;
 
             const newUserToken = JWTUtils.createTokenSync(config.get("auth"), {
                 uid: newUserUid,
@@ -244,6 +272,45 @@ describe("Route:UserMongo Tests", () => {
         // Validate the contents were removed
         const count: number = await repo.count({ uid: obj.uid });
         expect(count).toBe(0);
+    });
+
+    it("Can make exists request (with admin token).", async () => {
+        const obj: UserMongo = await createUserMongo();
+        const url = baseUrl + "/" + obj.uid;
+
+        const result = await request(server.getApplication())
+            .head(url)
+            .set("Authorization", "jwt " + adminToken);
+
+        expect(result).toBeDefined();
+        expect(result.status).toBeGreaterThanOrEqual(200);
+        expect(result.status).toBeLessThan(300);
+        expect(result.headers["content-length"]).toBe("1");
+    });
+
+    it(
+        "Cannot make an exists request without authentication (regression: exists() was missing the " +
+            "`@Auth([\"jwt\"])` guard applied to every sibling endpoint on this route, so an anonymous " +
+            "caller could reach the handler directly instead of being rejected with 401 up front).",
+        async () => {
+            const obj: UserMongo = await createUserMongo();
+            const url = baseUrl + "/" + obj.uid;
+
+            const result = await request(server.getApplication()).head(url);
+
+            expect(result.status).toBe(401);
+        },
+    );
+
+    it("Cannot check if another user's record exists (with user token).", async () => {
+        const obj: UserMongo = await createUserMongo();
+        const url = baseUrl + "/" + obj.uid;
+
+        const result = await request(server.getApplication())
+            .head(url)
+            .set("Authorization", "jwt " + userToken);
+
+        expect(result.status).toBe(403);
     });
 
     it("Can make findAll request (with admin token).", async () => {
@@ -317,6 +384,38 @@ describe("Route:UserMongo Tests", () => {
         if (existing) {
             expectMatchingFields(existing, obj);
         }
+    });
+
+    it("Sets requireMFA on a newly-created User from the request body when the server has no MFA mandate configured (with admin token).", async () => {
+        const result = await request(server.getApplication())
+            .post(baseUrl)
+            .set("Authorization", "jwt " + adminToken)
+            .send({ roles: [], scopes: [], verified: true, requireMFA: true });
+
+        expect(result.status).toBeGreaterThanOrEqual(200);
+        expect(result.status).toBeLessThan(300);
+        expect(result.body.user.requireMFA).toBe(true);
+
+        const existing: UserMongo | null = await repo.findOne({ uid: result.body.user.uid } as any);
+        expect(existing?.requireMFA).toBe(true);
+    });
+
+    it("Allows a caller to change their own requireMFA when the server has no MFA mandate configured.", async () => {
+        const obj: UserMongo = await createUserMongo({ requireMFA: false, roles: [] });
+        const selfToken = JWTUtils.createTokenSync(config.get("auth"), { uid: obj.uid, roles: [] });
+        const url = baseUrl + "/" + obj.uid;
+
+        const result = await request(server.getApplication())
+            .put(url)
+            .set("Authorization", "jwt " + selfToken)
+            .send({ ...obj, requireMFA: true });
+
+        expect(result.status).toBeGreaterThanOrEqual(200);
+        expect(result.status).toBeLessThan(300);
+        expect(result.body.requireMFA).toBe(true);
+
+        const existing: UserMongo | null = await repo.findOne({ uid: obj.uid } as any);
+        expect(existing?.requireMFA).toBe(true);
     });
 
     it(

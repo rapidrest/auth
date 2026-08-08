@@ -3,8 +3,11 @@
 ///////////////////////////////////////////////////////////////////////////////
 import { BaseMongoEntity, DocDecorators, ModelDecorators, PersistenceDecorators } from "@rapidrest/service-core";
 import { User } from "../types.js";
+import { ObjectDecorators } from "@rapidrest/core";
+
 const { Description } = DocDecorators;
 const { DataStore, Protect } = ModelDecorators;
+const { Nullable } = ObjectDecorators;
 const { Column, Entity } = PersistenceDecorators;
 
 /**
@@ -34,6 +37,11 @@ const { Column, Entity } = PersistenceDecorators;
 )
 export class UserMongo extends BaseMongoEntity implements User {
     @Column()
+    @Description("Set to `true` to require multi-factor authentication for this account, otherwise set to `false`.")
+    @Nullable
+    requireMFA?: boolean;
+
+    @Column()
     @Description("The list of permission roles the user has.")
     public roles: string[] = [];
 
@@ -49,6 +57,7 @@ export class UserMongo extends BaseMongoEntity implements User {
         super(other);
 
         if (other) {
+            this.requireMFA = "requireMFA" in other ? other.requireMFA : this.requireMFA;
             this.roles = other.roles !== undefined ? other.roles : this.roles;
             this.scopes = other.scopes !== undefined ? other.scopes : this.scopes;
             this.verified = other.verified !== undefined ? other.verified : this.verified;

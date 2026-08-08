@@ -161,4 +161,11 @@ export interface Secret extends BaseEntity {
  *
  * @author Jean-Philippe Steinmetz
  */
-export interface User extends BaseEntity, JWTUser {}
+export interface User extends BaseEntity, JWTUser {
+    /**
+     * Set to `true` to require multi-factor authentication for this account, otherwise set to `false`.
+     *
+     * Default value is set by `@Config("auth:require_mfa")`.
+     */
+    requireMFA?: boolean;
+}

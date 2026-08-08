@@ -1,11 +1,25 @@
 ///////////////////////////////////////////////////////////////////////////////
 // Copyright (C) 2026 Jean-Philippe Steinmetz
 ///////////////////////////////////////////////////////////////////////////////
-// Isolated unit tests for BaseUserRoute — no HTTP server, no database.
-import { ACLAction, CRUDRoute, ModelRoute } from "@rapidrest/service-core";
+// Isolated unit tests for BaseUserRoute — no HTTP server, no database. `ModelRoute`'s own `do*`
+// behaviors are mocked directly on its prototype (BaseUserRoute never overrides them, it only calls
+// `super.doX(...)`) so we can exercise BaseUserRoute's own logic (auto-login on create, roles/verified
+// reconciliation) without booting a full server.
+import { ACLAction, ModelRoute } from "@rapidrest/service-core";
 import { BaseUserRoute } from "../../src/routes/BaseUserRoute.js";
+import { TokenUtils } from "../../src/auth/TokenUtils.js";
 
 class TestUserRoute extends BaseUserRoute<any> {}
+
+function makeRes(): any {
+    return { setHeader: vi.fn() };
+}
+
+function makeTokenUtils(cookieEnabled: boolean): TokenUtils {
+    const tokenUtils = new TokenUtils();
+    (tokenUtils as any).cookieConfig = { enabled: cookieEnabled };
+    return tokenUtils;
+}
 
 describe("BaseUserRoute Tests", () => {
     afterEach(() => {
@@ -17,34 +31,47 @@ describe("BaseUserRoute Tests", () => {
             const route = new TestUserRoute();
             const req: any = {};
 
-            await expect(route.create({ roles: [] } as any, req, { uid: "admin-uid", roles: ["admin"] })).rejects.toThrow(
-                /internal error/i,
-            );
+            await expect(route.create({ roles: [] } as any, req, makeRes())).rejects.toThrow(/internal error/i);
         });
 
-        it("Processes each object in an array individually and returns the combined results.", async () => {
+        it("Throws INTERNAL_ERROR when tokenUtils is not set.", async () => {
             const route = new TestUserRoute();
-            const doCreate = vi.spyOn(ModelRoute.prototype as any, "doCreate").mockResolvedValue({ uid: "new-uid" });
-            (route as any).repoUtils = { instantiateObject: (o: any) => ({ uid: "new-uid", ...o }) };
+            (route as any).repoUtils = { instantiateObject: (o: any) => o };
             const req: any = {};
 
-            const result = await route.create([{ roles: [] }, { roles: [] }] as any, req, {
-                uid: "admin-uid",
-                roles: ["admin"],
-            });
-
-            expect(result).toEqual([{ uid: "new-uid" }, { uid: "new-uid" }]);
-            expect(doCreate).toHaveBeenCalledTimes(2);
+            await expect(route.create({ roles: [] } as any, req, makeRes())).rejects.toThrow(/internal error/i);
         });
 
-        it("Grants the newly-created record's own uid full owner ACL access.", async () => {
+        it("Runs validateCreate() before creating the object.", async () => {
             const route = new TestUserRoute();
             const doCreate = vi.spyOn(ModelRoute.prototype as any, "doCreate").mockResolvedValue({ uid: "new-uid" });
             (route as any).repoUtils = { instantiateObject: (o: any) => ({ uid: "new-uid", ...o }) };
+            (route as any).tokenUtils = makeTokenUtils(false);
+            (route as any).authConfig = { secret: "test-secret" };
+            const validateCreateSpy = vi.spyOn(route as any, "validateCreate").mockResolvedValue(undefined);
+            const req: any = {};
+            const user: any = { uid: "admin-uid", roles: ["admin"] };
+            const obj: any = { roles: [] };
+
+            await route.create(obj, req, makeRes(), user);
+
+            expect(validateCreateSpy).toHaveBeenCalledWith(obj, user);
+            expect(doCreate).toHaveBeenCalled();
+        });
+
+        it("Instantiates the object via repoUtils.instantiateObject() and grants the new record's own uid full owner ACL access.", async () => {
+            const route = new TestUserRoute();
+            const doCreate = vi.spyOn(ModelRoute.prototype as any, "doCreate").mockResolvedValue({ uid: "new-uid" });
+            (route as any).repoUtils = {
+                instantiateObject: (o: any) => ({ uid: "new-uid", ...o }),
+                validate: vi.fn().mockResolvedValue(undefined),
+            };
+            (route as any).tokenUtils = makeTokenUtils(false);
+            (route as any).authConfig = { secret: "test-secret" };
             const req: any = {};
             const user: any = { uid: "admin-uid", roles: ["admin"] };
 
-            await route.create({ roles: [] } as any, req, user);
+            await route.create({ roles: [] } as any, req, makeRes(), user);
 
             expect(doCreate).toHaveBeenCalledWith(
                 expect.objectContaining({ uid: "new-uid" }),
@@ -72,18 +99,100 @@ describe("BaseUserRoute Tests", () => {
                 }),
             );
         });
+
+        it("Returns an AuthResult with the created user and a freshly minted token, not the bare user object.", async () => {
+            const route = new TestUserRoute();
+            vi.spyOn(ModelRoute.prototype as any, "doCreate").mockResolvedValue({ uid: "new-uid", roles: [] });
+            (route as any).repoUtils = {
+                instantiateObject: (o: any) => ({ uid: "new-uid", ...o }),
+                validate: vi.fn().mockResolvedValue(undefined),
+            };
+            (route as any).tokenUtils = makeTokenUtils(false);
+            (route as any).authConfig = { secret: "test-secret" };
+
+            const result = await route.create({ roles: [] } as any, {} as any, makeRes());
+
+            expect(result.user).toEqual({ uid: "new-uid", roles: [] });
+            expect(typeof result.token).toBe("string");
+            expect(result.token.length).toBeGreaterThan(0);
+        });
+
+        it("Mints the token using the configured authConfig and defaultScopes.", async () => {
+            const route = new TestUserRoute();
+            vi.spyOn(ModelRoute.prototype as any, "doCreate").mockResolvedValue({ uid: "new-uid", roles: [] });
+            (route as any).repoUtils = {
+                instantiateObject: (o: any) => ({ uid: "new-uid", ...o }),
+                validate: vi.fn().mockResolvedValue(undefined),
+            };
+            const tokenUtils = makeTokenUtils(false);
+            const createTokenSpy = vi.spyOn(tokenUtils, "createToken");
+            (route as any).tokenUtils = tokenUtils;
+            (route as any).authConfig = { secret: "test-secret" };
+            (route as any).defaultScopes = ["profile"];
+            const res = makeRes();
+
+            await route.create({ roles: [] } as any, {} as any, res);
+
+            expect(createTokenSpy).toHaveBeenCalledWith(
+                { secret: "test-secret" },
+                { uid: "new-uid", roles: [] },
+                ["profile"],
+                res,
+            );
+        });
+
+        it("Sets a `Set-Cookie` header for an unauthenticated (self-registration) call when cookie issuance is enabled.", async () => {
+            const route = new TestUserRoute();
+            vi.spyOn(ModelRoute.prototype as any, "doCreate").mockResolvedValue({ uid: "new-uid", roles: [] });
+            (route as any).repoUtils = {
+                instantiateObject: (o: any) => ({ uid: "new-uid", ...o }),
+                validate: vi.fn().mockResolvedValue(undefined),
+            };
+            (route as any).tokenUtils = makeTokenUtils(true);
+            (route as any).authConfig = { secret: "test-secret" };
+            const res = makeRes();
+
+            const result = await route.create({ roles: [] } as any, {} as any, res, undefined);
+
+            expect(res.setHeader).toHaveBeenCalledWith("Set-Cookie", expect.stringContaining(`jwt=${result.token}`));
+        });
+
+        // Regression: TokenUtils.createToken() writes the issued token as a Set-Cookie header on whatever
+        // `res` it's given. Before this fix, `res` was always forwarded regardless of caller - so an
+        // already-authenticated caller (e.g. an admin provisioning a User for someone else) would have the
+        // *new* account's session silently written to their *own* response, clobbering their own session
+        // cookie with a session for an account that isn't theirs.
+        it("Does not set a `Set-Cookie` header when the caller is already authenticated, even though a token is still returned in the body.", async () => {
+            const route = new TestUserRoute();
+            vi.spyOn(ModelRoute.prototype as any, "doCreate").mockResolvedValue({ uid: "new-uid", roles: [] });
+            (route as any).repoUtils = {
+                instantiateObject: (o: any) => ({ uid: "new-uid", ...o }),
+                validate: vi.fn().mockResolvedValue(undefined),
+            };
+            (route as any).tokenUtils = makeTokenUtils(true);
+            (route as any).authConfig = { secret: "test-secret" };
+            const res = makeRes();
+            const admin: any = { uid: "admin-uid", roles: ["admin"] };
+
+            const result = await route.create({ roles: [] } as any, {} as any, res, admin);
+
+            expect(res.setHeader).not.toHaveBeenCalled();
+            expect(typeof result.token).toBe("string");
+            expect(result.token.length).toBeGreaterThan(0);
+        });
     });
 
     describe("validateCreate", () => {
-        it("Delegates to CRUDRoute.validateCreate() for schema validation.", async () => {
-            const spy = vi.spyOn(CRUDRoute.prototype as any, "validateCreate").mockResolvedValue(undefined);
+        it("Runs base validation via this.validate().", async () => {
+            const validateSpy = vi.spyOn(ModelRoute.prototype as any, "validate").mockResolvedValue(undefined);
             const route = new TestUserRoute();
+            (route as any).authConfig = {};
             const obj: any = { roles: [] };
             const user: any = { uid: "admin-uid", roles: ["admin"] };
 
             await (route as any).validateCreate(obj, user);
 
-            expect(spy).toHaveBeenCalledWith(obj, user);
+            expect(validateSpy).toHaveBeenCalledWith(obj, { user });
         });
 
         // Regression: without this, a caller able to reach create() by any means other than the class-level
@@ -92,8 +201,9 @@ describe("BaseUserRoute Tests", () => {
         // baked in from the start - the same account-takeover shape as the validateUpdate fix below, just
         // at creation time instead of update time.
         it("Resets roles to an empty array when a non-trusted caller includes it.", async () => {
-            vi.spyOn(CRUDRoute.prototype as any, "validateCreate").mockResolvedValue(undefined);
+            vi.spyOn(ModelRoute.prototype as any, "validate").mockResolvedValue(undefined);
             const route = new TestUserRoute();
+            (route as any).authConfig = {};
             const obj: any = { roles: ["admin"] };
 
             await (route as any).validateCreate(obj, { uid: "attacker-uid", roles: [] });
@@ -102,8 +212,9 @@ describe("BaseUserRoute Tests", () => {
         });
 
         it("Does not add a roles key at all when the client omitted it.", async () => {
-            vi.spyOn(CRUDRoute.prototype as any, "validateCreate").mockResolvedValue(undefined);
+            vi.spyOn(ModelRoute.prototype as any, "validate").mockResolvedValue(undefined);
             const route = new TestUserRoute();
+            (route as any).authConfig = {};
             const obj: any = { verified: true };
 
             await (route as any).validateCreate(obj, { uid: "attacker-uid", roles: [] });
@@ -112,8 +223,9 @@ describe("BaseUserRoute Tests", () => {
         });
 
         it("Allows a trusted (admin) caller to set roles on a newly-created user.", async () => {
-            vi.spyOn(CRUDRoute.prototype as any, "validateCreate").mockResolvedValue(undefined);
+            vi.spyOn(ModelRoute.prototype as any, "validate").mockResolvedValue(undefined);
             const route = new TestUserRoute();
+            (route as any).authConfig = {};
             const obj: any = { roles: ["admin"] };
 
             await (route as any).validateCreate(obj, { uid: "admin-uid", roles: ["admin"] });
@@ -121,27 +233,91 @@ describe("BaseUserRoute Tests", () => {
             expect(obj.roles).toEqual(["admin"]);
         });
 
-        it("Allows an unauthenticated create call to proceed without roles present (delegates auth to the ACL layer).", async () => {
-            vi.spyOn(CRUDRoute.prototype as any, "validateCreate").mockResolvedValue(undefined);
+        it("Allows an unauthenticated create call to proceed without roles present (resets to empty rather than rejecting).", async () => {
+            vi.spyOn(ModelRoute.prototype as any, "validate").mockResolvedValue(undefined);
             const route = new TestUserRoute();
+            (route as any).authConfig = {};
             const obj: any = { roles: ["admin"] };
 
             await (route as any).validateCreate(obj, undefined);
 
             expect(obj.roles).toEqual([]);
         });
+
+        it("Resets verified to false when a non-trusted caller includes it.", async () => {
+            vi.spyOn(ModelRoute.prototype as any, "validate").mockResolvedValue(undefined);
+            const route = new TestUserRoute();
+            (route as any).authConfig = {};
+            const obj: any = { verified: true };
+
+            await (route as any).validateCreate(obj, { uid: "attacker-uid", roles: [] });
+
+            expect(obj.verified).toBe(false);
+        });
+
+        it("Allows a trusted (admin) caller to set verified:true on a newly-created user.", async () => {
+            vi.spyOn(ModelRoute.prototype as any, "validate").mockResolvedValue(undefined);
+            const route = new TestUserRoute();
+            (route as any).authConfig = {};
+            const obj: any = { verified: true };
+
+            await (route as any).validateCreate(obj, { uid: "admin-uid", roles: ["admin"] });
+
+            expect(obj.verified).toBe(true);
+        });
+
+        it("Forces requireMFA to the server-configured value when auth:require_mfa is set, overriding any client-supplied value.", async () => {
+            vi.spyOn(ModelRoute.prototype as any, "validate").mockResolvedValue(undefined);
+            const route = new TestUserRoute();
+            (route as any).authConfig = { require_mfa: true };
+            const obj: any = { requireMFA: false };
+
+            await (route as any).validateCreate(obj, { uid: "admin-uid", roles: ["admin"] });
+
+            expect(obj.requireMFA).toBe(true);
+        });
+
+        it("Leaves the client-supplied requireMFA alone when auth:require_mfa is unset.", async () => {
+            vi.spyOn(ModelRoute.prototype as any, "validate").mockResolvedValue(undefined);
+            const route = new TestUserRoute();
+            (route as any).authConfig = {};
+            const obj: any = { requireMFA: true };
+
+            await (route as any).validateCreate(obj, { uid: "user-1", roles: [] });
+
+            expect(obj.requireMFA).toBe(true);
+        });
     });
 
     describe("validateUpdate", () => {
-        it("Delegates to CRUDRoute.validateUpdate() for schema validation.", async () => {
-            const spy = vi.spyOn(CRUDRoute.prototype as any, "validateUpdate").mockResolvedValue(undefined);
+        it("Runs base validation via this.validate().", async () => {
+            const validateSpy = vi.spyOn(ModelRoute.prototype as any, "validate").mockResolvedValue(undefined);
             const route = new TestUserRoute();
+            const findOne = vi.fn().mockResolvedValue(undefined);
+            (route as any).repoUtils = { findOne };
+            (route as any).authConfig = {};
             const obj: any = { uid: "user-1" };
             const user: any = { uid: "admin-uid", roles: ["admin"] };
 
             await (route as any).validateUpdate("user-1", obj, user);
 
-            expect(spy).toHaveBeenCalledWith("user-1", obj, user);
+            expect(validateSpy).toHaveBeenCalledWith(obj, { user });
+        });
+
+        // Every possible change (roles, verified, requireMFA) needs the persisted record to compare
+        // against, so the lookup is now unconditional rather than only firing when a specific field known
+        // to need reconciliation is present in the request body.
+        it("Always retrieves the existing record for comparison, even when the update touches none of roles/verified/requireMFA.", async () => {
+            vi.spyOn(ModelRoute.prototype as any, "validate").mockResolvedValue(undefined);
+            const route = new TestUserRoute();
+            const findOne = vi.fn().mockResolvedValue({ uid: "user-1" });
+            (route as any).repoUtils = { findOne };
+            (route as any).authConfig = {};
+            const obj: any = { uid: "user-1", someOtherField: "x" };
+
+            await (route as any).validateUpdate("user-1", obj, { uid: "user-1", roles: [] });
+
+            expect(findOne).toHaveBeenCalledWith("user-1", { ignoreACL: true });
         });
 
         // Regression: `roles` had no `@ReadOnly` protection and every self-registered user is automatically
@@ -149,10 +325,11 @@ describe("BaseUserRoute Tests", () => {
         // unmodified - a full account takeover, since roles:["admin"] bypasses every ACL check system-wide.
         // The attempted roles change is silently discarded rather than rejecting the whole request.
         it("Reverts roles to the persisted value when a non-trusted caller attempts to change them.", async () => {
-            vi.spyOn(CRUDRoute.prototype as any, "validateUpdate").mockResolvedValue(undefined);
+            vi.spyOn(ModelRoute.prototype as any, "validate").mockResolvedValue(undefined);
             const route = new TestUserRoute();
             const findOne = vi.fn().mockResolvedValue({ uid: "user-1", roles: [] });
             (route as any).repoUtils = { findOne };
+            (route as any).authConfig = {};
             const obj: any = { uid: "user-1", roles: ["admin"] };
 
             await (route as any).validateUpdate("user-1", obj, { uid: "user-1", roles: [] });
@@ -162,10 +339,11 @@ describe("BaseUserRoute Tests", () => {
         });
 
         it("Resolves the 'me' keyword to the caller's own uid when looking up the persisted roles.", async () => {
-            vi.spyOn(CRUDRoute.prototype as any, "validateUpdate").mockResolvedValue(undefined);
+            vi.spyOn(ModelRoute.prototype as any, "validate").mockResolvedValue(undefined);
             const route = new TestUserRoute();
             const findOne = vi.fn().mockResolvedValue({ uid: "user-1", roles: [] });
             (route as any).repoUtils = { findOne };
+            (route as any).authConfig = {};
             const obj: any = { roles: ["admin"] };
 
             await (route as any).validateUpdate("me", obj, { uid: "user-1", roles: [] });
@@ -174,39 +352,41 @@ describe("BaseUserRoute Tests", () => {
             expect(obj.roles).toEqual([]);
         });
 
-        it("Does not touch obj.roles when the update doesn't include roles at all.", async () => {
-            vi.spyOn(CRUDRoute.prototype as any, "validateUpdate").mockResolvedValue(undefined);
+        it("Does not add a roles key at all when the update doesn't include roles.", async () => {
+            vi.spyOn(ModelRoute.prototype as any, "validate").mockResolvedValue(undefined);
             const route = new TestUserRoute();
-            const findOne = vi.fn();
+            const findOne = vi.fn().mockResolvedValue({ uid: "user-1", roles: [] });
             (route as any).repoUtils = { findOne };
+            (route as any).authConfig = {};
             // `verified: false` here (rather than `true`) is deliberate: it proves the absence of `roles`
-            // alone skips the lookup, without also tripping the separate verified-escalation check below.
+            // alone leaves `obj.roles` untouched, without also tripping the separate verified-escalation
+            // check below.
             const obj: any = { uid: "user-1", verified: false };
 
             await (route as any).validateUpdate("user-1", obj, { uid: "user-1", roles: [] });
 
-            expect(findOne).not.toHaveBeenCalled();
             expect("roles" in obj).toBe(false);
         });
 
         it("Allows a trusted (admin) caller to change another user's roles.", async () => {
-            vi.spyOn(CRUDRoute.prototype as any, "validateUpdate").mockResolvedValue(undefined);
+            vi.spyOn(ModelRoute.prototype as any, "validate").mockResolvedValue(undefined);
             const route = new TestUserRoute();
-            const findOne = vi.fn();
+            const findOne = vi.fn().mockResolvedValue({ uid: "victim-uid", roles: [] });
             (route as any).repoUtils = { findOne };
+            (route as any).authConfig = {};
             const obj: any = { uid: "victim-uid", roles: ["admin"] };
 
             await (route as any).validateUpdate("victim-uid", obj, { uid: "admin-uid", roles: ["admin"] });
 
-            expect(findOne).not.toHaveBeenCalled();
             expect(obj.roles).toEqual(["admin"]);
         });
 
         it("Resets verified to false when a non-trusted caller attempts to set it to true and it isn't already verified.", async () => {
-            vi.spyOn(CRUDRoute.prototype as any, "validateUpdate").mockResolvedValue(undefined);
+            vi.spyOn(ModelRoute.prototype as any, "validate").mockResolvedValue(undefined);
             const route = new TestUserRoute();
             const findOne = vi.fn().mockResolvedValue({ uid: "user-1", verified: false });
             (route as any).repoUtils = { findOne };
+            (route as any).authConfig = {};
             const obj: any = { uid: "user-1", verified: true };
 
             await (route as any).validateUpdate("user-1", obj, { uid: "user-1", roles: [] });
@@ -215,24 +395,25 @@ describe("BaseUserRoute Tests", () => {
             expect(obj.verified).toBe(false);
         });
 
-        it("Allows a non-trusted caller to lower their own verified status without a lookup (no false-positive block).", async () => {
-            vi.spyOn(CRUDRoute.prototype as any, "validateUpdate").mockResolvedValue(undefined);
+        it("Allows a non-trusted caller to lower their own verified status (no false-positive block).", async () => {
+            vi.spyOn(ModelRoute.prototype as any, "validate").mockResolvedValue(undefined);
             const route = new TestUserRoute();
-            const findOne = vi.fn();
+            const findOne = vi.fn().mockResolvedValue({ uid: "user-1", verified: true });
             (route as any).repoUtils = { findOne };
+            (route as any).authConfig = {};
             const obj: any = { uid: "user-1", verified: false };
 
             await (route as any).validateUpdate("user-1", obj, { uid: "user-1", roles: [] });
 
-            expect(findOne).not.toHaveBeenCalled();
             expect(obj.verified).toBe(false);
         });
 
         it("Allows verified:true to pass through unchanged when the persisted record is already verified (no false-positive block on a no-op resubmission).", async () => {
-            vi.spyOn(CRUDRoute.prototype as any, "validateUpdate").mockResolvedValue(undefined);
+            vi.spyOn(ModelRoute.prototype as any, "validate").mockResolvedValue(undefined);
             const route = new TestUserRoute();
             const findOne = vi.fn().mockResolvedValue({ uid: "user-1", verified: true });
             (route as any).repoUtils = { findOne };
+            (route as any).authConfig = {};
             const obj: any = { uid: "user-1", verified: true };
 
             await (route as any).validateUpdate("user-1", obj, { uid: "user-1", roles: [] });
@@ -240,51 +421,175 @@ describe("BaseUserRoute Tests", () => {
             expect(obj.verified).toBe(true);
         });
 
-        it("Allows a trusted (admin) caller to verify another user without a lookup.", async () => {
-            vi.spyOn(CRUDRoute.prototype as any, "validateUpdate").mockResolvedValue(undefined);
+        it("Allows a trusted (admin) caller to verify another user.", async () => {
+            vi.spyOn(ModelRoute.prototype as any, "validate").mockResolvedValue(undefined);
             const route = new TestUserRoute();
-            const findOne = vi.fn();
+            const findOne = vi.fn().mockResolvedValue({ uid: "victim-uid", verified: false });
             (route as any).repoUtils = { findOne };
+            (route as any).authConfig = {};
             const obj: any = { uid: "victim-uid", verified: true };
 
             await (route as any).validateUpdate("victim-uid", obj, { uid: "admin-uid", roles: ["admin"] });
 
-            expect(findOne).not.toHaveBeenCalled();
             expect(obj.verified).toBe(true);
+        });
+
+        it("Does not touch requireMFA when it's absent from the update.", async () => {
+            vi.spyOn(ModelRoute.prototype as any, "validate").mockResolvedValue(undefined);
+            const route = new TestUserRoute();
+            const findOne = vi.fn().mockResolvedValue({ uid: "user-1", requireMFA: true });
+            (route as any).repoUtils = { findOne };
+            (route as any).authConfig = { require_mfa: true };
+            const obj: any = { uid: "user-1", verified: false };
+
+            await (route as any).validateUpdate("user-1", obj, { uid: "user-1", roles: [] });
+
+            expect("requireMFA" in obj).toBe(false);
+        });
+
+        it("Leaves requireMFA unchanged when it matches the persisted value (no-op resubmission, no override applied).", async () => {
+            vi.spyOn(ModelRoute.prototype as any, "validate").mockResolvedValue(undefined);
+            const route = new TestUserRoute();
+            const findOne = vi.fn().mockResolvedValue({ uid: "user-1", requireMFA: true });
+            (route as any).repoUtils = { findOne };
+            (route as any).authConfig = { require_mfa: true };
+            const obj: any = { uid: "user-1", requireMFA: true };
+
+            await (route as any).validateUpdate("user-1", obj, { uid: "user-1", roles: [] });
+
+            expect(obj.requireMFA).toBe(true);
+        });
+
+        // Regression/coverage: once the server mandates MFA fleet-wide, a non-trusted caller can't budge
+        // `requireMFA` off whatever is currently persisted, in *either* direction - this isn't just "force
+        // to true", it's a full freeze for non-admins while the mandate is active.
+        it("Freezes requireMFA at the persisted value for a non-trusted caller attempting to disable it while the server mandates MFA.", async () => {
+            vi.spyOn(ModelRoute.prototype as any, "validate").mockResolvedValue(undefined);
+            const route = new TestUserRoute();
+            const findOne = vi.fn().mockResolvedValue({ uid: "user-1", requireMFA: true });
+            (route as any).repoUtils = { findOne };
+            (route as any).authConfig = { require_mfa: true };
+            const obj: any = { uid: "user-1", requireMFA: false };
+
+            await (route as any).validateUpdate("user-1", obj, { uid: "user-1", roles: [] });
+
+            expect(obj.requireMFA).toBe(true);
+        });
+
+        it("Freezes requireMFA at the persisted value for a non-trusted caller attempting to enable it while the server mandates MFA (a stale/legacy record predating the mandate).", async () => {
+            vi.spyOn(ModelRoute.prototype as any, "validate").mockResolvedValue(undefined);
+            const route = new TestUserRoute();
+            const findOne = vi.fn().mockResolvedValue({ uid: "user-1", requireMFA: false });
+            (route as any).repoUtils = { findOne };
+            (route as any).authConfig = { require_mfa: true };
+            const obj: any = { uid: "user-1", requireMFA: true };
+
+            await (route as any).validateUpdate("user-1", obj, { uid: "user-1", roles: [] });
+
+            expect(obj.requireMFA).toBe(false);
+        });
+
+        it("Allows a trusted (admin) caller to change requireMFA even while the server mandates MFA fleet-wide.", async () => {
+            vi.spyOn(ModelRoute.prototype as any, "validate").mockResolvedValue(undefined);
+            const route = new TestUserRoute();
+            const findOne = vi.fn().mockResolvedValue({ uid: "victim-uid", requireMFA: true });
+            (route as any).repoUtils = { findOne };
+            (route as any).authConfig = { require_mfa: true };
+            const obj: any = { uid: "victim-uid", requireMFA: false };
+
+            await (route as any).validateUpdate("victim-uid", obj, { uid: "admin-uid", roles: ["admin"] });
+
+            expect(obj.requireMFA).toBe(false);
+        });
+
+        it("Allows requireMFA to be changed freely by a non-trusted caller when the server has no configured opinion (auth:require_mfa unset).", async () => {
+            vi.spyOn(ModelRoute.prototype as any, "validate").mockResolvedValue(undefined);
+            const route = new TestUserRoute();
+            const findOne = vi.fn().mockResolvedValue({ uid: "user-1", requireMFA: true });
+            (route as any).repoUtils = { findOne };
+            (route as any).authConfig = {};
+            const obj: any = { uid: "user-1", requireMFA: false };
+
+            await (route as any).validateUpdate("user-1", obj, { uid: "user-1", roles: [] });
+
+            expect(obj.requireMFA).toBe(false);
         });
     });
 
-    describe("updateProperty", () => {
-        // Disabled outright: CRUDRoute.updateProperty (PUT /:id/:property) invokes validateUpdate() with a
-        // throwaway wrapper object ({[propertyName]: obj}), not the object that actually gets persisted, so
-        // the roles reconciliation in validateUpdate() above cannot protect this path - a client could
-        // otherwise self-escalate via PUT /users/:id/roles. Rather than special-case `roles`, the whole
-        // endpoint is disabled, the same way BaseAliasRoute disables it.
-        // These throw synchronously (rather than returning a rejected Promise), so the call is wrapped in an
-        // async closure below to normalize both forms for `.rejects` (same pattern as BaseAliasRoute.test.ts).
-        it("Always rejects, regardless of caller or property.", async () => {
+    describe("update", () => {
+        it("Delegates to ModelRoute.doUpdate().", async () => {
+            const spy = vi.spyOn(ModelRoute.prototype as any, "doUpdate").mockResolvedValue({ uid: "user-1" });
             const route = new TestUserRoute();
+            const req: any = {};
+            const user: any = { uid: "user-1", roles: [] };
 
-            await expect(
-                (async () => route.updateProperty("victim-uid", "roles", ["admin"], { uid: "attacker-uid", roles: [] }))(),
-            ).rejects.toThrow(/no resource could be found/i);
+            const result = await route.update("user-1", { uid: "user-1" } as any, req, user);
+
+            expect(spy).toHaveBeenCalledWith("user-1", { uid: "user-1" }, { user });
+            expect(result).toEqual({ uid: "user-1" });
+        });
+    });
+
+    describe("count / delete / exists / find / findById / truncate", () => {
+        it("count() delegates to ModelRoute.doCount().", async () => {
+            const spy = vi.spyOn(ModelRoute.prototype as any, "doCount").mockResolvedValue("count-result");
+            const route = new TestUserRoute();
+            const res: any = {};
+
+            const result = await route.count({ p: 1 }, { q: 1 }, res, { uid: "u1" } as any);
+
+            expect(spy).toHaveBeenCalledWith({ params: { p: 1 }, query: { q: 1 }, res, user: { uid: "u1" } });
+            expect(result).toBe("count-result");
         });
 
-        it("Rejects even for the record's own owner.", async () => {
+        it("delete() delegates to ModelRoute.doDelete(), converting purge='true' to a boolean.", async () => {
+            const spy = vi.spyOn(ModelRoute.prototype as any, "doDelete").mockResolvedValue(undefined);
             const route = new TestUserRoute();
+            const req: any = {};
 
-            await expect(
-                (async () => route.updateProperty("user-1", "roles", ["admin"], { uid: "user-1", roles: [] }))(),
-            ).rejects.toThrow(/no resource could be found/i);
+            await route.delete("id-1", "2", "true", req, { uid: "u1" } as any);
+
+            expect(spy).toHaveBeenCalledWith("id-1", { user: { uid: "u1" }, req, version: "2", purge: true });
         });
 
-        it("Rejects even for a trusted (admin) caller.", async () => {
+        it("exists() delegates to ModelRoute.doExists().", async () => {
+            const spy = vi.spyOn(ModelRoute.prototype as any, "doExists").mockResolvedValue("exists-result");
+            const route = new TestUserRoute();
+            const res: any = {};
+
+            const result = await route.exists("id-1", { q: 1 }, res, { uid: "u1" } as any);
+
+            expect(spy).toHaveBeenCalledWith("id-1", { query: { q: 1 }, res, user: { uid: "u1" } });
+            expect(result).toBe("exists-result");
+        });
+
+        it("find() delegates to ModelRoute.doFind().", async () => {
+            const spy = vi.spyOn(ModelRoute.prototype as any, "doFind").mockResolvedValue(["a", "b"]);
             const route = new TestUserRoute();
 
-            await expect(
-                (async () =>
-                    route.updateProperty("victim-uid", "roles", ["admin"], { uid: "admin-uid", roles: ["admin"] }))(),
-            ).rejects.toThrow(/no resource could be found/i);
+            const result = await route.find({ p: 1 }, { q: 1 }, { uid: "u1" } as any);
+
+            expect(spy).toHaveBeenCalledWith({ params: { p: 1 }, query: { q: 1 }, user: { uid: "u1" } });
+            expect(result).toEqual(["a", "b"]);
+        });
+
+        it("findById() delegates to ModelRoute.doFindById().", async () => {
+            const spy = vi.spyOn(ModelRoute.prototype as any, "doFindById").mockResolvedValue({ uid: "id-1" });
+            const route = new TestUserRoute();
+
+            const result = await route.findById("id-1", { q: 1 }, { uid: "u1" } as any);
+
+            expect(spy).toHaveBeenCalledWith("id-1", { query: { q: 1 }, user: { uid: "u1" } });
+            expect(result).toEqual({ uid: "id-1" });
+        });
+
+        it("truncate() delegates to ModelRoute.doTruncate().", async () => {
+            const spy = vi.spyOn(ModelRoute.prototype as any, "doTruncate").mockResolvedValue(undefined);
+            const route = new TestUserRoute();
+
+            await route.truncate({ p: 1 }, { q: 1 }, { uid: "u1" } as any);
+
+            expect(spy).toHaveBeenCalledWith({ params: { p: 1 }, query: { q: 1 }, user: { uid: "u1" } });
         });
     });
 });

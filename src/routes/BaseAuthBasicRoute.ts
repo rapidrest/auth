@@ -98,6 +98,15 @@ export abstract class BaseAuthBasicRoute<U extends User, S extends Secret, A ext
                 throw new Error("Invalid name or password");
             }
 
+            // If MFA is required on this account, this auth route cannot be used. Automatically reject.
+            // Shares the same generic message and dummy-Argon2 timing delay as every other rejection path
+            // in this function - a distinct "requires MFA" message would let an attacker enumerate valid
+            // usernames (and which ones have MFA enabled) purely from the error text.
+            if (user.requireMFA) {
+                await verifyDummyPassword(password);
+                throw new Error("Invalid name or password");
+            }
+
             let secrets: Secret[] = await this.secretRepo.find(
                 {
                     userUid: user.uid,

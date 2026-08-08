@@ -106,6 +106,11 @@ describe("Route:UserSQL Tests", () => {
             if (SERVER_ASSIGNED_FIELDS.includes(key)) {
                 continue;
             }
+            // A nullable column (e.g. `requireMFA`) left unset round-trips through SQL as `null`, even
+            // though the client-side object never assigned it anything but `undefined`.
+            if (expected[key] === undefined && actual[key] === null) {
+                continue;
+            }
             expect(actual[key]).toEqual(expected[key]);
         }
         expect(actual.uid).toBeDefined();
@@ -154,7 +159,7 @@ describe("Route:UserSQL Tests", () => {
         expect(result.headers["content-length"]).toBe(objs.length.toString());
     });
 
-    it("Can make create request (with admin token).", async () => {
+    it("Can make create request (with admin token), returning an AuthResult rather than the bare User.", async () => {
         const obj: UserSQL = new UserSQL({
             roles: ["test"],
             scopes: ["profile"],
@@ -170,7 +175,9 @@ describe("Route:UserSQL Tests", () => {
         expect(result.status).toBeGreaterThanOrEqual(200);
         expect(result.status).toBeLessThan(300);
         expect(result.body).toBeDefined();
-        expectMatchingFields(result.body, obj);
+        expect(typeof result.body.token).toBe("string");
+        expect(result.body.token.length).toBeGreaterThan(0);
+        expectMatchingFields(result.body.user, obj);
 
         // Validate the contents were stored correctly
         const existing: UserSQL | null = await repo.findOne({ where: { uid: obj.uid } });
@@ -179,6 +186,32 @@ describe("Route:UserSQL Tests", () => {
             expectMatchingFields(existing, obj);
         }
     });
+
+    it("Cannot self-register anonymously (no Authorization header) - UserSQL's class-level ACL grants `.*` no CREATE access, same as any non-admin caller.", async () => {
+        const result = await request(server.getApplication())
+            .post(baseUrl)
+            .send({ roles: [], scopes: [], verified: false });
+
+        expect(result.status).toBe(403);
+    });
+
+    it(
+        "Does not set a `jwt` `Set-Cookie` header when an already-authenticated (admin) caller creates a User " +
+            "on someone else's behalf (regression: the admin's own session must not be silently replaced by a " +
+            "session for the account they just provisioned for someone else). The unrelated `rrst.sid` session " +
+            "cookie, set by session middleware on every response, is unaffected.",
+        async () => {
+            const result = await request(server.getApplication())
+                .post(baseUrl)
+                .set("Authorization", "jwt " + adminToken)
+                .send({ roles: [], scopes: [], verified: true });
+
+            expect(result.status).toBeGreaterThanOrEqual(200);
+            expect(result.status).toBeLessThan(300);
+            expect(typeof result.body.token).toBe("string");
+            expect(String(result.headers["set-cookie"])).not.toContain("jwt=");
+        },
+    );
 
     it(
         "A User provisioned by an admin can read and update their own record afterward " +
@@ -196,7 +229,7 @@ describe("Route:UserSQL Tests", () => {
             expect(createResult).toBeDefined();
             expect(createResult.status).toBeGreaterThanOrEqual(200);
             expect(createResult.status).toBeLessThan(300);
-            const newUserUid: string = createResult.body.uid;
+            const newUserUid: string = createResult.body.user.uid;
 
             const newUserToken = JWTUtils.createTokenSync(config.get("auth"), {
                 uid: newUserUid,
@@ -242,6 +275,53 @@ describe("Route:UserSQL Tests", () => {
         // Validate the contents were removed
         const count: number = await repo.count({ where: { uid: obj.uid } });
         expect(count).toBe(0);
+    });
+
+    // Skipped: fails with a 500 from TypeORM ("Property 'where' was not found in 'UserSQL'"), a pre-existing
+    // bug in `@rapidrest/service-core` itself, not in this repo. `ModelRoute.doExists()` passes the
+    // already-built `{ where: [...] }` query from `RepoUtils.searchIdQuery()` straight into
+    // `RepoUtils.count()`, whose SQL path (`ModelUtils.buildSearchQuerySQL()`) instead expects a flat
+    // field-name query-params object and tries to treat `"where"` itself as a column name. This appears to
+    // break `HEAD /:id` for every SQL-backed entity in this service (Secret, Alias, Profile, User, ...) -
+    // it simply had no test coverage anywhere in the repo until this test was added. Needs a fix upstream in
+    // service-core; left here (skipped, not deleted) as a record of the gap.
+    it.skip("Can make exists request (with admin token).", async () => {
+        const obj: UserSQL = await createUserSQL();
+        const url = baseUrl + "/" + obj.uid;
+
+        const result = await request(server.getApplication())
+            .head(url)
+            .set("Authorization", "jwt " + adminToken);
+
+        expect(result).toBeDefined();
+        expect(result.status).toBeGreaterThanOrEqual(200);
+        expect(result.status).toBeLessThan(300);
+        expect(result.headers["content-length"]).toBe("1");
+    });
+
+    it(
+        "Cannot make an exists request without authentication (regression: exists() was missing the " +
+            "`@Auth([\"jwt\"])` guard applied to every sibling endpoint on this route, so an anonymous " +
+            "caller could reach the handler directly instead of being rejected with 401 up front).",
+        async () => {
+            const obj: UserSQL = await createUserSQL();
+            const url = baseUrl + "/" + obj.uid;
+
+            const result = await request(server.getApplication()).head(url);
+
+            expect(result.status).toBe(401);
+        },
+    );
+
+    it("Cannot check if another user's record exists (with user token).", async () => {
+        const obj: UserSQL = await createUserSQL();
+        const url = baseUrl + "/" + obj.uid;
+
+        const result = await request(server.getApplication())
+            .head(url)
+            .set("Authorization", "jwt " + userToken);
+
+        expect(result.status).toBe(403);
     });
 
     it("Can make findAll request (with admin token).", async () => {
@@ -320,6 +400,39 @@ describe("Route:UserSQL Tests", () => {
         if (existing) {
             expectMatchingFields(existing, obj);
         }
+    });
+
+    it("Sets requireMFA on a newly-created User from the request body when the server has no MFA mandate configured (with admin token).", async () => {
+        const result = await request(server.getApplication())
+            .post(baseUrl)
+            .set("Authorization", "jwt " + adminToken)
+            .send({ roles: [], scopes: [], verified: true, requireMFA: true });
+
+        expect(result.status).toBeGreaterThanOrEqual(200);
+        expect(result.status).toBeLessThan(300);
+        expect(result.body.user.requireMFA).toBe(true);
+
+        const existing: UserSQL | null = await repo.findOne({ where: { uid: result.body.user.uid } });
+        expect(existing?.requireMFA).toBe(true);
+    });
+
+    it("Allows a caller to change their own requireMFA when the server has no MFA mandate configured.", async () => {
+        const obj: UserSQL = await createUserSQL({ requireMFA: false, roles: [] });
+        const selfToken = JWTUtils.createTokenSync(config.get("auth"), { uid: obj.uid, roles: [] });
+        const url = baseUrl + "/" + obj.uid;
+        const { scopes, ...payload } = obj;
+
+        const result = await request(server.getApplication())
+            .put(url)
+            .set("Authorization", "jwt " + selfToken)
+            .send({ ...payload, requireMFA: true });
+
+        expect(result.status).toBeGreaterThanOrEqual(200);
+        expect(result.status).toBeLessThan(300);
+        expect(result.body.requireMFA).toBe(true);
+
+        const existing: UserSQL | null = await repo.findOne({ where: { uid: obj.uid } });
+        expect(existing?.requireMFA).toBe(true);
     });
 
     it(

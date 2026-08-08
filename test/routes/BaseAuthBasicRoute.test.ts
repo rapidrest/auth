@@ -150,6 +150,41 @@ describe("BaseAuthBasicRoute Tests", () => {
             expect(verifyDummySpy).toHaveBeenCalledWith("pass1");
         });
 
+        // Regression/coverage: `requireMFA` accounts must reject basic auth entirely rather than let a
+        // correct password succeed, since basic auth has no way to prompt for a second factor.
+        it("Throws when the account requires MFA, even before checking any stored password.", async () => {
+            const { userUtils, secretRepo, verify } = await setupRoute();
+            userUtils.lookup.mockResolvedValue({ uid: "user-uid-1", requireMFA: true });
+
+            await expect(verify("user1", "pass1")).rejects.toThrow(/Invalid name or password/);
+            expect(secretRepo.find).not.toHaveBeenCalled();
+        });
+
+        // The message and timing must match every other rejection path in this function (unknown user, no
+        // password secret, wrong password) - a distinct "requires MFA" message would let an attacker
+        // enumerate valid usernames, and which of them have MFA enabled, purely from the error text.
+        it("Performs a dummy Argon2 verification when the account requires MFA, to equalize response timing and error message with other rejection paths.", async () => {
+            const { userUtils, verify } = await setupRoute();
+            userUtils.lookup.mockResolvedValue({ uid: "user-uid-1", requireMFA: true });
+            const shared = await import("../../src/auth/shared.js");
+            const verifyDummySpy = vi.spyOn(shared, "verifyDummyPassword");
+
+            await expect(verify("user1", "pass1")).rejects.toThrow(/Invalid name or password/);
+
+            expect(verifyDummySpy).toHaveBeenCalledWith("pass1");
+        });
+
+        it("Allows login to proceed to password verification when requireMFA is false.", async () => {
+            const { userUtils, secretRepo, verify } = await setupRoute();
+            const argon2 = await import("argon2");
+            userUtils.lookup.mockResolvedValue({ uid: "user-uid-1", requireMFA: false });
+            secretRepo.find.mockResolvedValue([{ data: await argon2.hash("correct-password") }]);
+
+            const user = await verify("user1", "correct-password");
+
+            expect(user).toEqual({ uid: "user-uid-1", requireMFA: false });
+        });
+
         it("Throws when none of the user's stored passwords match.", async () => {
             const { userUtils, secretRepo, verify } = await setupRoute();
             userUtils.lookup.mockResolvedValue({ uid: "user-uid-1" });
