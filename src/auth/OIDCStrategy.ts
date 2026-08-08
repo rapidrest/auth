@@ -435,6 +435,11 @@ export class OIDCStrategy implements AuthStrategy {
                     if (typeof map[key] === "object") {
                         result[key] = transform(profile, map[key], Array.isArray(map[key]) ? [] : {});
                     } else {
+                        // Note: The following eval() is intentional and by design. The map whose values will be
+                        // executed here can only be set by the server configuration and/or system environment and
+                        // is never exposed to a potential malicious client. Therefore, it is considered safe to
+                        // run eval() here. Should the mechanism for obtaining the profile map change in the future
+                        // then this should be flagged as a problem. Until then, ignore it.
                         // eslint-disable-next-line no-eval
                         result[key] = eval(map[key]);
                     }

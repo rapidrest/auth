@@ -272,6 +272,10 @@ export abstract class DefaultAccounts<
         }
 
         if (pwCreated) {
+            // Note: We print this out to the console here so that a system administrator will be able to login
+            // to the system after the first boot. This only occurs once and is otherwise safe as its never
+            // exposed to an end-user or client. In the future, perhaps reconsider this by instead writing the
+            // password to a file.
             this.logger.info("================================================================================");
             this.logger.info("!!!IMPORTANT!!! Write down this information. It won't be shown again.");
             this.logger.info("================================================================================");
