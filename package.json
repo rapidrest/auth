@@ -1,6 +1,6 @@
 {
     "name": "@rapidrest/auth",
-    "version": "1.0.0-rc.15",
+    "version": "1.0.0-rc.16",
     "description": "A library for implementing a complete authentication server in RapidREST.",
     "repository": "https://github.com/rapidrest/auth.git",
     "author": "RapidREST <rapidrests@gmail.com>",
