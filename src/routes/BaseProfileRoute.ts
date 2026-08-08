@@ -331,6 +331,8 @@ export abstract class BaseProfileRoute<T extends Profile> extends CRUDRoute<T> {
             throw new ApiError(ApiErrors.NOT_FOUND, 404, "No such contact on this Profile.");
         }
 
+        await this.rateLimiter?.checkAndIncrement(contact);
+
         let valid = false;
         try {
             valid = await verifyOTP(req, { id: contact, token: obj?.token });

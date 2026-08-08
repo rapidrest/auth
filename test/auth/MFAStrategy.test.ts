@@ -348,6 +348,66 @@ describe("MFAStrategy Tests", () => {
 
             await expect(strategy.authenticate(req, makeRes())).rejects.toThrow(/Unsupported MFA method: unknown/);
         });
+
+        // Regression: the OTP case used to leave a previously-recorded `mfaMethodId` (set by an earlier
+        // TOTP/FIDO2 selection in the same session) in place. Since authenticate()'s phase-3 dispatch routes
+        // purely on whether `mfaMethodId` is truthy, a stale value would misroute the subsequent (correct)
+        // OTP submission into verifyTOTP(), which always fails against an OTP-shaped token.
+        it("Clears a stale mfaMethodId left over from a previous TOTP/FIDO2 selection when OTP is selected.", async () => {
+            const req = makeReq({
+                body: { id: "user-uid-1", methodId: "otp-method" },
+                session: { userUid: "user-uid-1", mfaMethodId: "stale-totp-secret-id" },
+            });
+            (options.getMethod as any).mockResolvedValue({
+                id: "otp-method",
+                type: MFAMethodType.OTP,
+                data: { contact: "test@example.com", type: OTPContactType.EMAIL, verified: true },
+            });
+
+            await strategy.authenticate(req, makeRes());
+
+            expect((req.session as any).mfaMethodId).toBeUndefined();
+        });
+
+        // End-to-end regression for the same bug: selecting TOTP, then switching to OTP, must still let
+        // the correct OTP code authenticate — before the fix, this always failed because the leftover
+        // `mfaMethodId` from the TOTP selection misrouted the OTP submission into verifyTOTP().
+        it("Regression: switching from a TOTP selection to OTP still authenticates on the correct OTP code.", async () => {
+            const session: any = { userUid: "user-uid-1" };
+
+            // Phase 2a: select TOTP first, recording its method id in the session.
+            (options.getMethod as any).mockResolvedValue({ id: "totp-method", type: MFAMethodType.TOTP, data: {} });
+            await strategy.authenticate(
+                makeReq({ body: { id: "user-uid-1", methodId: "totp-method" }, session }),
+                makeRes(),
+            );
+            expect(session.mfaMethodId).toBe("totp-method");
+
+            // Phase 2b: the user switches to OTP instead.
+            (options.getMethod as any).mockResolvedValue({
+                id: "otp-method",
+                type: MFAMethodType.OTP,
+                data: { contact: "test@example.com", type: OTPContactType.EMAIL, verified: true },
+            });
+            await strategy.authenticate(
+                makeReq({ body: { id: "user-uid-1", methodId: "otp-method" }, session }),
+                makeRes(),
+            );
+            const otpToken: string = (options.notifyContact as any).mock.calls[0][1];
+
+            // Phase 3: submitting the real OTP code must authenticate, not be misrouted to verifyTOTP().
+            // verifyOTP() never calls getMethod() at all (unlike verifyTOTP(), which re-fetches the
+            // selected secret) — its call count staying at 2 (the two challenge() calls above) confirms
+            // phase 3 took the verifyOTP() path, not verifyTOTP().
+            (options.getUser as any).mockResolvedValue(jwtUser);
+            const result = await strategy.authenticate(
+                makeReq({ body: { id: "user-uid-1", token: otpToken }, session }),
+                makeRes(),
+            );
+
+            expect(result?.user).toEqual(jwtUser);
+            expect(options.getMethod).toHaveBeenCalledTimes(2);
+        });
     });
 
     describe("verifyBasic (phase 1)", () => {

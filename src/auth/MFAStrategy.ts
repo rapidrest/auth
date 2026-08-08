@@ -279,6 +279,10 @@ export class MFAStrategy implements AuthStrategy {
                 break;
             case MFAMethodType.OTP:
                 {
+                    // Clear any stale `mfaMethodId` left over from a previous TOTP/FIDO2 challenge
+                    // selection in this session — otherwise authenticate()'s routing check would
+                    // misroute this OTP submission into verifyTOTP(), which always fails.
+                    delete req.session.mfaMethodId;
                     const totp: string = await generateOTP(req, payload);
                     await this.options.notifyContact(method.data, totp);
                     res.status(200);

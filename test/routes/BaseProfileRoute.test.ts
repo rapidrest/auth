@@ -833,6 +833,58 @@ describe("BaseProfileRoute Tests", () => {
             ).rejects.toThrow(/no such contact/i);
         });
 
+        // Regression: verifyOTP() itself has no internal lockout — it's a pure single-use session check —
+        // so without a rate limit here an attacker who knows the contact's value could brute-force the
+        // 6-digit code with unlimited guesses. This mirrors the throttle already applied when the code is
+        // first sent (see sendVerificationCode's tests above).
+        it("Rate-limits by the contact value before verifying the code.", async () => {
+            const route = new TestProfileRoute();
+            const req = makeReq();
+            await generateOTP(req, { id: "new@example.com" });
+            const checkAndIncrement = vi.fn().mockResolvedValue(undefined);
+            (route as any).rateLimiter = { checkAndIncrement };
+            (route as any).repoUtils = {
+                findOne: vi.fn().mockResolvedValue({
+                    uid: "user-1",
+                    version: 0,
+                    contacts: [{ contact: "new@example.com", type: ContactType.EMAIL, verified: false }],
+                }),
+                update: vi.fn(),
+            };
+
+            await expect(
+                route.verifyContact("user-1", { contact: "new@example.com", token: "000000" }, req, {
+                    uid: "user-1",
+                } as any),
+            ).rejects.toThrow(/invalid or expired/i);
+
+            expect(checkAndIncrement).toHaveBeenCalledWith("new@example.com");
+        });
+
+        it("Propagates the rate limiter's error and does not attempt verification.", async () => {
+            const route = new TestProfileRoute();
+            const req = makeReq();
+            const token = await generateOTP(req, { id: "new@example.com" });
+            const checkAndIncrement = vi.fn().mockRejectedValue(new Error("Too many attempts"));
+            (route as any).rateLimiter = { checkAndIncrement };
+            const update = vi.fn();
+            (route as any).repoUtils = {
+                findOne: vi.fn().mockResolvedValue({
+                    uid: "user-1",
+                    version: 0,
+                    contacts: [{ contact: "new@example.com", type: ContactType.EMAIL, verified: false }],
+                }),
+                update,
+            };
+
+            await expect(
+                route.verifyContact("user-1", { contact: "new@example.com", token }, req, {
+                    uid: "user-1",
+                } as any),
+            ).rejects.toThrow(/Too many attempts/);
+            expect(update).not.toHaveBeenCalled();
+        });
+
         it("Throws 400 on a wrong/expired code and leaves the contact unverified.", async () => {
             const route = new TestProfileRoute();
             const req = makeReq();

@@ -13,7 +13,7 @@ import { ObjectDecorators } from "@rapidrest/core";
 const { Description } = DocDecorators;
 const { DataStore, Protect } = ModelDecorators;
 const { Nullable } = ObjectDecorators;
-const { Column, Entity } = PersistenceDecorators;
+const { Column, Entity, Index } = PersistenceDecorators;
 
 /**
  * Implementation of the `Secret` interface for storage in a MongoDB database. If SQL is desired, please use
@@ -53,6 +53,7 @@ export class SecretMongo extends BaseMongoEntity implements Secret {
     public type: SecretType = SecretType.PASSWORD;
 
     @Column()
+    @Index("secret_userUid")
     public userUid: string = "";
 
     constructor(other?: Partial<SecretMongo>) {

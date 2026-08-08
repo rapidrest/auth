@@ -291,18 +291,55 @@ describe("BaseRegistrationRoute Tests", () => {
             expect(sendEmail).not.toHaveBeenCalled();
         });
 
-        it("Does not rate-limit or send an OTP when a verified alias already exists.", async () => {
+        // Regression: rate-limiting used to be skipped entirely on this branch, making an already-registered
+        // identifier distinguishable from a non-existing one by request-rate tolerance alone (an attacker
+        // could hammer `start()` for a known email forever without ever being throttled, while a guess at a
+        // non-existing email would eventually 429). It must now run identically on both branches.
+        it("Still rate-limits (but does not send an OTP) when a verified e-mail alias already exists.", async () => {
             const route = new TestRegistrationRoute();
             const find = vi.fn().mockResolvedValue([{ alias: "user@example.com", verified: true }]);
             (route as any).aliasRepo = { find };
-            const checkAndIncrement = vi.fn();
+            const checkAndIncrement = vi.fn().mockResolvedValue(undefined);
             (route as any).rateLimiter = { checkAndIncrement };
-            (route as any).messagingUtils = { sendEmail: vi.fn(), sendSMS: vi.fn() };
+            const sendEmail = vi.fn();
+            (route as any).messagingUtils = { sendEmail, sendSMS: vi.fn() };
             const req = makeReq();
 
             await (route as any).start({ email: "user@example.com" }, req);
 
-            expect(checkAndIncrement).not.toHaveBeenCalled();
+            expect(checkAndIncrement).toHaveBeenCalledWith("user@example.com");
+            expect(sendEmail).not.toHaveBeenCalled();
+        });
+
+        it("Still rate-limits (but does not send an OTP) when a verified phone alias already exists.", async () => {
+            const route = new TestRegistrationRoute();
+            const find = vi.fn().mockResolvedValue([{ alias: "+14155552671", verified: true }]);
+            (route as any).aliasRepo = { find };
+            const checkAndIncrement = vi.fn().mockResolvedValue(undefined);
+            (route as any).rateLimiter = { checkAndIncrement };
+            const sendSMS = vi.fn();
+            (route as any).messagingUtils = { sendEmail: vi.fn(), sendSMS };
+            const req = makeReq();
+
+            await (route as any).start({ phone: "+14155552671" }, req);
+
+            expect(checkAndIncrement).toHaveBeenCalledWith("+14155552671");
+            expect(sendSMS).not.toHaveBeenCalled();
+        });
+
+        // Regression: an exceeded rate limit on the "already registered" branch must surface the same way
+        // it does on the "not registered" branch (a thrown error), rather than silently succeeding.
+        it("Propagates the rate limiter's error even when a verified alias already exists.", async () => {
+            const route = new TestRegistrationRoute();
+            const find = vi.fn().mockResolvedValue([{ alias: "user@example.com", verified: true }]);
+            (route as any).aliasRepo = { find };
+            const checkAndIncrement = vi.fn().mockRejectedValue(new Error("Too many attempts"));
+            (route as any).rateLimiter = { checkAndIncrement };
+            const req = makeReq();
+
+            await expect((route as any).start({ email: "user@example.com" }, req)).rejects.toThrow(
+                /Too many attempts/,
+            );
         });
 
         it("Does not throw when rateLimiter is unset.", async () => {
@@ -378,6 +415,51 @@ describe("BaseRegistrationRoute Tests", () => {
             await expect((route as any).verify({ email: "user@example.com" }, req)).rejects.toThrow(
                 /id and verification code are required/,
             );
+        });
+
+        // Regression: verifyOTP() itself has no internal lockout — it's a pure single-use session check —
+        // so without a rate limit here an attacker who knows the session's id could brute-force the
+        // 6-digit code with unlimited guesses. This mirrors the throttle already applied when the code is
+        // first sent (see the "start" tests above).
+        it("Rate-limits by the claimed id before verifying the code.", async () => {
+            const req = makeReq();
+            await generateOTP(req, { id: "user@example.com" });
+
+            const route = new TestRegistrationRoute();
+            (route as any).aliasRepo = {};
+            (route as any).userRepo = {};
+            const checkAndIncrement = vi.fn().mockResolvedValue(undefined);
+            (route as any).rateLimiter = { checkAndIncrement };
+
+            await expect(
+                (route as any).verify({ email: "user@example.com", token: "000000" }, req),
+            ).rejects.toThrow(/verification code is invalid or has expired/);
+
+            expect(checkAndIncrement).toHaveBeenCalledWith("user@example.com");
+        });
+
+        it("Propagates the rate limiter's error and does not consume the OTP.", async () => {
+            const req = makeReq();
+            const token = await generateOTP(req, { id: "user@example.com" });
+
+            const route = new TestRegistrationRoute();
+            (route as any).aliasRepo = {};
+            (route as any).userRepo = {};
+            const checkAndIncrement = vi.fn().mockRejectedValue(new Error("Too many attempts"));
+            (route as any).rateLimiter = { checkAndIncrement };
+
+            await expect((route as any).verify({ email: "user@example.com", token }, req)).rejects.toThrow(
+                /Too many attempts/,
+            );
+
+            // The OTP is still valid/unconsumed since verifyOTP() was never reached — a subsequent, properly
+            // rate-limited attempt with the same token must still succeed.
+            const route2 = new TestRegistrationRoute();
+            (route2 as any).aliasRepo = { create: vi.fn().mockResolvedValue(undefined) };
+            (route2 as any).userRepo = { create: vi.fn().mockResolvedValue({ uid: "user-1", roles: [], scopes: [] }) };
+            (route2 as any).jwtConfig = { secret: "test-secret" };
+            (route2 as any).tokenUtils = new TokenUtils();
+            await expect((route2 as any).verify({ email: "user@example.com", token }, req)).resolves.toBeDefined();
         });
 
         it("Rejects an invalid or expired verification code.", async () => {

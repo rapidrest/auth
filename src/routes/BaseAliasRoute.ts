@@ -280,6 +280,8 @@ export abstract class BaseAliasRoute<T extends Alias> extends CRUDRoute<T> {
             throw new ApiError(ApiErrors.NOT_FOUND, 404, ApiErrorMessages.NOT_FOUND);
         }
 
+        await this.rateLimiter?.checkAndIncrement(alias.alias);
+
         let valid = false;
         try {
             valid = await verifyOTP(req, { id: alias.alias, token: obj?.token });

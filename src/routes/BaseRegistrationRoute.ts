@@ -120,6 +120,12 @@ export abstract class BaseRegistrationRoute<U extends User, A extends Alias> {
         }
 
         if (email) {
+            // Rate limit unconditionally, before the "already registered" check below, so that an
+            // existing identifier and a non-existing one are throttled identically — otherwise the two
+            // branches are distinguishable by request-rate tolerance alone, defeating the point of the
+            // identical `{}` response used for both.
+            await this.rateLimiter?.checkAndIncrement(email);
+
             const existing = await this.aliasRepo.find(
                 {
                     alias: email,
@@ -133,7 +139,6 @@ export abstract class BaseRegistrationRoute<U extends User, A extends Alias> {
                 return {};
             }
 
-            await this.rateLimiter?.checkAndIncrement(email);
             const token = await generateOTP(req, { id: email });
             this.messagingUtils?.sendEmail("register-otp", { totp: token }, { to: email }).catch((err) => {
                 this.logger.debug(`Failed to send verification e-mail: ${err}`);
@@ -142,6 +147,10 @@ export abstract class BaseRegistrationRoute<U extends User, A extends Alias> {
                 this.logger.debug(`Verification code for ${email}: ${token}`);
             }
         } else if (phone) {
+            // See the email branch above for why this runs unconditionally, before the "already
+            // registered" check.
+            await this.rateLimiter?.checkAndIncrement(phone);
+
             const existing = await this.aliasRepo.find(
                 {
                     alias: phone,
@@ -155,7 +164,6 @@ export abstract class BaseRegistrationRoute<U extends User, A extends Alias> {
                 return {};
             }
 
-            await this.rateLimiter?.checkAndIncrement(phone);
             const token = await generateOTP(req, { id: phone });
             this.messagingUtils?.sendSMS("register-otp", { totp: token }, { to: phone }).catch((err) => {
                 this.logger.debug(`Failed to send verification SMS: ${err}`);
@@ -197,6 +205,8 @@ export abstract class BaseRegistrationRoute<U extends User, A extends Alias> {
         if (!id || !token) {
             throw new ApiError(ApiErrors.INVALID_REQUEST, 400, "An id and verification code are required.");
         }
+
+        await this.rateLimiter?.checkAndIncrement(id);
 
         let valid: boolean;
         try {

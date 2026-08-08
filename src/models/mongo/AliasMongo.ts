@@ -48,6 +48,7 @@ export class AliasMongo extends BaseMongoEntity implements Alias {
     public type: AliasType = AliasType.NAME;
 
     @Column()
+    @Index("alias_userUid")
     public userUid: string = "";
 
     @Column()
