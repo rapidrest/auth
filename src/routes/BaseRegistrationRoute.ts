@@ -251,10 +251,6 @@ export abstract class BaseRegistrationRoute<U extends User, A extends Alias> {
             user: newUser,
         });
 
-        const result = new AuthResult({
-            token: await this.tokenUtils!.createToken(this.jwtConfig, user, this.defaultScopes, res),
-            user,
-        });
-        return result;
+        return await this.tokenUtils!.createAuthResult(user, this.defaultScopes, req, res);
     }
 }

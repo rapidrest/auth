@@ -9,6 +9,7 @@ import {
     RepoUtils,
     AuthMiddleware,
     ObjectFactory,
+    HttpRequest,
 } from "@rapidrest/service-core";
 import { Alias, AliasType, AuthResult, Secret, User } from "../models/types.js";
 import { OTPStrategy, OTPStrategyOptions } from "../auth/OTPStrategy.js";
@@ -19,7 +20,7 @@ import { UserUtils } from "./UserUtils.js";
 
 const { Config, Init, Inject, Logger } = ObjectDecorators;
 const { Summary, Description, Returns } = DocDecorators;
-const { Auth, Get, Post, Response } = RouteDecorators;
+const { Auth, Get, Post, Request, Response } = RouteDecorators;
 const AuthUser = RouteDecorators.User;
 
 /**
@@ -131,12 +132,12 @@ export abstract class BaseAuthOTPRoute<U extends User, A extends Alias, S extend
     @Auth(["otp"])
     @Get()
     @Post()
-    public async authenticate(@AuthUser user: JWTUser, @Response res: HttpResponse): Promise<AuthResult | undefined> {
-        const token: string = await this.tokenUtils!.createToken(this.jwtConfig, user, this.defaultScopes, res);
-        return new AuthResult({
-            token,
-            user,
-        });
+    public async authenticate(
+        @AuthUser user: JWTUser,
+        @Request req: HttpRequest,
+        @Response res: HttpResponse,
+    ): Promise<AuthResult | undefined> {
+        return await this.tokenUtils!.createAuthResult(user, this.defaultScopes, req, res);
     }
 
     protected convertAliasType(type: AliasType): OTPContactType {
@@ -198,7 +199,8 @@ export abstract class BaseAuthOTPRoute<U extends User, A extends Alias, S extend
         });
         if (!user && aliases.length > 0) {
             aliases = await this.aliasRepo.find({ userUid: aliases[0].userUid }, { ignoreACL: true });
-            user = aliases.length > 0 ? await this.userRepo.findOne(aliases[0].userUid, { ignoreACL: true }) : undefined;
+            user =
+                aliases.length > 0 ? await this.userRepo.findOne(aliases[0].userUid, { ignoreACL: true }) : undefined;
         }
 
         // Filter aliases to only those that can be notified

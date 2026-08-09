@@ -810,8 +810,8 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@rapidrest/auth@workspace:."
   dependencies:
-    "@rapidrest/core": "npm:^1.11.0"
-    "@rapidrest/service-core": "npm:1.0.0-rc.32"
+    "@rapidrest/core": "npm:^1.12.0"
+    "@rapidrest/service-core": "npm:1.0.0-rc.33"
     "@simplewebauthn/server": "npm:^13.3.2"
     "@swc/core": "npm:^1.15.41"
     "@types/cross-spawn": "npm:^6.0.6"
@@ -837,6 +837,7 @@ __metadata:
     nconf: "npm:^0.13.0"
     openapi3-ts: "npm:^4.6.0"
     otplib: "npm:^13.4.1"
+    parse-duration: "npm:^2.1.8"
     prom-client: "npm:^15.1.3"
     reflect-metadata: "npm:^0.2.2"
     rimraf: "npm:^6.1.3"
@@ -882,9 +883,9 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@rapidrest/core@npm:^1.11.0":
-  version: 1.11.0
-  resolution: "@rapidrest/core@npm:1.11.0"
+"@rapidrest/core@npm:^1.12.0":
+  version: 1.12.0
+  resolution: "@rapidrest/core@npm:1.12.0"
   dependencies:
     form-data: "npm:^4.0.5"
     handlebars: "npm:^4.7.9"
@@ -900,13 +901,13 @@ __metadata:
     reflect-metadata: 0.2.x
     winston: 3.x
     winston-transport: 4.x
-  checksum: 10c0/211d488ace6b21f38701874975b3e5a94459e0d636d0e97170d0493efcb494369817f7cc29dcb67d052ddcf3a94ace82bef2457c66dd6238573348f2d430c228
+  checksum: 10c0/6e5e23ece7b1a8a01d927ca5425cc881657337d586d36d61e0368a8ac81fa3448fdfcdb593419f231264872763cc7989ffb6642e9153387ab8d839fa105afac7
   languageName: node
   linkType: hard
 
-"@rapidrest/service-core@npm:1.0.0-rc.32":
-  version: 1.0.0-rc.32
-  resolution: "@rapidrest/service-core@npm:1.0.0-rc.32"
+"@rapidrest/service-core@npm:1.0.0-rc.33":
+  version: 1.0.0-rc.33
+  resolution: "@rapidrest/service-core@npm:1.0.0-rc.33"
   dependencies:
     axios: "npm:^1.17.0"
     dayjs: "npm:^1.11.21"
@@ -938,7 +939,7 @@ __metadata:
       optional: true
     uWebSockets.js:
       optional: true
-  checksum: 10c0/902a0aa4bd336a5ee7768159a0178e8e1baeaff3e7d1805eba473055fbccdb09afff01fc22a48d58909337552e561ef301c371ca1057d5a618342a8f74011551
+  checksum: 10c0/20f17989df4a43c83b56a7c8c56af431d1c00b4e9bf4484f4315414947b0196be928edf9604a8f9d41949d9a296da933cee633fb1609da43ce2cb99a235692b9
   languageName: node
   linkType: hard
 
@@ -5087,6 +5088,13 @@ __metadata:
   version: 1.0.11
   resolution: "pako@npm:1.0.11"
   checksum: 10c0/86dd99d8b34c3930345b8bbeb5e1cd8a05f608eeb40967b293f72fe469d0e9c88b783a8777e4cc7dc7c91ce54c5e93d88ff4b4f060e6ff18408fd21030d9ffbe
+  languageName: node
+  linkType: hard
+
+"parse-duration@npm:^2.1.8":
+  version: 2.1.8
+  resolution: "parse-duration@npm:2.1.8"
+  checksum: 10c0/9d376d6942fcd40057db0dca733e4429ce09eb98f07169f610c80fc2df9082ee078f75381174e92a22cf5bc82f9828ceaa02b2b1dfc4a3dab2a70b13f0f9a8ee
   languageName: node
   linkType: hard
 

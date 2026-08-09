@@ -9,6 +9,7 @@ import {
     RepoUtils,
     AuthMiddleware,
     ObjectFactory,
+    HttpRequest,
 } from "@rapidrest/service-core";
 import { Alias, AuthResult, Secret, SecretType, User } from "../models/types.js";
 import { BasicStrategy, BasicStrategyOptions } from "../auth/BasicStrategy.js";
@@ -19,7 +20,7 @@ import { UserUtils } from "./UserUtils.js";
 
 const { Config, Init, Inject } = ObjectDecorators;
 const { Summary, Description, Returns } = DocDecorators;
-const { Auth, Get, Response } = RouteDecorators;
+const { Auth, Get, Request, Response } = RouteDecorators;
 const AuthUser = RouteDecorators.User;
 
 /**
@@ -157,12 +158,9 @@ export abstract class BaseAuthBasicRoute<U extends User, S extends Secret, A ext
     @Get()
     public async authenticate(
         @AuthUser user: JWTUser,
+        @Request req: HttpRequest,
         @Response res: HttpResponse,
     ): Promise<AuthResult | undefined> {
-        const token: string = await this.tokenUtils!.createToken(this.jwtConfig, user, this.defaultScopes, res);
-        return new AuthResult({
-            token,
-            user,
-        });
+        return await this.tokenUtils!.createAuthResult(user, this.defaultScopes, req, res);
     }
 }

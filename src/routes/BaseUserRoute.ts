@@ -123,24 +123,16 @@ export abstract class BaseUserRoute<T extends User> extends ModelRoute<T> {
             },
         })) as T;
 
-        // `res` is only forwarded when this is a self-registration (no caller was already authenticated).
-        // `TokenUtils.createToken()` writes the issued token as a `Set-Cookie` header on `res` when cookie
-        // auth is enabled - correct for self-registration, which is meant to establish a new session. But
-        // when an already-authenticated caller (e.g. an admin) provisions a User on someone else's behalf,
-        // `res` is the *caller's own* response; forwarding it would silently clobber the caller's own
-        // session cookie with a session for the account they just created for someone else. The token is
-        // still returned in the response body either way, just never written to `res` in that case.
-        const token: string = await this.tokenUtils.createToken(
-            this.authConfig,
-            result,
-            this.defaultScopes,
-            user ? undefined : res,
-        );
-
-        return {
-            token,
-            user: result,
-        };
+        // `req` and `res` are only forwarded when this is a self-registration (no caller was already authenticated).
+        // `TokenUtils.createAuthResult()` writes session info to req and the issued token as a `Set-Cookie` header on
+        // `res` when cookie auth is enabled. This is correct for self-registration, which is meant to establish a new
+        // session. But when an already-authenticated caller (e.g. an admin) provisions a User on someone else's behalf,
+        // this behavior will clobber the calling user's session.
+        if (user) {
+            return await this.tokenUtils.createAuthResult(result, this.defaultScopes);
+        } else {
+            return await this.tokenUtils.createAuthResult(result, this.defaultScopes, req, res);
+        }
     }
 
     @Summary("Delete {{name}} by ID")

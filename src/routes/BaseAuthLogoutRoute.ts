@@ -1,13 +1,13 @@
 ///////////////////////////////////////////////////////////////////////////////
 // Copyright (C) 2026 Jean-Philippe Steinmetz
 ///////////////////////////////////////////////////////////////////////////////
-import { DocDecorators, HttpResponse, RouteDecorators } from "@rapidrest/service-core";
+import { DocDecorators, HttpRequest, HttpResponse, RouteDecorators } from "@rapidrest/service-core";
 import { ObjectDecorators } from "@rapidrest/core";
 import { TokenUtils } from "../auth/TokenUtils.js";
 
 const { Inject } = ObjectDecorators;
 const { Description, Returns, Summary } = DocDecorators;
-const { Post, Response } = RouteDecorators;
+const { Post, Request, Response } = RouteDecorators;
 
 /**
  * Clears the authentication cookie previously set by a successful sign-in (see `TokenUtils`/`auth:cookie`
@@ -20,7 +20,11 @@ const { Post, Response } = RouteDecorators;
  *
  * This does not invalidate the JWT itself — a bearer token already issued remains valid until its natural
  * expiry even after this call succeeds; deployments needing server-side revocation must add a token
- * blocklist/short-lived-token strategy on top of this.
+ * blocklist/short-lived-token strategy on top of this. It does, however, invalidate the session-bound
+ * refresh token (see `BaseAuthRefreshRoute`): without clearing `req.session.userUid`/`refreshUid` here, a
+ * refresh token leaked before logout (e.g. a narrow XSS window, a synced device) would remain fully usable
+ * to silently mint new sessions until the session's own independent TTL eventually expired, long after the
+ * user believed they'd logged out.
  *
  * @example
  * ```ts
@@ -45,7 +49,15 @@ export abstract class BaseAuthLogoutRoute {
     )
     @Returns([null])
     @Post()
-    public async logout(@Response res: HttpResponse): Promise<void> {
+    public async logout(@Request req: HttpRequest, @Response res: HttpResponse): Promise<void> {
         this.tokenUtils?.clearToken(res);
+
+        // Set rather than deleted: the session-persistence middleware only re-saves the session when it
+        // still has at least one key left (see `sessionMiddleware`), so clearing every key here could
+        // leave the stale `userUid`/`refreshUid` values sitting in the store, forever unpersisted-over.
+        if (req.session) {
+            req.session.userUid = undefined;
+            req.session.refreshUid = undefined;
+        }
     }
 }

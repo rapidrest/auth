@@ -11,7 +11,7 @@ import { generateOTP } from "../../src/auth/shared.js";
 import { TokenUtils } from "../../src/auth/TokenUtils.js";
 
 function makeRes(): any {
-    return { setHeader: vi.fn() };
+    return { setHeader: vi.fn(), appendHeader: vi.fn() };
 }
 
 class FakeAliasClass {
@@ -457,8 +457,9 @@ describe("BaseRegistrationRoute Tests", () => {
             const route2 = new TestRegistrationRoute();
             (route2 as any).aliasRepo = { create: vi.fn().mockResolvedValue(undefined) };
             (route2 as any).userRepo = { create: vi.fn().mockResolvedValue({ uid: "user-1", roles: [], scopes: [] }) };
-            (route2 as any).jwtConfig = { secret: "test-secret" };
-            (route2 as any).tokenUtils = new TokenUtils();
+            const tokenUtils2 = new TokenUtils();
+            (tokenUtils2 as any).jwtConfig = { secret: "test-secret", refresh: { expiresIn: "14 days" } };
+            (route2 as any).tokenUtils = tokenUtils2;
             await expect((route2 as any).verify({ email: "user@example.com", token }, req)).resolves.toBeDefined();
         });
 
@@ -492,8 +493,9 @@ describe("BaseRegistrationRoute Tests", () => {
             });
             (route as any).aliasRepo = { create: aliasCreate };
             (route as any).userRepo = { create: userCreate };
-            (route as any).jwtConfig = { secret: "test-secret" };
-            (route as any).tokenUtils = new TokenUtils();
+            const tokenUtils = new TokenUtils();
+            (tokenUtils as any).jwtConfig = { secret: "test-secret", refresh: { expiresIn: "14 days" } };
+            (route as any).tokenUtils = tokenUtils;
             const res = makeRes();
 
             const result = await (route as any).verify({ email: "user@example.com", token }, req, res);
@@ -518,7 +520,7 @@ describe("BaseRegistrationRoute Tests", () => {
             expect(result.user).toEqual(user);
             expect(typeof result.token).toBe("string");
             // Cookie issuance is disabled by default (`auth:cookie.enabled` defaults to `false`).
-            expect(res.setHeader).not.toHaveBeenCalled();
+            expect(res.appendHeader).not.toHaveBeenCalled();
         });
 
         // Regression: the alias used to be created *after* the user, so a collision on the alias's unique
@@ -535,8 +537,9 @@ describe("BaseRegistrationRoute Tests", () => {
             const userCreate = vi.fn();
             (route as any).aliasRepo = { create: aliasCreate };
             (route as any).userRepo = { create: userCreate };
-            (route as any).jwtConfig = { secret: "test-secret" };
-            (route as any).tokenUtils = new TokenUtils();
+            const tokenUtils = new TokenUtils();
+            (tokenUtils as any).jwtConfig = { secret: "test-secret", refresh: { expiresIn: "14 days" } };
+            (route as any).tokenUtils = tokenUtils;
 
             await expect((route as any).verify({ email: "user@example.com", token }, req)).rejects.toThrow(
                 /IDENTIFIER_EXISTS/,
@@ -554,15 +557,22 @@ describe("BaseRegistrationRoute Tests", () => {
             const user = { uid: "user-1", roles: [], scopes: [] };
             (route as any).aliasRepo = { create: vi.fn().mockResolvedValue(undefined) };
             (route as any).userRepo = { create: vi.fn().mockResolvedValue(user) };
-            (route as any).jwtConfig = { secret: "test-secret" };
             const tokenUtils = new TokenUtils();
-            (tokenUtils as any).cookieConfig = { enabled: true };
+            (tokenUtils as any).jwtConfig = { secret: "test-secret", refresh: { expiresIn: "14 days" } };
+            (tokenUtils as any).cookieConfig = {
+                enabled: true,
+                access: { name: "jwt" },
+                refresh: { name: "refresh" },
+            };
             (route as any).tokenUtils = tokenUtils;
             const res = makeRes();
 
             const result = await (route as any).verify({ email: "user@example.com", token }, req, res);
 
-            expect(res.setHeader).toHaveBeenCalledWith("Set-Cookie", expect.stringContaining(`jwt=${result.token}`));
+            expect(res.appendHeader).toHaveBeenCalledWith(
+                "Set-Cookie",
+                expect.stringContaining(`jwt=${result.token}`),
+            );
         });
 
         it("Creates a phone alias when a phone number was verified instead of an e-mail.", async () => {
@@ -575,8 +585,9 @@ describe("BaseRegistrationRoute Tests", () => {
             const userCreate = vi.fn().mockResolvedValue(user);
             (route as any).aliasRepo = { create: aliasCreate };
             (route as any).userRepo = { create: userCreate };
-            (route as any).jwtConfig = { secret: "test-secret" };
-            (route as any).tokenUtils = new TokenUtils();
+            const tokenUtils = new TokenUtils();
+            (tokenUtils as any).jwtConfig = { secret: "test-secret", refresh: { expiresIn: "14 days" } };
+            (route as any).tokenUtils = tokenUtils;
 
             const result = await (route as any).verify({ phone: "+15551234567", token }, req);
 
@@ -594,8 +605,9 @@ describe("BaseRegistrationRoute Tests", () => {
             const route = new TestRegistrationRoute();
             (route as any).aliasRepo = { create: vi.fn().mockResolvedValue(undefined) };
             (route as any).userRepo = { create: vi.fn().mockResolvedValue({ uid: "user-1", roles: [], scopes: [] }) };
-            (route as any).jwtConfig = { secret: "test-secret" };
-            (route as any).tokenUtils = new TokenUtils();
+            const tokenUtils = new TokenUtils();
+            (tokenUtils as any).jwtConfig = { secret: "test-secret", refresh: { expiresIn: "14 days" } };
+            (route as any).tokenUtils = tokenUtils;
 
             await (route as any).verify({ email: "user@example.com", token }, req);
 

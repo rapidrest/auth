@@ -7,6 +7,7 @@ export * from "./BaseAuthMFARouteSQL.js";
 export * from "./BaseAuthOIDCRouteSQL.js";
 export * from "./BaseAuthOTPRouteSQL.js";
 export * from "./BaseAuthPasskeyRouteSQL.js";
+export * from "./BaseAuthRefreshRouteSQL.js";
 export * from "./BaseAuthTOTPRouteSQL.js";
 export * from "./BaseProfileRouteSQL.js";
 export * from "./BaseRegistrationRouteSQL.js";

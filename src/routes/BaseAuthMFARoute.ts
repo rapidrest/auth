@@ -9,6 +9,7 @@ import {
     RepoUtils,
     AuthMiddleware,
     ObjectFactory,
+    HttpRequest,
 } from "@rapidrest/service-core";
 import { Alias, AliasType, AuthResult, Secret, SecretType, User } from "../models/types.js";
 import { MFAMethod, MFAMethodType, MFAStrategy, MFAStrategyOptions } from "../auth/MFAStrategy.js";
@@ -20,7 +21,7 @@ import { UserUtils } from "./UserUtils.js";
 
 const { Config, Init, Inject } = ObjectDecorators;
 const { Summary, Description, Returns } = DocDecorators;
-const { Auth, Get, Post, Response } = RouteDecorators;
+const { Auth, Get, Post, Request, Response } = RouteDecorators;
 const AuthUser = RouteDecorators.User;
 
 /**
@@ -148,13 +149,10 @@ export abstract class BaseAuthMFARoute<U extends User, S extends Secret, A exten
     @Post()
     public async authenticate(
         @AuthUser user: JWTUser,
+        @Request req: HttpRequest,
         @Response res: HttpResponse,
     ): Promise<AuthResult | undefined> {
-        const token: string = await this.tokenUtils!.createToken(this.jwtConfig, user, this.defaultScopes, res);
-        return new AuthResult({
-            token,
-            user,
-        });
+        return await this.tokenUtils!.createAuthResult(user, this.defaultScopes, req, res);
     }
 
     protected convertAliasToMethod(alias: Alias, obfuscate?: boolean): MFAMethod | undefined {

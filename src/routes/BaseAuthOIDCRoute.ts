@@ -10,6 +10,7 @@ import {
     RepoUtils,
     AuthMiddleware,
     ObjectFactory,
+    HttpRequest,
 } from "@rapidrest/service-core";
 import { Alias, AliasType, AuthResult, ContactType, Profile, User } from "../models/types.js";
 import { OIDCProfile, OIDCProvider, OIDCStrategy, OIDCStrategyOptions } from "../auth/OIDCStrategy.js";
@@ -19,7 +20,7 @@ import { UserUtils } from "./UserUtils.js";
 
 const { Config, Init, Inject } = ObjectDecorators;
 const { Summary, Description, Returns } = DocDecorators;
-const { Auth, Get, Post, Response } = RouteDecorators;
+const { Auth, Get, Post, Request, Response } = RouteDecorators;
 const AuthUser = RouteDecorators.User;
 
 /**
@@ -277,11 +278,11 @@ export abstract class BaseAuthOIDCRoute<U extends User, A extends Alias, P exten
     @Auth(["oauth"])
     @Get()
     @Post()
-    public async login(@AuthUser user: JWTUser, @Response res: HttpResponse): Promise<AuthResult | undefined> {
-        const token: string = await this.tokenUtils!.createToken(this.jwtConfig, user, this.defaultScopes, res);
-        return new AuthResult({
-            token,
-            user,
-        });
+    public async login(
+        @AuthUser user: JWTUser,
+        @Request req: HttpRequest,
+        @Response res: HttpResponse,
+    ): Promise<AuthResult | undefined> {
+        return await this.tokenUtils!.createAuthResult(user, this.defaultScopes, req, res);
     }
 }

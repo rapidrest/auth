@@ -62,11 +62,12 @@
         "rapidreact": "./dist/cli/cli.js"
     },
     "dependencies": {
-        "cross-spawn": "^7.0.5"
+        "cross-spawn": "^7.0.5",
+        "parse-duration": "^2.1.8"
     },
     "devDependencies": {
         "@rapidrest/core": "^1.12.0",
-        "@rapidrest/service-core": "1.0.0-rc.32",
+        "@rapidrest/service-core": "1.0.0-rc.33",
         "@simplewebauthn/server": "^13.3.2",
         "@swc/core": "^1.15.41",
         "@types/cross-spawn": "^6.0.6",

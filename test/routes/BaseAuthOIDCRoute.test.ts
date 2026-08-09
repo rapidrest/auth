@@ -486,31 +486,46 @@ describe("BaseAuthOIDCRoute Tests", () => {
     });
 
     describe("login", () => {
-        it("Returns an AuthResult containing a signed JWT for the authenticated user.", async () => {
+        it("Returns an AuthResult containing a signed access token and refresh token for the authenticated user.", async () => {
             const route = new TestAuthOIDCRoute();
-            (route as any).jwtConfig = { secret: "test-secret" };
-            (route as any).tokenUtils = new TokenUtils();
-            const res = { setHeader: vi.fn() } as any;
+            const tokenUtils = new TokenUtils();
+            (tokenUtils as any).jwtConfig = { secret: "test-secret", refresh: { expiresIn: "14 days" } };
+            (route as any).tokenUtils = tokenUtils;
+            const req = { session: {} } as any;
+            const res = { setHeader: vi.fn(), appendHeader: vi.fn() } as any;
 
-            const result = await route.login({ uid: "user-1" } as any, res);
+            const result = await route.login({ uid: "user-1" } as any, req, res);
 
             expect(result?.user).toEqual({ uid: "user-1" });
             expect(typeof result?.token).toBe("string");
+            expect(typeof result?.refresh).toBe("string");
             // Cookie issuance is disabled by default (`auth:cookie.enabled` defaults to `false`).
-            expect(res.setHeader).not.toHaveBeenCalled();
+            expect(res.appendHeader).not.toHaveBeenCalled();
         });
 
-        it("Sets a `Set-Cookie` header when cookie issuance is enabled.", async () => {
+        it("Sets `Set-Cookie` headers for both the access and refresh tokens when cookie issuance is enabled.", async () => {
             const route = new TestAuthOIDCRoute();
-            (route as any).jwtConfig = { secret: "test-secret" };
             const tokenUtils = new TokenUtils();
-            (tokenUtils as any).cookieConfig = { enabled: true };
+            (tokenUtils as any).jwtConfig = { secret: "test-secret", refresh: { expiresIn: "14 days" } };
+            (tokenUtils as any).cookieConfig = {
+                enabled: true,
+                access: { name: "jwt" },
+                refresh: { name: "refresh" },
+            };
             (route as any).tokenUtils = tokenUtils;
-            const res = { setHeader: vi.fn() } as any;
+            const req = { session: {} } as any;
+            const res = { setHeader: vi.fn(), appendHeader: vi.fn() } as any;
 
-            const result = await route.login({ uid: "user-1" } as any, res);
+            const result = await route.login({ uid: "user-1" } as any, req, res);
 
-            expect(res.setHeader).toHaveBeenCalledWith("Set-Cookie", expect.stringContaining(`jwt=${result?.token}`));
+            expect(res.appendHeader).toHaveBeenCalledWith(
+                "Set-Cookie",
+                expect.stringContaining(`jwt=${result?.token}`),
+            );
+            expect(res.appendHeader).toHaveBeenCalledWith(
+                "Set-Cookie",
+                expect.stringContaining(`refresh=${result?.refresh}`),
+            );
         });
     });
 });

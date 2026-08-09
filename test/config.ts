@@ -52,11 +52,20 @@ conf.defaults({
             audience: "mydomain.com",
             issuer: "api.mydomain.com",
         },
-        // Controls the `Set-Cookie` header written alongside the JWT returned by the various
-        // authentication routes. Enabled here so integration tests can verify the cookie is set.
+        // Settings for the long-lived refresh token issued alongside every access token.
+        refresh: {
+            expiresIn: "14 days",
+        },
+        // Controls the `Set-Cookie` header(s) written alongside the JWT/refresh token returned by the
+        // various authentication routes. Enabled here so integration tests can verify the cookies are set.
         cookie: {
             enabled: true,
-            name: "jwt",
+            access: {
+                name: "jwt",
+            },
+            refresh: {
+                name: "refresh",
+            },
         },
         oidc: {
             name: "test",

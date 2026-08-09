@@ -1,8 +1,11 @@
 ///////////////////////////////////////////////////////////////////////////////
 // Copyright (C) 2026 Jean-Philippe Steinmetz
 ///////////////////////////////////////////////////////////////////////////////
-import { JWTUser, JWTUtils, JWTUtilsConfig, ObjectDecorators } from "@rapidrest/core";
-import type { HttpResponse } from "@rapidrest/service-core";
+import { JWTUser, JWTUtils, ObjectDecorators } from "@rapidrest/core";
+import { HttpRequest, NetUtils, type HttpResponse } from "@rapidrest/service-core";
+import parseDuration from "parse-duration";
+import * as uuid from "uuid";
+import { AuthResult } from "../models/types.js";
 
 const { Config } = ObjectDecorators;
 
@@ -10,13 +13,11 @@ const { Config } = ObjectDecorators;
  * Configuration options controlling the `Set-Cookie` header written alongside a newly issued JWT.
  */
 export interface TokenCookieConfig {
-    /** Set to `true` to also return the issued JWT as a `Set-Cookie` header. Default is `false`. */
-    enabled?: boolean;
     /**
      * The name of the cookie. Should match the `cookieName` configured for `JWTStrategy` if the
-     * cookie is meant to be used for authenticating subsequent requests. Default is `jwt`.
+     * cookie is meant to be used for authenticating subsequent requests.
      */
-    name?: string;
+    name: string;
     /** The `Path` attribute of the cookie. Default is `/`. */
     path?: string;
     /** The `Max-Age` attribute of the cookie, in seconds. Omitted (session cookie) if not set. */
@@ -29,6 +30,15 @@ export interface TokenCookieConfig {
     httpOnly?: boolean;
 }
 
+export interface CookieConfig {
+    /** Set to `true` to also return the issued JWT as a `Set-Cookie` header. Default is `false`. */
+    enabled?: boolean;
+    /** Cookie configuration for the access token. */
+    access: TokenCookieConfig;
+    /** Cookie configuration for the refresh token. */
+    refresh: TokenCookieConfig;
+}
+
 /**
  * Central utility for issuing the JWT access tokens returned by the various authentication routes
  * (Basic, MFA, OTP, TOTP, FIDO2, Passkey, OIDC, Registration). In addition to signing the token via
@@ -38,45 +48,39 @@ export interface TokenCookieConfig {
  * @author Jean-Philippe Steinmetz
  */
 export class TokenUtils {
-    @Config("auth:cookie", { enabled: false })
-    protected cookieConfig: TokenCookieConfig = { enabled: false };
+    @Config("auth:cookie", { enabled: false, access: { name: "jwt" }, refresh: { name: "refresh" } })
+    protected cookieConfig: CookieConfig = { enabled: false, access: { name: "jwt" }, refresh: { name: "refresh" } };
+
+    @Config("auth")
+    private jwtConfig?: any;
 
     /**
-     * Signs a new JWT for the given user and, when cookie issuance is enabled via the `auth:cookie`
-     * configuration, sets it as a `Set-Cookie` header on the provided response.
-     *
-     * @param jwtConfig The JWT configuration to use for signing (the `auth` configuration block).
-     * @param user The user to encode into the token's payload.
-     * @param scopes The scopes to grant the issued token.
-     * @param res The response to write the `Set-Cookie` header to. When omitted, no cookie is set
-     * regardless of configuration.
-     * @returns The signed JWT.
+     * Builds the `Set-Cookie` header value for the given token using the configured cookie options. Pass
+     * an empty string to build a header that immediately expires/clears the cookie instead.
      */
-    public async createToken(
-        jwtConfig: JWTUtilsConfig,
-        user: JWTUser,
-        scopes: string[],
-        res?: HttpResponse,
-    ): Promise<string> {
-        const token: string = await JWTUtils.createToken(jwtConfig, {
-            ...user,
-            scopes,
-        });
-
-        if (res && this.cookieConfig?.enabled) {
-            // NOTE: the underlying HTTP adapters currently back `res.setHeader()` with a single-value
-            // map, so only one `Set-Cookie` header can be represented per response. This is safe for
-            // every route that issues a token today since none of them also establish a new session
-            // (see `sessionMiddleware`) in the same request, but a route that did both would have one
-            // `Set-Cookie` silently clobber the other.
-            res.setHeader("Set-Cookie", this.buildCookie(token));
+    protected buildCookie(token: string, config: TokenCookieConfig): string {
+        const clearing: boolean = token === "";
+        const parts: string[] = [
+            `${config.name ?? "jwt"}=${token}`,
+            `Path=${config.path ?? "/"}`,
+            `SameSite=${config.sameSite ?? "Lax"}`,
+        ];
+        if (clearing) {
+            parts.push("Max-Age=0");
+        } else if (config.maxAge !== undefined) {
+            parts.push(`Max-Age=${config.maxAge}`);
         }
-
-        return token;
+        if (config.httpOnly !== false) {
+            parts.push("HttpOnly");
+        }
+        if (config.secure) {
+            parts.push("Secure");
+        }
+        return parts.join("; ");
     }
 
     /**
-     * Clears the cookie previously set by `createToken()`, when cookie issuance is enabled via the
+     * Clears the cookie previously set by `createAuthResult()`, when cookie issuance is enabled via the
      * `auth:cookie` configuration. An `HttpOnly` cookie can only ever be cleared by the server writing a
      * new `Set-Cookie` header — client-side JavaScript has no ability to read or overwrite it — so a
      * logout flow that relies on cookie-based auth must call this (see `BaseAuthLogoutRoute`) rather than
@@ -86,33 +90,97 @@ export class TokenUtils {
      */
     public clearToken(res?: HttpResponse): void {
         if (res && this.cookieConfig?.enabled) {
-            res.setHeader("Set-Cookie", this.buildCookie(""));
+            // `appendHeader()`, not `setHeader()`: the latter replaces any value already set for the same
+            // header key, so a second `setHeader("Set-Cookie", ...)` call would silently clobber the first
+            // and only the refresh cookie would actually be cleared, leaving the access-token cookie alive
+            // after "logout".
+            res.appendHeader("Set-Cookie", this.buildCookie("", this.cookieConfig.access));
+            res.appendHeader("Set-Cookie", this.buildCookie("", this.cookieConfig.refresh));
         }
     }
 
     /**
-     * Builds the `Set-Cookie` header value for the given token using the configured cookie options. Pass
-     * an empty string to build a header that immediately expires/clears the cookie instead.
+     * Signs a new refresh token for the given user. Optionally, stores the refresh `uid` in the session
+     * in order to verify future auth attempts (when sessions are enabled).
      */
-    protected buildCookie(token: string): string {
-        const cfg: TokenCookieConfig = this.cookieConfig ?? {};
-        const clearing: boolean = token === "";
-        const parts: string[] = [
-            `${cfg.name ?? "jwt"}=${token}`,
-            `Path=${cfg.path ?? "/"}`,
-            `SameSite=${cfg.sameSite ?? "Lax"}`,
-        ];
-        if (clearing) {
-            parts.push("Max-Age=0");
-        } else if (cfg.maxAge !== undefined) {
-            parts.push(`Max-Age=${cfg.maxAge}`);
+    public async createRefreshToken(user: JWTUser, req?: HttpRequest): Promise<string> {
+        // Parsed and defaulted rather than passed straight through: an unset or malformed
+        // `auth:refresh:expiresIn` would otherwise reach `jwt.sign()` as `expiresIn: undefined`, which
+        // signs a token with no `exp` claim at all - i.e. a refresh token that never expires.
+        const expires: number = parseDuration(this.jwtConfig.refresh?.expiresIn, "sec") || 1209600; // 14 days
+        const uid: string = uuid.v4();
+        const config: any = {
+            secret: this.jwtConfig.secret,
+            options: {
+                ...this.jwtConfig.options,
+                expiresIn: expires,
+            },
+        };
+
+        const result: string = await JWTUtils.createToken(config, { uid: user.uid } as any, {
+            uid,
+            userUid: user.uid,
+        });
+
+        // Store the refresh uid in the session
+        if (req?.session) {
+            req.session.refreshUid = uid;
         }
-        if (cfg.httpOnly !== false) {
-            parts.push("HttpOnly");
+
+        return result;
+    }
+
+    /**
+     * Signs a new JWT access token for the given user.
+     *
+     * @param user The user to encode into the token's payload.
+     * @param scopes The scopes to grant the issued token.
+     * @param res The response to write the `Set-Cookie` header to. When omitted, no cookie is set
+     * regardless of configuration.
+     * @returns The signed JWT.
+     */
+    public async createAccessToken(user: JWTUser, scopes: string[]): Promise<string> {
+        const token: string = await JWTUtils.createToken(this.jwtConfig, {
+            ...user,
+            scopes,
+        });
+        return token;
+    }
+
+    /**
+     * Signs new JWT access and refresh tokens for the given user, and optionally issues a cookie.
+     * @param user The user to create an auth token for.
+     * @param scopes The scopes to grant the user.
+     * @param req The original request.
+     * @param res The response to set the auth cookie for (if desired).
+     */
+    public async createAuthResult(
+        user: JWTUser,
+        scopes: string[],
+        req?: HttpRequest,
+        res?: HttpResponse,
+    ): Promise<AuthResult> {
+        const refresh: string = await this.createRefreshToken(user, req);
+        const token: string = await this.createAccessToken(user, scopes);
+
+        if (res && this.cookieConfig?.enabled) {
+            res.appendHeader("Set-Cookie", this.buildCookie(token, this.cookieConfig.access));
+            res.appendHeader("Set-Cookie", this.buildCookie(refresh, this.cookieConfig.refresh));
         }
-        if (cfg.secure) {
-            parts.push("Secure");
+
+        // If sessions are available, store some useful information about the user
+        if (req?.session) {
+            const now = Date.now();
+            req.session.ip = NetUtils.getIPAddress(req);
+            req.session.lastAccess = now;
+            req.session.lastLogin = now;
+            req.session.userUid = user.uid;
         }
-        return parts.join("; ");
+
+        return {
+            refresh,
+            token,
+            user,
+        };
     }
 }

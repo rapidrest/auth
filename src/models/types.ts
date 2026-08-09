@@ -5,10 +5,12 @@ import { BaseEntity } from "@rapidrest/service-core";
  * @author Jean-Philippe Steinmetz
  */
 export class AuthResult {
+    public readonly refresh: string;
     public readonly token: string;
-    public readonly user: User;
+    public readonly user: JWTUser;
 
     constructor(other: any) {
+        this.refresh = other.refresh;
         this.token = other.token;
         this.user = other.user;
     }

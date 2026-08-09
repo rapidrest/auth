@@ -12,12 +12,17 @@ import { TokenUtils } from "../../src/auth/TokenUtils.js";
 class TestUserRoute extends BaseUserRoute<any> {}
 
 function makeRes(): any {
-    return { setHeader: vi.fn() };
+    return { setHeader: vi.fn(), appendHeader: vi.fn() };
 }
 
 function makeTokenUtils(cookieEnabled: boolean): TokenUtils {
     const tokenUtils = new TokenUtils();
-    (tokenUtils as any).cookieConfig = { enabled: cookieEnabled };
+    (tokenUtils as any).jwtConfig = { secret: "test-secret", refresh: { expiresIn: "14 days" } };
+    (tokenUtils as any).cookieConfig = {
+        enabled: cookieEnabled,
+        access: { name: "jwt" },
+        refresh: { name: "refresh" },
+    };
     return tokenUtils;
 }
 
@@ -117,7 +122,7 @@ describe("BaseUserRoute Tests", () => {
             expect(result.token.length).toBeGreaterThan(0);
         });
 
-        it("Mints the token using the configured authConfig and defaultScopes.", async () => {
+        it("Mints the auth result using the configured defaultScopes.", async () => {
             const route = new TestUserRoute();
             vi.spyOn(ModelRoute.prototype as any, "doCreate").mockResolvedValue({ uid: "new-uid", roles: [] });
             (route as any).repoUtils = {
@@ -125,23 +130,19 @@ describe("BaseUserRoute Tests", () => {
                 validate: vi.fn().mockResolvedValue(undefined),
             };
             const tokenUtils = makeTokenUtils(false);
-            const createTokenSpy = vi.spyOn(tokenUtils, "createToken");
+            const createAuthResultSpy = vi.spyOn(tokenUtils, "createAuthResult");
             (route as any).tokenUtils = tokenUtils;
             (route as any).authConfig = { secret: "test-secret" };
             (route as any).defaultScopes = ["profile"];
             const res = makeRes();
+            const req: any = {};
 
-            await route.create({ roles: [] } as any, {} as any, res);
+            await route.create({ roles: [] } as any, req, res);
 
-            expect(createTokenSpy).toHaveBeenCalledWith(
-                { secret: "test-secret" },
-                { uid: "new-uid", roles: [] },
-                ["profile"],
-                res,
-            );
+            expect(createAuthResultSpy).toHaveBeenCalledWith({ uid: "new-uid", roles: [] }, ["profile"], req, res);
         });
 
-        it("Sets a `Set-Cookie` header for an unauthenticated (self-registration) call when cookie issuance is enabled.", async () => {
+        it("Sets `Set-Cookie` headers for an unauthenticated (self-registration) call when cookie issuance is enabled.", async () => {
             const route = new TestUserRoute();
             vi.spyOn(ModelRoute.prototype as any, "doCreate").mockResolvedValue({ uid: "new-uid", roles: [] });
             (route as any).repoUtils = {
@@ -154,14 +155,21 @@ describe("BaseUserRoute Tests", () => {
 
             const result = await route.create({ roles: [] } as any, {} as any, res, undefined);
 
-            expect(res.setHeader).toHaveBeenCalledWith("Set-Cookie", expect.stringContaining(`jwt=${result.token}`));
+            expect(res.appendHeader).toHaveBeenCalledWith(
+                "Set-Cookie",
+                expect.stringContaining(`jwt=${result.token}`),
+            );
+            expect(res.appendHeader).toHaveBeenCalledWith(
+                "Set-Cookie",
+                expect.stringContaining(`refresh=${result.refresh}`),
+            );
         });
 
-        // Regression: TokenUtils.createToken() writes the issued token as a Set-Cookie header on whatever
-        // `res` it's given. Before this fix, `res` was always forwarded regardless of caller - so an
-        // already-authenticated caller (e.g. an admin provisioning a User for someone else) would have the
-        // *new* account's session silently written to their *own* response, clobbering their own session
-        // cookie with a session for an account that isn't theirs.
+        // Regression: TokenUtils.createAuthResult() writes the issued tokens as Set-Cookie headers on
+        // whatever `res` it's given. Before this fix, `res` was always forwarded regardless of caller - so
+        // an already-authenticated caller (e.g. an admin provisioning a User for someone else) would have
+        // the *new* account's session silently written to their *own* response, clobbering their own
+        // session cookie with a session for an account that isn't theirs.
         it("Does not set a `Set-Cookie` header when the caller is already authenticated, even though a token is still returned in the body.", async () => {
             const route = new TestUserRoute();
             vi.spyOn(ModelRoute.prototype as any, "doCreate").mockResolvedValue({ uid: "new-uid", roles: [] });
@@ -176,7 +184,7 @@ describe("BaseUserRoute Tests", () => {
 
             const result = await route.create({ roles: [] } as any, {} as any, res, admin);
 
-            expect(res.setHeader).not.toHaveBeenCalled();
+            expect(res.appendHeader).not.toHaveBeenCalled();
             expect(typeof result.token).toBe("string");
             expect(result.token.length).toBeGreaterThan(0);
         });
