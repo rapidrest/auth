@@ -117,7 +117,7 @@ describe("BaseUserRoute Tests", () => {
 
             const result = await route.create({ roles: [] } as any, {} as any, makeRes());
 
-            expect(result.user).toEqual({ uid: "new-uid", roles: [] });
+            expect(result.user).toEqual({ uid: "new-uid", roles: [], elevated: expect.any(Number) });
             expect(typeof result.token).toBe("string");
             expect(result.token.length).toBeGreaterThan(0);
         });
@@ -139,7 +139,13 @@ describe("BaseUserRoute Tests", () => {
 
             await route.create({ roles: [] } as any, req, res);
 
-            expect(createAuthResultSpy).toHaveBeenCalledWith({ uid: "new-uid", roles: [] }, ["profile"], req, res);
+            expect(createAuthResultSpy).toHaveBeenCalledWith(
+                { uid: "new-uid", roles: [] },
+                ["profile"],
+                req,
+                res,
+                true,
+            );
         });
 
         it("Sets `Set-Cookie` headers for an unauthenticated (self-registration) call when cookie issuance is enabled.", async () => {
@@ -170,7 +176,11 @@ describe("BaseUserRoute Tests", () => {
         // an already-authenticated caller (e.g. an admin provisioning a User for someone else) would have
         // the *new* account's session silently written to their *own* response, clobbering their own
         // session cookie with a session for an account that isn't theirs.
-        it("Does not set a `Set-Cookie` header when the caller is already authenticated, even though a token is still returned in the body.", async () => {
+        //
+        // Since then, admin-provisioned creation stopped minting a token at all (see the "does not need
+        // to generate an access token" branch in BaseUserRoute.create()), so there's no longer a token to
+        // leak via Set-Cookie in the first place — this test now confirms both properties together.
+        it("Does not set a `Set-Cookie` header when the caller is already authenticated, and returns no token since the caller isn't logging in as the new account.", async () => {
             const route = new TestUserRoute();
             vi.spyOn(ModelRoute.prototype as any, "doCreate").mockResolvedValue({ uid: "new-uid", roles: [] });
             (route as any).repoUtils = {
@@ -185,8 +195,9 @@ describe("BaseUserRoute Tests", () => {
             const result = await route.create({ roles: [] } as any, {} as any, res, admin);
 
             expect(res.appendHeader).not.toHaveBeenCalled();
-            expect(typeof result.token).toBe("string");
-            expect(result.token.length).toBeGreaterThan(0);
+            expect(result.token).toBe("");
+            expect(result.refresh).toBe("");
+            expect(result.user).toEqual({ uid: "new-uid", roles: [] });
         });
     });
 

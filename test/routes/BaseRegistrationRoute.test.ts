@@ -517,7 +517,11 @@ describe("BaseRegistrationRoute Tests", () => {
                 { ignoreACL: true, user: passedUser },
             );
             expect(callOrder).toEqual(["alias", "user"]);
-            expect(result.user).toEqual(user);
+            // A newly self-registered account is always issued an elevated token (see createAuthResult's
+            // `elevated` argument below) so it can immediately set up its own credentials (e.g. MFA) without
+            // hitting a `@RequiresElevation`-gated wall it has no way to satisfy yet - hence the extra
+            // `elevated` timestamp beyond the plain `user` object.
+            expect(result.user).toEqual({ ...user, elevated: expect.any(Number) });
             expect(typeof result.token).toBe("string");
             // Cookie issuance is disabled by default (`auth:cookie.enabled` defaults to `false`).
             expect(res.appendHeader).not.toHaveBeenCalled();
@@ -595,7 +599,8 @@ describe("BaseRegistrationRoute Tests", () => {
                 { alias: "+15551234567", type: AliasType.PHONE, userUid: "new-user-uid", verified: true },
                 { ignoreACL: true, user: expect.any(FakeUserClass) },
             );
-            expect(result.user).toEqual(user);
+            // Self-registration always issues an elevated token - see the same note above.
+            expect(result.user).toEqual({ ...user, elevated: expect.any(Number) });
         });
 
         it("Is single-use: a token cannot be verified twice.", async () => {

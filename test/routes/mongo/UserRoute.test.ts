@@ -34,11 +34,16 @@ describe("Route:UserMongo Tests", () => {
     const admin: any = {
         uid: uuid.v4(),
         roles: ["admin"],
+        // BaseUserRoute's update/delete/truncate require an elevated token (@RequiresElevation). This
+        // file exercises CRUD/ownership/roles behavior, not elevation enforcement itself, so tokens are
+        // minted pre-elevated throughout.
+        elevated: Date.now(),
     };
     const adminToken = JWTUtils.createTokenSync(config.get("auth"), admin);
     const user: any = {
         uid: uuid.v4(),
         roles: [],
+        elevated: Date.now(),
     };
     const userToken = JWTUtils.createTokenSync(config.get("auth"), user);
 
@@ -175,8 +180,10 @@ describe("Route:UserMongo Tests", () => {
         expect(result.status).toBeGreaterThanOrEqual(200);
         expect(result.status).toBeLessThan(300);
         expect(result.body).toBeDefined();
-        expect(typeof result.body.token).toBe("string");
-        expect(result.body.token.length).toBeGreaterThan(0);
+        // An admin provisioning a User on someone else's behalf doesn't log in as that account, so no
+        // token is minted for them (see BaseUserRoute.create()'s trusted-caller branch).
+        expect(result.body.token).toBe("");
+        expect(result.body.refresh).toBe("");
         expectMatchingFields(result.body.user, obj);
 
         // Validate the contents were stored correctly
@@ -235,6 +242,7 @@ describe("Route:UserMongo Tests", () => {
                 uid: newUserUid,
                 roles: [],
                 scopes: [],
+                elevated: Date.now(),
             });
 
             const readResult = await request(server.getApplication())
@@ -402,7 +410,7 @@ describe("Route:UserMongo Tests", () => {
 
     it("Allows a caller to change their own requireMFA when the server has no MFA mandate configured.", async () => {
         const obj: UserMongo = await createUserMongo({ requireMFA: false, roles: [] });
-        const selfToken = JWTUtils.createTokenSync(config.get("auth"), { uid: obj.uid, roles: [] });
+        const selfToken = JWTUtils.createTokenSync(config.get("auth"), { uid: obj.uid, roles: [], elevated: Date.now() });
         const url = baseUrl + "/" + obj.uid;
 
         const result = await request(server.getApplication())
@@ -486,7 +494,7 @@ describe("Route:UserMongo Tests", () => {
             "change is now silently discarded rather than rejecting the whole request.",
         async () => {
             const obj: UserMongo = await createUserMongo({ roles: [] });
-            const selfToken = JWTUtils.createTokenSync(config.get("auth"), { uid: obj.uid, roles: [] });
+            const selfToken = JWTUtils.createTokenSync(config.get("auth"), { uid: obj.uid, roles: [], elevated: Date.now() });
             const url = baseUrl + "/" + obj.uid;
 
             const result = await request(server.getApplication())
@@ -506,7 +514,7 @@ describe("Route:UserMongo Tests", () => {
 
     it("Allows a caller to update their own record when roles are unchanged (no false-positive block).", async () => {
         const obj: UserMongo = await createUserMongo({ roles: [] });
-        const selfToken = JWTUtils.createTokenSync(config.get("auth"), { uid: obj.uid, roles: [] });
+        const selfToken = JWTUtils.createTokenSync(config.get("auth"), { uid: obj.uid, roles: [], elevated: Date.now() });
         const url = baseUrl + "/" + obj.uid;
 
         const result = await request(server.getApplication())

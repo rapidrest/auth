@@ -496,7 +496,9 @@ describe("BaseAuthOIDCRoute Tests", () => {
 
             const result = await route.login({ uid: "user-1" } as any, req, res);
 
-            expect(result?.user).toEqual({ uid: "user-1" });
+            // `roles` is added by `resolveTokenUser()` even though the input didn't have one - a
+            // non-elevated token always has its (possibly absent) trusted roles normalized away.
+            expect(result?.user).toEqual({ uid: "user-1", roles: [] });
             expect(typeof result?.token).toBe("string");
             expect(typeof result?.refresh).toBe("string");
             // Cookie issuance is disabled by default (`auth:cookie.enabled` defaults to `false`).

@@ -2,6 +2,7 @@ export * from "./BaseAccountRouteMongo.js";
 export * from "./BaseAliasRouteMongo.js";
 export * from "./BaseAuthBasicRouteMongo.js";
 export * from "./BaseAuthDiscoverRouteMongo.js";
+export * from "./BaseAuthElevationRouteMongo.js";
 export * from "./BaseAuthFIDO2RouteMongo.js";
 export * from "./BaseAuthMFARouteMongo.js";
 export * from "./BaseAuthOIDCRouteMongo.js";

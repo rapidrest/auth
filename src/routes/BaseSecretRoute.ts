@@ -27,7 +27,8 @@ import { PasskeyConfig, PasswordConfig, StoredPasskeyCredential, TOTPConfig, TOT
 
 const { Config, Init } = ObjectDecorators;
 const { Description, Returns, Summary } = DocDecorators;
-const { Auth, Delete, Get, Head, Param, Post, Put, Query, Request, Response, User, Validate } = RouteDecorators;
+const { Auth, Delete, Get, Head, Param, Post, Put, Query, Request, RequiresElevation, Response, User, Validate } =
+    RouteDecorators;
 
 const REGEX_LOWERCASE = new RegExp("^.*[a-z]+.*$");
 const REGEX_NUMERAL = new RegExp("^.*[0-9]+.*$");
@@ -363,6 +364,7 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
     )
     @Returns([Object])
     @Get("/passkey/register")
+    @RequiresElevation()
     public async passkeyRegistrationOptions(@Request req: HttpRequest, @User user: JWTUser): Promise<any> {
         if (!user) {
             throw new ApiError(ApiErrors.AUTH_REQUIRED, 401, "Authentication is required to register a passkey.");
@@ -388,6 +390,7 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
     )
     @Returns([Object])
     @Get("/fido2/register")
+    @RequiresElevation()
     public async fido2RegistrationOptions(@Request req: HttpRequest, @User user: JWTUser): Promise<any> {
         if (!user) {
             throw new ApiError(
@@ -406,6 +409,7 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
     @Returns([Object])
     @Post()
     @Validate("validateCreate")
+    @RequiresElevation()
     public async create(obj: T | T[], @Request req: HttpRequest, @User user: JWTUser): Promise<T | Array<T>> {
         const result: T | Array<T> = await super.doCreate(obj, { req, user });
 
@@ -444,6 +448,7 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
     @Description("Deletes the secret from the service.")
     @Returns([null])
     @Delete("/:id")
+    @RequiresElevation(60)
     public async delete(
         @Param("id") id: string,
         @Query("version") version: string | undefined,
@@ -523,6 +528,7 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
     @Description("Deletes all Secrets from the datastore that the user has access to.")
     @Returns([null])
     @Delete()
+    @RequiresElevation(60)
     public async truncate(@Param() params: any, @Query() query: any, @User user: JWTUser): Promise<void> {
         return super.doTruncate({ params, query, user });
     }
@@ -588,6 +594,7 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
     @Description("Updates a single Secret.")
     @Returns([Object])
     @Put("/:id")
+    @RequiresElevation(60)
     public async update(
         @Param("id") id: string,
         obj: UpdateObject<T>,

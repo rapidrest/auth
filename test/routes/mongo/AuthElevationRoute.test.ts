@@ -1,0 +1,375 @@
+///////////////////////////////////////////////////////////////////////////////
+// Copyright (C) 2026 Jean-Philippe Steinmetz
+///////////////////////////////////////////////////////////////////////////////
+import config from "../../config.js";
+import * as argon2 from "argon2";
+import { agent, request } from "@rapidrest/service-core/test";
+import {
+    ACLRecord,
+    MongoConnection,
+    MongoRepository,
+    Server,
+    ObjectFactory,
+    ConnectionManager,
+    ACLAction,
+} from "@rapidrest/service-core";
+import { Logger, MessagingUtils } from "@rapidrest/core";
+import * as uuid from "uuid";
+import { UserMongo } from "../../../src/models/mongo/UserMongo.js";
+import { MongoMemoryServer } from "mongodb-memory-server";
+import { SecretMongo } from "../../../src/models/mongo/SecretMongo.js";
+import { AliasMongo } from "../../../src/models/mongo/AliasMongo.js";
+import { AliasType, SecretType } from "../../../src/models/types.js";
+
+const mongod: MongoMemoryServer = new MongoMemoryServer({
+    instance: {
+        port: 9999,
+        dbName: "rrst-test",
+    },
+});
+
+describe("Route:AuthElevationMongo Tests", () => {
+    const logger = Logger();
+    const objectFactory: ObjectFactory = new ObjectFactory(config, logger);
+    const server: Server = new Server({ config, basePath: "./test/server-mongo", logger, objectFactory });
+    const baseUrl = "/mongo/auth/elevate";
+    const loginUrl = "/mongo/auth/password";
+    const secretsUrl = "/mongo/secrets";
+    let userRepo: MongoRepository<UserMongo>;
+    let aclRepo: MongoRepository<any>;
+    let secretRepo: MongoRepository<SecretMongo>;
+    let aliasRepo: MongoRepository<AliasMongo>;
+    let messagingUtils: MessagingUtils;
+
+    const createUserMongo = async function (data?: any): Promise<UserMongo> {
+        const obj: UserMongo = new UserMongo({
+            roles: ["admin"],
+            scopes: [],
+            verified: true,
+            ...data,
+        });
+
+        const result: UserMongo = await userRepo.save(obj);
+
+        const records: ACLRecord[] = [
+            {
+                userOrRoleId: obj.uid,
+                actions: [
+                    ACLAction.COUNT,
+                    ACLAction.CREATE,
+                    ACLAction.DELETE,
+                    ACLAction.EXISTS,
+                    ACLAction.LIST,
+                    ACLAction.READ,
+                    ACLAction.TRUNCATE,
+                    ACLAction.UPDATE,
+                ],
+            },
+        ];
+
+        const acl: any = {
+            uid: result.uid,
+            dateCreated: new Date(),
+            dateModified: new Date(),
+            version: 0,
+            records,
+            parentUid: "UserMongo",
+        };
+        await aclRepo.save(acl);
+
+        return result;
+    };
+
+    const createPasswordSecretMongo = async function (data?: any): Promise<SecretMongo> {
+        const obj: SecretMongo = new SecretMongo({
+            data: await argon2.hash("password"),
+            type: SecretType.PASSWORD,
+            userUid: uuid.v4(),
+            ...data,
+        });
+
+        const result: SecretMongo = await secretRepo.save(obj);
+
+        const records: ACLRecord[] = [
+            {
+                userOrRoleId: obj.userUid,
+                actions: [
+                    ACLAction.COUNT,
+                    ACLAction.CREATE,
+                    ACLAction.DELETE,
+                    ACLAction.EXISTS,
+                    ACLAction.LIST,
+                    ACLAction.READ,
+                    ACLAction.TRUNCATE,
+                    ACLAction.UPDATE,
+                ],
+            },
+        ];
+
+        const acl: any = {
+            uid: result.uid,
+            dateCreated: new Date(),
+            dateModified: new Date(),
+            version: 0,
+            records,
+            parentUid: "SecretMongo",
+        };
+        await aclRepo.save(acl);
+
+        return result;
+    };
+
+    const createAliasMongo = async function (data?: any): Promise<AliasMongo> {
+        const obj: AliasMongo = new AliasMongo({
+            alias: uuid.v4(),
+            type: AliasType.EMAIL,
+            userUid: uuid.v4(),
+            verified: true,
+            ...data,
+        });
+
+        const result: AliasMongo = await aliasRepo.save(obj);
+
+        const records: ACLRecord[] = [
+            {
+                userOrRoleId: obj.userUid,
+                actions: [
+                    ACLAction.COUNT,
+                    ACLAction.CREATE,
+                    ACLAction.DELETE,
+                    ACLAction.EXISTS,
+                    ACLAction.LIST,
+                    ACLAction.READ,
+                    ACLAction.TRUNCATE,
+                    ACLAction.UPDATE,
+                ],
+            },
+        ];
+
+        const acl: any = {
+            uid: result.uid,
+            dateCreated: new Date(),
+            dateModified: new Date(),
+            version: 0,
+            records,
+            parentUid: "AliasMongo",
+        };
+        await aclRepo.save(acl);
+
+        return result;
+    };
+
+    // Logs in via the normal password flow to obtain a real, non-elevated access token — this route
+    // requires the caller to already hold one (see BaseAuthElevationRoute's doc comment: this is a
+    // "prove you're still you" check, not a full re-authentication).
+    const login = async function (client: any, uid: string): Promise<string> {
+        const result = await client
+            .get(loginUrl)
+            .set("Authorization", `basic ${Buffer.from(uid + ":password").toString("base64")}`);
+        return result.body.token;
+    };
+
+    beforeAll(async () => {
+        await mongod.start();
+        await server.start();
+
+        const connMgr: ConnectionManager | undefined = objectFactory.getInstance(ConnectionManager);
+        let conn: any = connMgr?.connections.get("acl");
+        if (conn instanceof MongoConnection) {
+            aclRepo = conn.getMongoRepository("AccessControlListMongo");
+        }
+        conn = connMgr?.connections.get("mongo");
+        if (conn instanceof MongoConnection) {
+            userRepo = conn.getMongoRepository("UserMongo");
+            secretRepo = conn.getMongoRepository("SecretMongo");
+            aliasRepo = conn.getMongoRepository("AliasMongo");
+        } else {
+            throw new Error("Could not find user connection");
+        }
+
+        messagingUtils = objectFactory.getInstance(MessagingUtils) as MessagingUtils;
+    });
+
+    afterAll(async () => {
+        await server.stop();
+        await mongod.stop();
+        await objectFactory.destroy();
+    });
+
+    beforeEach(async () => {
+        try {
+            await userRepo.clear();
+            await secretRepo.clear();
+            await aliasRepo.clear();
+        } catch (err: any) {
+            // The error "ns not found" occurs when the collection doesn't exist yet. We can ignore this error.
+            if (err.message !== "ns not found") {
+                throw err;
+            }
+        }
+
+        vi.spyOn(messagingUtils, "sendEmail").mockResolvedValue(undefined as any);
+    });
+
+    it("Cannot list methods or elevate without an existing valid access token.", async () => {
+        const result = await request(server.getApplication()).get(baseUrl);
+        expect(result.status).toBe(401);
+    });
+
+    it("Lists no methods for a user with only a password secret.", async () => {
+        const user: UserMongo = await createUserMongo();
+        await createPasswordSecretMongo({ userUid: user.uid });
+        const client = agent(server.getApplication());
+        const token = await login(client, user.uid);
+
+        const result = await client.get(baseUrl).set("Authorization", "jwt " + token);
+
+        expect(result.status).toBeGreaterThanOrEqual(200);
+        expect(result.status).toBeLessThan(300);
+        expect(result.body).toEqual([]);
+    });
+
+    it(
+        "A user with no enrolled secondary method elevates by resubmitting their password (prevents lockout " +
+            "of a freshly bootstrapped admin account that has no 2FA configured yet).",
+        async () => {
+            const user: UserMongo = await createUserMongo();
+            await createPasswordSecretMongo({ userUid: user.uid });
+            const client = agent(server.getApplication());
+            const token = await login(client, user.uid);
+
+            const result = await client.post(baseUrl).set("Authorization", "jwt " + token).send({ password: "password" });
+
+            expect(result).toBeDefined();
+            expect(result.status).toBeGreaterThanOrEqual(200);
+            expect(result.status).toBeLessThan(300);
+            expect(result.body).toHaveProperty("token");
+            expect(result.body.user.uid).toBe(user.uid);
+            // Only an elevated token carries trusted roles.
+            expect(result.body.user.roles).toContain("admin");
+            expect(result.body.user.elevated).toEqual(expect.any(Number));
+        },
+    );
+
+    it("Cannot elevate by password with an invalid password.", async () => {
+        const user: UserMongo = await createUserMongo();
+        await createPasswordSecretMongo({ userUid: user.uid });
+        const client = agent(server.getApplication());
+        const token = await login(client, user.uid);
+
+        const result = await client.post(baseUrl).set("Authorization", "jwt " + token).send({ password: "bogus" });
+
+        expect(result.status).toBe(401);
+    });
+
+    it(
+        "A user with an enrolled OTP method cannot elevate via password alone — resubmitting the same " +
+            "password used to obtain the current token proves nothing new once a real second factor exists.",
+        async () => {
+            const user: UserMongo = await createUserMongo();
+            await createPasswordSecretMongo({ userUid: user.uid });
+            await createAliasMongo({ userUid: user.uid });
+            const client = agent(server.getApplication());
+            const token = await login(client, user.uid);
+
+            const result = await client.post(baseUrl).set("Authorization", "jwt " + token).send({ password: "password" });
+
+            expect(result.status).toBe(400);
+        },
+    );
+
+    it("Lists the user's enrolled OTP method.", async () => {
+        const user: UserMongo = await createUserMongo();
+        await createPasswordSecretMongo({ userUid: user.uid });
+        const alias: AliasMongo = await createAliasMongo({ userUid: user.uid });
+        const client = agent(server.getApplication());
+        const token = await login(client, user.uid);
+
+        const result = await client.get(baseUrl).set("Authorization", "jwt " + token);
+
+        expect(result.status).toBeGreaterThanOrEqual(200);
+        expect(result.status).toBeLessThan(300);
+        expect(result.body).toHaveLength(1);
+        expect(result.body[0]).toMatchObject({ id: alias.uid, type: "otp" });
+    });
+
+    it("Completes a single-factor OTP challenge and mints a usable elevated token.", async () => {
+        const user: UserMongo = await createUserMongo();
+        await createPasswordSecretMongo({ userUid: user.uid });
+        const alias: AliasMongo = await createAliasMongo({ userUid: user.uid });
+        const client = agent(server.getApplication());
+        const token = await login(client, user.uid);
+
+        const begin = await client
+            .post(baseUrl)
+            .set("Authorization", "jwt " + token)
+            .send({ methodId: alias.uid });
+        expect(begin.status).toBeGreaterThanOrEqual(200);
+        expect(begin.status).toBeLessThan(300);
+
+        const sendEmailMock = messagingUtils.sendEmail as any;
+        expect(sendEmailMock).toHaveBeenCalledTimes(1);
+        const otp: string = sendEmailMock.mock.calls[0][1].totp;
+        expect(otp).toBeDefined();
+
+        const verify = await client.post(baseUrl).set("Authorization", "jwt " + token).send({ token: otp });
+        expect(verify.status).toBeGreaterThanOrEqual(200);
+        expect(verify.status).toBeLessThan(300);
+        expect(verify.body.user.uid).toBe(user.uid);
+        expect(verify.body.user.elevated).toEqual(expect.any(Number));
+
+        // The minted token actually satisfies a @RequiresElevation-gated endpoint (BaseSecretRoute.create()).
+        const createResult = await request(server.getApplication())
+            .post(secretsUrl)
+            .set("Authorization", "jwt " + verify.body.token)
+            .send({ data: "MyValidPassw0rd!", type: SecretType.PASSWORD, userUid: user.uid });
+        expect(createResult.status).toBeGreaterThanOrEqual(200);
+        expect(createResult.status).toBeLessThan(300);
+    });
+
+    it("Cannot complete an OTP challenge with an invalid token.", async () => {
+        const user: UserMongo = await createUserMongo();
+        await createPasswordSecretMongo({ userUid: user.uid });
+        const alias: AliasMongo = await createAliasMongo({ userUid: user.uid });
+        const client = agent(server.getApplication());
+        const token = await login(client, user.uid);
+
+        await client.post(baseUrl).set("Authorization", "jwt " + token).send({ methodId: alias.uid });
+
+        const result = await client.post(baseUrl).set("Authorization", "jwt " + token).send({ token: "000000" });
+        expect(result.status).toBe(401);
+    });
+
+    it("Cannot begin a challenge for a method id that does not belong to the caller.", async () => {
+        const user: UserMongo = await createUserMongo();
+        await createPasswordSecretMongo({ userUid: user.uid });
+        const otherUsersAlias: AliasMongo = await createAliasMongo();
+        const client = agent(server.getApplication());
+        const token = await login(client, user.uid);
+
+        const result = await client
+            .post(baseUrl)
+            .set("Authorization", "jwt " + token)
+            .send({ methodId: otherUsersAlias.uid });
+
+        expect(result.status).toBe(400);
+    });
+
+    it(
+        "A plain (non-elevated) access token is rejected by a @RequiresElevation-gated endpoint " +
+            "(regression guard for the elevate route's entire reason for existing).",
+        async () => {
+            const user: UserMongo = await createUserMongo();
+            await createPasswordSecretMongo({ userUid: user.uid });
+            const client = agent(server.getApplication());
+            const token = await login(client, user.uid);
+
+            const createResult = await request(server.getApplication())
+                .post(secretsUrl)
+                .set("Authorization", "jwt " + token)
+                .send({ data: "MyValidPassw0rd!", type: SecretType.PASSWORD, userUid: user.uid });
+
+            expect(createResult.status).toBe(403);
+        },
+    );
+});

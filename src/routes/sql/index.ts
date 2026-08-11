@@ -2,6 +2,7 @@ export * from "./BaseAccountRouteSQL.js";
 export * from "./BaseAliasRouteSQL.js";
 export * from "./BaseAuthBasicRouteSQL.js";
 export * from "./BaseAuthDiscoverRouteSQL.js";
+export * from "./BaseAuthElevationRouteSQL.js";
 export * from "./BaseAuthFIDO2RouteSQL.js";
 export * from "./BaseAuthMFARouteSQL.js";
 export * from "./BaseAuthOIDCRouteSQL.js";

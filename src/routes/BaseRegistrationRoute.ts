@@ -251,6 +251,8 @@ export abstract class BaseRegistrationRoute<U extends User, A extends Alias> {
             user: newUser,
         });
 
-        return await this.tokenUtils!.createAuthResult(user, this.defaultScopes, req, res);
+        // New accounts always get an elevated token in order to ensure that they can safely create
+        // secrets (e.g. MFA setup) needed to maintain account access.
+        return await this.tokenUtils!.createAuthResult(user, this.defaultScopes, req, res, true);
     }
 }

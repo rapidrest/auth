@@ -56,6 +56,12 @@ conf.defaults({
         refresh: {
             expiresIn: "14 days",
         },
+        // Settings for elevated access tokens issued after a fresh re-authentication (see
+        // BaseAuthElevationRoute). Deliberately short-lived relative to `options.expiresIn` above, since an
+        // elevated token also carries trusted roles that a normal token does not.
+        elevated: {
+            expiresIn: "15m",
+        },
         // Controls the `Set-Cookie` header(s) written alongside the JWT/refresh token returned by the
         // various authentication routes. Enabled here so integration tests can verify the cookies are set.
         cookie: {

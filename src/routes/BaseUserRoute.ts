@@ -27,6 +27,7 @@ const {
     Post,
     Put,
     Query,
+    RequiresElevation,
     Request,
     Response,
     User: AuthUser,
@@ -123,15 +124,18 @@ export abstract class BaseUserRoute<T extends User> extends ModelRoute<T> {
             },
         })) as T;
 
-        // `req` and `res` are only forwarded when this is a self-registration (no caller was already authenticated).
-        // `TokenUtils.createAuthResult()` writes session info to req and the issued token as a `Set-Cookie` header on
-        // `res` when cookie auth is enabled. This is correct for self-registration, which is meant to establish a new
-        // session. But when an already-authenticated caller (e.g. an admin) provisions a User on someone else's behalf,
-        // this behavior will clobber the calling user's session.
+        // When creation is being performed by another user (e.g. an admin) we don't need to generate
+        // an access token. So just return an empty result.
         if (user) {
-            return await this.tokenUtils.createAuthResult(result, this.defaultScopes);
+            return {
+                refresh: "",
+                token: "",
+                user: result,
+            };
         } else {
-            return await this.tokenUtils.createAuthResult(result, this.defaultScopes, req, res);
+            // New accounts always get an elevated token in order to ensure that they can safely create
+            // secrets (e.g. MFA setup) needed to maintain account access.
+            return await this.tokenUtils.createAuthResult(result, this.defaultScopes, req, res, true);
         }
     }
 
@@ -140,6 +144,7 @@ export abstract class BaseUserRoute<T extends User> extends ModelRoute<T> {
     @Returns([null])
     @Auth(["jwt"])
     @Delete("/:id")
+    @RequiresElevation(60)
     public async delete(
         @Param("id") id: string,
         @Query("version") version: string | undefined,
@@ -190,6 +195,7 @@ export abstract class BaseUserRoute<T extends User> extends ModelRoute<T> {
     @Returns([null])
     @Auth(["jwt"])
     @Delete()
+    @RequiresElevation(60)
     public async truncate(@Param() params: any, @Query() query: any, @AuthUser user?: JWTUser): Promise<void> {
         return await super.doTruncate({ params, query, user });
     }
@@ -233,6 +239,7 @@ export abstract class BaseUserRoute<T extends User> extends ModelRoute<T> {
     @Auth(["jwt"])
     @Put("/:id")
     @Validate("validateUpdate")
+    @RequiresElevation()
     public async update(
         @Param("id") id: string,
         obj: UpdateObject<T>,

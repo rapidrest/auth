@@ -66,11 +66,16 @@ describe("Route:SecretSQL Tests", () => {
     const admin: any = {
         uid: uuid.v4(),
         roles: ["admin"],
+        // Most of BaseSecretRoute's mutating endpoints require an elevated token (@RequiresElevation).
+        // This file exercises CRUD/WebAuthn behavior, not elevation enforcement itself (see
+        // BaseAuthElevationRoute's own tests for that), so tokens are minted pre-elevated throughout.
+        elevated: Date.now(),
     };
     const adminToken = JWTUtils.createTokenSync(config.get("auth"), admin);
     const user: any = {
         uid: uuid.v4(),
         roles: [],
+        elevated: Date.now(),
     };
     const userToken = JWTUtils.createTokenSync(config.get("auth"), user);
 

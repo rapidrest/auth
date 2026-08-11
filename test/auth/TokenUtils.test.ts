@@ -37,6 +37,75 @@ describe("TokenUtils Tests", () => {
             const payload = await JWTUtils.decodeToken(jwtConfig, token);
             expect(payload.profile).toMatchObject({ uid: "user-1", scopes: ["read"] });
         });
+
+        // Regression/core behavior: only an elevated token may carry trusted roles - this is the mechanism
+        // `@RequiresElevation`-gated admin actions ultimately rely on. A non-elevated token for the same
+        // trusted user must have those roles stripped, not just left alone.
+        it("Strips trusted roles from a non-elevated token.", async () => {
+            const tokenUtils = makeTokenUtils();
+            (tokenUtils as any).trustedRoles = ["admin"];
+            const trustedUser = { uid: "admin-1", roles: ["admin", "editor"], scopes: [] };
+
+            const token = await tokenUtils.createAccessToken(trustedUser, [], false);
+
+            const payload = await JWTUtils.decodeToken(jwtConfig, token);
+            expect(payload.profile.roles).toEqual(["editor"]);
+            expect(payload.profile.elevated).toBeUndefined();
+        });
+
+        it("Keeps trusted roles and stamps an elevated timestamp on an elevated token.", async () => {
+            const tokenUtils = makeTokenUtils();
+            (tokenUtils as any).trustedRoles = ["admin"];
+            const trustedUser = { uid: "admin-1", roles: ["admin", "editor"], scopes: [] };
+            const before = Date.now();
+
+            const token = await tokenUtils.createAccessToken(trustedUser, [], true);
+
+            const payload = await JWTUtils.decodeToken(jwtConfig, token);
+            expect(payload.profile.roles).toEqual(["admin", "editor"]);
+            expect(payload.profile.elevated).toBeGreaterThanOrEqual(before);
+        });
+
+        it("Signs an elevated token with the configured elevated expiresIn.", async () => {
+            const tokenUtils = makeTokenUtils({
+                secret: "test-secret",
+                options: { expiresIn: "7d" },
+                elevated: { expiresIn: "15m" },
+            });
+
+            const token = await tokenUtils.createAccessToken(user, [], true);
+
+            const payload = await JWTUtils.decodeToken(
+                { secret: "test-secret", options: { expiresIn: "7d" } },
+                token,
+            );
+            const ttl = payload.exp - payload.iat;
+            expect(ttl).toBe(15 * 60);
+        });
+
+        // Regression: assigning `config.options.expiresIn = parseDuration(...) || config.options.expiresIn`
+        // unconditionally used to leave `expiresIn` explicitly set to `undefined` whenever neither
+        // `auth:elevated:expiresIn` nor `auth:options:expiresIn` was configured. `jsonwebtoken` validates
+        // every *present* options key, so a present-but-undefined `expiresIn` threw `"expiresIn" should be
+        // a number of seconds or string representing a timespan"` instead of just omitting the claim.
+        it("Does not throw when issuing an elevated token and no expiresIn is configured anywhere.", async () => {
+            const tokenUtils = makeTokenUtils({ secret: "test-secret" });
+
+            await expect(tokenUtils.createAccessToken(user, [], true)).resolves.toEqual(expect.any(String));
+        });
+
+        it("Falls back to the default (non-elevated) expiresIn when auth:elevated:expiresIn is unset.", async () => {
+            const tokenUtils = makeTokenUtils({ secret: "test-secret", options: { expiresIn: "7d" } });
+
+            const token = await tokenUtils.createAccessToken(user, [], true);
+
+            const payload = await JWTUtils.decodeToken(
+                { secret: "test-secret", options: { expiresIn: "7d" } },
+                token,
+            );
+            const ttl = payload.exp - payload.iat;
+            expect(ttl).toBe(7 * 24 * 60 * 60);
+        });
     });
 
     describe("createRefreshToken", () => {
@@ -132,12 +201,41 @@ describe("TokenUtils Tests", () => {
 
             expect(typeof result.token).toBe("string");
             expect(typeof result.refresh).toBe("string");
-            expect(result.user).toBe(user);
+            // Value-equal, not the same reference: `resolveTokenUser()` always returns a fresh copy (see
+            // the regression test below) so the returned `user` accurately reflects the token without ever
+            // mutating the caller's own object.
+            expect(result.user).toEqual(user);
 
             const accessPayload = await JWTUtils.decodeToken(jwtConfig, result.token);
             expect(accessPayload.profile).toMatchObject({ uid: "user-1", scopes: ["read"] });
             const refreshPayload = await JWTUtils.decodeToken(jwtConfig, result.refresh);
             expect(refreshPayload.userUid).toBe("user-1");
+        });
+
+        // Regression: createAccessToken() used to mutate the caller's `user` object in place (stripping
+        // roles directly on it, or setting `.elevated` directly on it) rather than operating on a copy. A
+        // caller that reused its own `user` reference after calling createAuthResult() - or that called it
+        // twice in a row (elevated once, then not) - would silently see its own object's roles/elevated
+        // state permanently altered as a side effect.
+        it("Does not mutate the caller's user object.", async () => {
+            const tokenUtils = makeTokenUtils();
+            const trustedUser = { uid: "admin-1", roles: ["admin"], scopes: [] };
+            const original = { ...trustedUser, roles: [...trustedUser.roles] };
+
+            await tokenUtils.createAuthResult(trustedUser, ["read"]);
+
+            expect(trustedUser).toEqual(original);
+        });
+
+        it("Does not mutate the caller's user object when issuing an elevated token either.", async () => {
+            const tokenUtils = makeTokenUtils();
+            const plainUser = { uid: "user-1", roles: [], scopes: [] };
+            const original = { ...plainUser };
+
+            await tokenUtils.createAuthResult(plainUser, ["read"], undefined, undefined, true);
+
+            expect(plainUser).toEqual(original);
+            expect((plainUser as any).elevated).toBeUndefined();
         });
 
         it("Does not set any cookie when no response is provided.", async () => {

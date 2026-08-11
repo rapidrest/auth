@@ -1,7 +1,7 @@
 ///////////////////////////////////////////////////////////////////////////////
 // Copyright (C) 2026 Jean-Philippe Steinmetz
 ///////////////////////////////////////////////////////////////////////////////
-import { JWTUser, JWTUtils, ObjectDecorators } from "@rapidrest/core";
+import { JWTUser, JWTUtils, JWTUtilsConfig, ObjectDecorators } from "@rapidrest/core";
 import { HttpRequest, NetUtils, type HttpResponse } from "@rapidrest/service-core";
 import parseDuration from "parse-duration";
 import * as uuid from "uuid";
@@ -54,6 +54,9 @@ export class TokenUtils {
     @Config("auth")
     private jwtConfig?: any;
 
+    @Config("trusted_roles", ["admin"])
+    protected trustedRoles: string[] = ["admin"];
+
     /**
      * Builds the `Set-Cookie` header value for the given token using the configured cookie options. Pass
      * an empty string to build a header that immediately expires/clears the cookie instead.
@@ -104,9 +107,6 @@ export class TokenUtils {
      * in order to verify future auth attempts (when sessions are enabled).
      */
     public async createRefreshToken(user: JWTUser, req?: HttpRequest): Promise<string> {
-        // Parsed and defaulted rather than passed straight through: an unset or malformed
-        // `auth:refresh:expiresIn` would otherwise reach `jwt.sign()` as `expiresIn: undefined`, which
-        // signs a token with no `exp` claim at all - i.e. a refresh token that never expires.
         const expires: number = parseDuration(this.jwtConfig.refresh?.expiresIn, "sec") || 1209600; // 14 days
         const uid: string = uuid.v4();
         const config: any = {
@@ -131,19 +131,49 @@ export class TokenUtils {
     }
 
     /**
+     * Derives the `JWTUser` that should actually be signed into a token, without mutating the object the
+     * caller passed in: an elevated token is stamped with the current time, while a non-elevated token has
+     * every trusted role stripped (only an elevated token may carry them). Pulled out so `createAuthResult()`
+     * can return a `user` that accurately reflects what its `token` actually grants, rather than the raw,
+     * unprocessed input.
+     */
+    private resolveTokenUser(user: JWTUser, elevated: boolean): JWTUser {
+        if (elevated) {
+            return { ...user, elevated: Date.now() };
+        }
+        return { ...user, roles: (user.roles ?? []).filter((role) => !this.trustedRoles.includes(role)) };
+    }
+
+    /**
      * Signs a new JWT access token for the given user.
      *
      * @param user The user to encode into the token's payload.
      * @param scopes The scopes to grant the issued token.
-     * @param res The response to write the `Set-Cookie` header to. When omitted, no cookie is set
-     * regardless of configuration.
+     * @param elevated Set to `true` to create an elevated token that includes trusted roles. Default is `false`.
      * @returns The signed JWT.
      */
-    public async createAccessToken(user: JWTUser, scopes: string[]): Promise<string> {
-        const token: string = await JWTUtils.createToken(this.jwtConfig, {
-            ...user,
+    public async createAccessToken(user: JWTUser, scopes: string[], elevated: boolean = false): Promise<string> {
+        const config: any = {
+            secret: this.jwtConfig.secret,
+            options: {
+                ...this.jwtConfig.options,
+            },
+        };
+
+        // When issuing an elevated token, we may have a different token expiration configured. Only
+        // override the default when a valid duration is actually configured.
+        if (elevated) {
+            const elevatedExpiresIn: number | null = parseDuration(this.jwtConfig.elevated?.expiresIn, "sec");
+            if (elevatedExpiresIn) {
+                config.options.expiresIn = elevatedExpiresIn;
+            }
+        }
+
+        const token: string = await JWTUtils.createToken(config, {
+            ...this.resolveTokenUser(user, elevated),
             scopes,
         });
+
         return token;
     }
 
@@ -153,15 +183,17 @@ export class TokenUtils {
      * @param scopes The scopes to grant the user.
      * @param req The original request.
      * @param res The response to set the auth cookie for (if desired).
+     * @param elevated Set to `true` to create an elevated access token that includes trusted roles. Default is `false`.
      */
     public async createAuthResult(
         user: JWTUser,
         scopes: string[],
         req?: HttpRequest,
         res?: HttpResponse,
+        elevated: boolean = false,
     ): Promise<AuthResult> {
         const refresh: string = await this.createRefreshToken(user, req);
-        const token: string = await this.createAccessToken(user, scopes);
+        const token: string = await this.createAccessToken(user, scopes, elevated);
 
         if (res && this.cookieConfig?.enabled) {
             res.appendHeader("Set-Cookie", this.buildCookie(token, this.cookieConfig.access));
@@ -180,7 +212,10 @@ export class TokenUtils {
         return {
             refresh,
             token,
-            user,
+            // Reflects what `token` actually grants (roles stripped/elevated timestamp stamped as
+            // appropriate), not the raw input — a caller reading `AuthResult.user.roles` must see the same
+            // privileges the accompanying token itself carries.
+            user: this.resolveTokenUser(user, elevated),
         };
     }
 }
