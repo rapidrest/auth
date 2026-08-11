@@ -411,7 +411,7 @@ describe("BaseAuthMFARoute Tests", () => {
     describe("notifyContact", () => {
         it("Sends an email when the contact type is EMAIL.", async () => {
             const route = new TestAuthMFARoute();
-            const sendEmail = vi.fn();
+            const sendEmail = vi.fn().mockResolvedValue(undefined);
             (route as any).messagingUtils = { sendEmail, sendSMS: vi.fn() };
 
             await (route as any).notifyContact({ contact: "user@example.com", type: OTPContactType.EMAIL }, "123456");
@@ -425,7 +425,7 @@ describe("BaseAuthMFARoute Tests", () => {
 
         it("Sends an SMS when the contact type is SMS.", async () => {
             const route = new TestAuthMFARoute();
-            const sendSMS = vi.fn();
+            const sendSMS = vi.fn().mockResolvedValue(undefined);
             (route as any).messagingUtils = { sendEmail: vi.fn(), sendSMS };
 
             await (route as any).notifyContact({ contact: "+15551234567", type: OTPContactType.SMS }, "123456");
@@ -435,6 +435,44 @@ describe("BaseAuthMFARoute Tests", () => {
                 { totp: "123456" },
                 { to: "+15551234567" },
             );
+        });
+
+        // Regression: a rejected sendEmail/sendSMS promise used to have no .catch(), so under Node's
+        // default `--unhandled-rejections=throw` a single transient messaging-provider failure during an
+        // MFA challenge send would crash the entire process for every user, not just this request.
+        it("Does not throw (and logs instead) when sendEmail rejects.", async () => {
+            const route = new TestAuthMFARoute();
+            const debug = vi.fn();
+            (route as any).logger = { debug };
+            (route as any).messagingUtils = {
+                sendEmail: vi.fn().mockRejectedValue(new Error("provider unavailable")),
+                sendSMS: vi.fn(),
+            };
+
+            await expect(
+                (route as any).notifyContact({ contact: "user@example.com", type: OTPContactType.EMAIL }, "123456"),
+            ).resolves.toBeUndefined();
+            // Flush the rejected .catch() microtask registered inside notifyContact.
+            await new Promise((resolve) => setImmediate(resolve));
+
+            expect(debug).toHaveBeenCalledWith(expect.stringContaining("Failed to send verification e-mail"));
+        });
+
+        it("Does not throw (and logs instead) when sendSMS rejects.", async () => {
+            const route = new TestAuthMFARoute();
+            const debug = vi.fn();
+            (route as any).logger = { debug };
+            (route as any).messagingUtils = {
+                sendEmail: vi.fn(),
+                sendSMS: vi.fn().mockRejectedValue(new Error("provider unavailable")),
+            };
+
+            await expect(
+                (route as any).notifyContact({ contact: "+15551234567", type: OTPContactType.SMS }, "123456"),
+            ).resolves.toBeUndefined();
+            await new Promise((resolve) => setImmediate(resolve));
+
+            expect(debug).toHaveBeenCalledWith(expect.stringContaining("Failed to send verification SMS"));
         });
 
         it("Does nothing (and does not throw) when messagingUtils is unset.", async () => {

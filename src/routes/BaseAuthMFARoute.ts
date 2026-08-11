@@ -19,7 +19,7 @@ import { importArgon2, verifyDummyPassword } from "../auth/shared.js";
 import { TokenUtils } from "../auth/TokenUtils.js";
 import { UserUtils } from "./UserUtils.js";
 
-const { Config, Init, Inject } = ObjectDecorators;
+const { Config, Init, Inject, Logger } = ObjectDecorators;
 const { Summary, Description, Returns } = DocDecorators;
 const { Auth, Get, Post, Request, Response } = RouteDecorators;
 const AuthUser = RouteDecorators.User;
@@ -56,6 +56,9 @@ export abstract class BaseAuthMFARoute<U extends User, S extends Secret, A exten
 
     @Config("auth")
     protected jwtConfig?: any;
+
+    @Logger
+    protected logger: any;
 
     @Inject(ObjectFactory)
     protected objectFactory?: ObjectFactory;
@@ -323,22 +326,18 @@ export abstract class BaseAuthMFARoute<U extends User, S extends Secret, A exten
     protected async notifyContact(contact: OTPContact, totp: string): Promise<void> {
         switch (contact.type) {
             case OTPContactType.EMAIL:
-                void this.messagingUtils?.sendEmail(
-                    this.template,
-                    { totp },
-                    {
-                        to: contact.contact,
-                    },
-                );
+                this.messagingUtils
+                    ?.sendEmail(this.template, { totp }, { to: contact.contact })
+                    .catch((err) =>
+                        this.logger?.debug(`[BaseAuthMFARoute] Failed to send verification e-mail: ${err}`),
+                    );
                 break;
             case OTPContactType.SMS:
-                void this.messagingUtils?.sendSMS(
-                    this.template,
-                    { totp },
-                    {
-                        to: contact.contact,
-                    },
-                );
+                this.messagingUtils
+                    ?.sendSMS(this.template, { totp }, { to: contact.contact })
+                    .catch((err) =>
+                        this.logger?.debug(`[BaseAuthMFARoute] Failed to send verification SMS: ${err}`),
+                    );
                 break;
         }
     }

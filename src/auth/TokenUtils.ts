@@ -205,7 +205,10 @@ export class TokenUtils {
             const now = Date.now();
             req.session.ip = NetUtils.getIPAddress(req);
             req.session.lastAccess = now;
-            req.session.lastLogin = now;
+            if (elevated) {
+                req.session.lastElevated = now;
+            }
+            req.session.lastLogin = req.session.lastLogin ?? now;
             req.session.userUid = user.uid;
         }
 

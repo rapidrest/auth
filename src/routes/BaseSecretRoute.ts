@@ -364,7 +364,7 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
     )
     @Returns([Object])
     @Get("/passkey/register")
-    @RequiresElevation()
+    @RequiresElevation(60)
     public async passkeyRegistrationOptions(@Request req: HttpRequest, @User user: JWTUser): Promise<any> {
         if (!user) {
             throw new ApiError(ApiErrors.AUTH_REQUIRED, 401, "Authentication is required to register a passkey.");
@@ -390,7 +390,7 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
     )
     @Returns([Object])
     @Get("/fido2/register")
-    @RequiresElevation()
+    @RequiresElevation(60)
     public async fido2RegistrationOptions(@Request req: HttpRequest, @User user: JWTUser): Promise<any> {
         if (!user) {
             throw new ApiError(
@@ -409,7 +409,7 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
     @Returns([Object])
     @Post()
     @Validate("validateCreate")
-    @RequiresElevation()
+    @RequiresElevation(60)
     public async create(obj: T | T[], @Request req: HttpRequest, @User user: JWTUser): Promise<T | Array<T>> {
         const result: T | Array<T> = await super.doCreate(obj, { req, user });
 

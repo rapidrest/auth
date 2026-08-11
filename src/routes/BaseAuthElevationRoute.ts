@@ -30,7 +30,7 @@ import {
 import { TokenUtils } from "../auth/TokenUtils.js";
 import { UserUtils } from "./UserUtils.js";
 
-const { Config, Init, Inject } = ObjectDecorators;
+const { Config, Init, Inject, Logger } = ObjectDecorators;
 const { Summary, Description, Returns } = DocDecorators;
 const { Auth, Get, Post, Request, Response } = RouteDecorators;
 const AuthUser = RouteDecorators.User;
@@ -84,6 +84,9 @@ export abstract class BaseAuthElevationRoute<U extends User, S extends Secret, A
 
     @Inject(ObjectFactory)
     protected objectFactory?: ObjectFactory;
+
+    @Logger
+    protected logger: any;
 
     @Inject(MessagingUtils)
     protected messagingUtils?: MessagingUtils;
@@ -247,7 +250,7 @@ export abstract class BaseAuthElevationRoute<U extends User, S extends Secret, A
                 const result = await generatePasskeyChallenge(this.fido2Config, req, [
                     { id: credential.id, transports: credential.transports },
                 ]);
-                req.session!.userUid = user.uid;
+                req.session!.elevateUid = user.uid;
                 req.session!.mfaMethodId = method.id;
                 return result;
             }
@@ -258,7 +261,7 @@ export abstract class BaseAuthElevationRoute<U extends User, S extends Secret, A
                 delete req.session!.mfaMethodId;
                 const totp: string = await generateOTP(req, { id: user.uid });
                 await this.notifyContact(method.data, totp);
-                req.session!.userUid = user.uid;
+                req.session!.elevateUid = user.uid;
                 return {};
             }
             case MFAMethodType.TOTP: {
@@ -266,7 +269,7 @@ export abstract class BaseAuthElevationRoute<U extends User, S extends Secret, A
                 // current code. Record which secret was selected so the submission below is verified
                 // against the right one, and so it's routed to TOTP rather than OTP verification (both
                 // share the same `{id, token}` shape).
-                req.session!.userUid = user.uid;
+                req.session!.elevateUid = user.uid;
                 req.session!.mfaMethodId = method.id;
                 return {};
             }
@@ -278,9 +281,13 @@ export abstract class BaseAuthElevationRoute<U extends User, S extends Secret, A
     protected async verifyOTPChallenge(payload: any, req: HttpRequest): Promise<JWTUser | undefined> {
         const valid: boolean = await verifyOTP(req, payload);
 
-        // Single-use regardless of outcome — cleared as soon as it's read.
-        const userUid: string | undefined = req.session?.userUid;
-        delete req.session?.userUid;
+        // Single-use regardless of outcome — cleared as soon as it's read. This is a route-local field
+        // (`elevateUid`), deliberately distinct from the shared `session.userUid` that `TokenUtils`/
+        // `BaseAuthRefreshRoute` use to track the caller's actual logged-in identity — clearing *that*
+        // field on a failed elevation attempt would break the caller's ability to refresh their still
+        // otherwise-valid session.
+        const userUid: string | undefined = req.session?.elevateUid;
+        delete req.session?.elevateUid;
 
         if (!valid || !userUid) {
             return undefined;
@@ -289,9 +296,9 @@ export abstract class BaseAuthElevationRoute<U extends User, S extends Secret, A
     }
 
     protected async verifyTOTPChallenge(payload: any, req: HttpRequest): Promise<JWTUser | undefined> {
-        const userUid: string | undefined = req.session?.userUid;
+        const userUid: string | undefined = req.session?.elevateUid;
         const methodId: string | undefined = req.session?.mfaMethodId;
-        delete req.session?.userUid;
+        delete req.session?.elevateUid;
         delete req.session?.mfaMethodId;
 
         if (!userUid || !methodId || payload.id !== userUid) {
@@ -316,10 +323,10 @@ export abstract class BaseAuthElevationRoute<U extends User, S extends Secret, A
     }
 
     protected async verifyFIDOChallenge(payload: any, req: HttpRequest): Promise<JWTUser | undefined> {
-        const userUid: string | undefined = req.session?.userUid;
+        const userUid: string | undefined = req.session?.elevateUid;
         const methodId: string | undefined = req.session?.mfaMethodId;
         const expectedChallenge: string | undefined = req.session?.challenge;
-        delete req.session?.userUid;
+        delete req.session?.elevateUid;
         delete req.session?.mfaMethodId;
         delete req.session?.challenge;
 
@@ -373,6 +380,15 @@ export abstract class BaseAuthElevationRoute<U extends User, S extends Secret, A
     }
 
     protected convertAliasToMethod(alias: Alias, obfuscate?: boolean): MFAMethod | undefined {
+        // An elevation method must already be a proven point of contact. Without this, any caller
+        // holding a mere (possibly stolen, non-elevated) access token could add a brand-new,
+        // self-controlled, unverified email/phone alias to their own account via BaseAliasRoute.create()
+        // — which requires no elevation — then use it to receive and submit a real OTP code, obtaining a
+        // fully elevated token without ever proving anything beyond possession of that access token.
+        if (!alias.verified) {
+            return undefined;
+        }
+
         switch (alias.type) {
             case AliasType.EMAIL:
                 return {
@@ -540,22 +556,18 @@ export abstract class BaseAuthElevationRoute<U extends User, S extends Secret, A
     protected async notifyContact(contact: OTPContact, totp: string): Promise<void> {
         switch (contact.type) {
             case OTPContactType.EMAIL:
-                void this.messagingUtils?.sendEmail(
-                    this.template,
-                    { totp },
-                    {
-                        to: contact.contact,
-                    },
-                );
+                this.messagingUtils
+                    ?.sendEmail(this.template, { totp }, { to: contact.contact })
+                    .catch((err) =>
+                        this.logger?.debug(`[BaseAuthElevationRoute] Failed to send verification e-mail: ${err}`),
+                    );
                 break;
             case OTPContactType.SMS:
-                void this.messagingUtils?.sendSMS(
-                    this.template,
-                    { totp },
-                    {
-                        to: contact.contact,
-                    },
-                );
+                this.messagingUtils
+                    ?.sendSMS(this.template, { totp }, { to: contact.contact })
+                    .catch((err) =>
+                        this.logger?.debug(`[BaseAuthElevationRoute] Failed to send verification SMS: ${err}`),
+                    );
                 break;
         }
     }

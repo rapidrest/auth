@@ -331,7 +331,11 @@ describe("BaseAuthElevationRoute Tests", () => {
                 expect.objectContaining({ allowCredentials: [{ id: "cred-id-1", transports: ["usb"] }] }),
             );
             expect(result).toEqual({ challenge: "chal-123" });
-            expect((req.session as any).userUid).toBe("user-uid-1");
+            // Recorded under a route-local `elevateUid` field, deliberately distinct from the shared
+            // `session.userUid` that TokenUtils/BaseAuthRefreshRoute use to track the caller's actual
+            // logged-in identity (see the "does not touch session.userUid" regression tests below).
+            expect((req.session as any).elevateUid).toBe("user-uid-1");
+            expect((req.session as any).userUid).toBeUndefined();
             expect((req.session as any).mfaMethodId).toBe("method-1");
         });
 
@@ -349,7 +353,7 @@ describe("BaseAuthElevationRoute Tests", () => {
 
             expect(result).toEqual({});
             expect(notifyContactSpy).toHaveBeenCalled();
-            expect((req.session as any).userUid).toBe("user-uid-1");
+            expect((req.session as any).elevateUid).toBe("user-uid-1");
             // Clears any stale mfaMethodId left over from a previous TOTP/FIDO2 selection.
             expect((req.session as any).mfaMethodId).toBeUndefined();
         });
@@ -364,8 +368,33 @@ describe("BaseAuthElevationRoute Tests", () => {
 
             expect(result).toEqual({});
             expect(notifyContactSpy).not.toHaveBeenCalled();
-            expect((req.session as any).userUid).toBe("user-uid-1");
+            expect((req.session as any).elevateUid).toBe("user-uid-1");
             expect((req.session as any).mfaMethodId).toBe("method-1");
+        });
+
+        it("Throws INVALID_REQUEST for an unsupported method type.", async () => {
+            const route = new TestAuthElevationRoute();
+            vi.spyOn(route as any, "getMethod").mockResolvedValue({ id: "method-1", type: "unknown", data: {} });
+            const req = makeReq({ session: {} });
+
+            await expect((route as any).beginChallenge("method-1", jwtUser, req)).rejects.toThrow(
+                /Unsupported elevation method/,
+            );
+        });
+
+        // Regression: beginChallenge() used to write the caller's uid into the shared `session.userUid`
+        // field — the same field TokenUtils/BaseAuthRefreshRoute rely on to identify the caller's actual
+        // logged-in session for refresh-token validation. Starting (or failing) an elevation challenge
+        // must never disturb that field.
+        it("Never writes to the shared session.userUid field used by the login/refresh flow.", async () => {
+            const route = new TestAuthElevationRoute();
+            vi.spyOn(route as any, "getMethod").mockResolvedValue({ id: "method-1", type: MFAMethodType.TOTP, data: {} });
+            const req = makeReq({ session: { userUid: "user-uid-1", refreshUid: "refresh-uid-1" } });
+
+            await (route as any).beginChallenge("method-1", jwtUser, req);
+
+            expect((req.session as any).userUid).toBe("user-uid-1");
+            expect((req.session as any).refreshUid).toBe("refresh-uid-1");
         });
     });
 
@@ -375,25 +404,52 @@ describe("BaseAuthElevationRoute Tests", () => {
             const secret = otplib.generateSecret();
             const token = await otplib.generate({ secret });
             const getUserSpy = vi.spyOn(route as any, "getUser").mockResolvedValue(jwtUser);
-            const req = makeReq({ session: { id: "user-uid-1", secret, userUid: "user-uid-1" } });
+            const req = makeReq({ session: { id: "user-uid-1", secret, elevateUid: "user-uid-1" } });
 
             const result = await (route as any).verifyOTPChallenge({ id: "user-uid-1", token }, req);
 
             expect(getUserSpy).toHaveBeenCalledWith("user-uid-1");
             expect(result).toEqual(jwtUser);
-            expect((req.session as any).userUid).toBeUndefined();
+            expect((req.session as any).elevateUid).toBeUndefined();
         });
 
         it("Returns undefined and clears session state when the token is invalid.", async () => {
             const route = new TestAuthElevationRoute();
             const getUserSpy = vi.spyOn(route as any, "getUser");
-            const req = makeReq({ session: { id: "user-uid-1", secret: otplib.generateSecret(), userUid: "user-uid-1" } });
+            const req = makeReq({
+                session: { id: "user-uid-1", secret: otplib.generateSecret(), elevateUid: "user-uid-1" },
+            });
 
             const result = await (route as any).verifyOTPChallenge({ id: "user-uid-1", token: "000000" }, req);
 
             expect(result).toBeUndefined();
             expect(getUserSpy).not.toHaveBeenCalled();
-            expect((req.session as any).userUid).toBeUndefined();
+            expect((req.session as any).elevateUid).toBeUndefined();
+        });
+
+        // Regression: this used to clear the shared `session.userUid` field regardless of outcome. Since
+        // BaseAuthElevationRoute runs on an already-authenticated session with a live refresh token bound
+        // to that same field (see BaseAuthRefreshRoute.authenticate()), a failed elevation attempt used to
+        // silently strand the caller's refresh token — the very next refresh would 401 even though nothing
+        // was wrong with their login. The fix moved this route's own challenge-binding state to a
+        // dedicated `elevateUid` field, so `session.userUid` must never be touched here, on success or
+        // failure.
+        it("Does not touch the shared session.userUid field, even on a failed verification.", async () => {
+            const route = new TestAuthElevationRoute();
+            const req = makeReq({
+                session: {
+                    id: "user-uid-1",
+                    secret: otplib.generateSecret(),
+                    elevateUid: "user-uid-1",
+                    userUid: "user-uid-1",
+                    refreshUid: "refresh-uid-1",
+                },
+            });
+
+            await (route as any).verifyOTPChallenge({ id: "user-uid-1", token: "000000" }, req);
+
+            expect((req.session as any).userUid).toBe("user-uid-1");
+            expect((req.session as any).refreshUid).toBe("refresh-uid-1");
         });
     });
 
@@ -409,14 +465,14 @@ describe("BaseAuthElevationRoute Tests", () => {
             });
             const getUserSpy = vi.spyOn(route as any, "getUser").mockResolvedValue(jwtUser);
             const updateSecretTimeStepSpy = vi.spyOn(route as any, "updateSecretTimeStep").mockResolvedValue(undefined);
-            const req = makeReq({ session: { userUid: "user-uid-1", mfaMethodId: "secret-1" } });
+            const req = makeReq({ session: { elevateUid: "user-uid-1", mfaMethodId: "secret-1" } });
 
             const result = await (route as any).verifyTOTPChallenge({ id: "user-uid-1", token }, req);
 
             expect(getUserSpy).toHaveBeenCalledWith("user-uid-1");
             expect(updateSecretTimeStepSpy).toHaveBeenCalledWith("secret-1", expect.any(Number));
             expect(result).toEqual(jwtUser);
-            expect((req.session as any).userUid).toBeUndefined();
+            expect((req.session as any).elevateUid).toBeUndefined();
             expect((req.session as any).mfaMethodId).toBeUndefined();
         });
 
@@ -432,7 +488,7 @@ describe("BaseAuthElevationRoute Tests", () => {
         it("Returns undefined when the selected method is no longer a TOTP method.", async () => {
             const route = new TestAuthElevationRoute();
             vi.spyOn(route as any, "getMethod").mockResolvedValue({ id: "secret-1", type: MFAMethodType.OTP, data: {} });
-            const req = makeReq({ session: { userUid: "user-uid-1", mfaMethodId: "secret-1" } });
+            const req = makeReq({ session: { elevateUid: "user-uid-1", mfaMethodId: "secret-1" } });
 
             const result = await (route as any).verifyTOTPChallenge({ id: "user-uid-1", token: "123456" }, req);
 
@@ -443,11 +499,29 @@ describe("BaseAuthElevationRoute Tests", () => {
             const route = new TestAuthElevationRoute();
             const secret = otplib.generateSecret();
             vi.spyOn(route as any, "getMethod").mockResolvedValue({ id: "secret-1", type: MFAMethodType.TOTP, data: { secret } });
-            const req = makeReq({ session: { userUid: "user-uid-1", mfaMethodId: "secret-1" } });
+            const req = makeReq({ session: { elevateUid: "user-uid-1", mfaMethodId: "secret-1" } });
 
             const result = await (route as any).verifyTOTPChallenge({ id: "user-uid-1", token: "000000" }, req);
 
             expect(result).toBeUndefined();
+        });
+
+        it("Does not touch the shared session.userUid field, even on a failed verification.", async () => {
+            const route = new TestAuthElevationRoute();
+            vi.spyOn(route as any, "getMethod").mockResolvedValue(undefined);
+            const req = makeReq({
+                session: {
+                    elevateUid: "user-uid-1",
+                    mfaMethodId: "secret-1",
+                    userUid: "user-uid-1",
+                    refreshUid: "refresh-uid-1",
+                },
+            });
+
+            await (route as any).verifyTOTPChallenge({ id: "user-uid-1", token: "000000" }, req);
+
+            expect((req.session as any).userUid).toBe("user-uid-1");
+            expect((req.session as any).refreshUid).toBe("refresh-uid-1");
         });
     });
 
@@ -455,7 +529,7 @@ describe("BaseAuthElevationRoute Tests", () => {
         function makeFidoSessionReq(overrides: any = {}): HttpRequest {
             return makeReq({
                 session: {
-                    userUid: "user-uid-1",
+                    elevateUid: "user-uid-1",
                     mfaMethodId: "cred-id-1",
                     challenge: "stored-challenge",
                     ...overrides,
@@ -480,9 +554,23 @@ describe("BaseAuthElevationRoute Tests", () => {
             expect(updateCredentialCounterSpy).toHaveBeenCalledWith("cred-id-1", 6);
             expect(getUserSpy).toHaveBeenCalledWith("user-uid-1");
             expect(result).toEqual(jwtUser);
-            expect((req.session as any).userUid).toBeUndefined();
+            expect((req.session as any).elevateUid).toBeUndefined();
             expect((req.session as any).mfaMethodId).toBeUndefined();
             expect((req.session as any).challenge).toBeUndefined();
+        });
+
+        it("Does not touch the shared session.userUid field, even on a failed verification.", async () => {
+            const route = new TestAuthElevationRoute();
+            (route as any).fido2Config = makeFidoConfig();
+            vi.spyOn(route as any, "getCredentialById").mockResolvedValue(storedCredential);
+            mockVerifyAuthenticationResponse.mockResolvedValue({ verified: false });
+            const req = makeFidoSessionReq({ userUid: "user-uid-1", refreshUid: "refresh-uid-1" });
+
+            const result = await (route as any).verifyFIDOChallenge(makeAssertionBody(), req);
+
+            expect(result).toBeUndefined();
+            expect((req.session as any).userUid).toBe("user-uid-1");
+            expect((req.session as any).refreshUid).toBe("refresh-uid-1");
         });
 
         it("Returns undefined when there is no session-bound challenge state (cold request).", async () => {
@@ -591,10 +679,57 @@ describe("BaseAuthElevationRoute Tests", () => {
 
         it("Returns undefined for an alias type that has no OTP equivalent.", () => {
             const route = new TestAuthElevationRoute();
+            // `verified: true` so this exercises the switch's fallthrough (no case for NAME), not the
+            // unverified early-return guarded by the tests below.
             const result = (route as any).convertAliasToMethod({
                 uid: "alias-1",
                 alias: "John Doe",
                 type: AliasType.NAME,
+                verified: true,
+            });
+
+            expect(result).toBeUndefined();
+        });
+
+        it("Converts a PHONE alias into an OTP method.", () => {
+            const route = new TestAuthElevationRoute();
+            const result = (route as any).convertAliasToMethod({
+                uid: "alias-1",
+                alias: "+15551234567",
+                type: AliasType.PHONE,
+                verified: true,
+            });
+
+            expect(result).toEqual({
+                id: "alias-1",
+                data: { contact: "+15551234567", type: OTPContactType.SMS, verified: true },
+                type: MFAMethodType.OTP,
+            });
+        });
+
+        // Regression: an elevation method must be a *proven* point of contact. Without this check, a
+        // caller holding only a non-elevated (possibly stolen) access token could add a brand-new,
+        // self-controlled, unverified email/phone alias via BaseAliasRoute.create() (which requires no
+        // elevation), then use it as an elevation method to receive and submit a real OTP code —
+        // obtaining a fully elevated token without ever proving anything beyond holding that token.
+        it("Returns undefined for an unverified EMAIL alias, even though it would otherwise convert.", () => {
+            const route = new TestAuthElevationRoute();
+            const result = (route as any).convertAliasToMethod({
+                uid: "alias-1",
+                alias: "attacker@evil.com",
+                type: AliasType.EMAIL,
+                verified: false,
+            });
+
+            expect(result).toBeUndefined();
+        });
+
+        it("Returns undefined for an unverified PHONE alias, even though it would otherwise convert.", () => {
+            const route = new TestAuthElevationRoute();
+            const result = (route as any).convertAliasToMethod({
+                uid: "alias-1",
+                alias: "+15551234567",
+                type: AliasType.PHONE,
                 verified: false,
             });
 
@@ -603,6 +738,17 @@ describe("BaseAuthElevationRoute Tests", () => {
     });
 
     describe("convertSecretToMethod", () => {
+        it("Converts a FIDO2 secret into a FIDO2 method.", () => {
+            const route = new TestAuthElevationRoute();
+            const result = (route as any).convertSecretToMethod({
+                uid: "secret-1",
+                type: SecretType.FIDO2,
+                data: { id: "cred-1" },
+            });
+
+            expect(result).toEqual({ id: "secret-1", data: { id: "cred-1" }, type: MFAMethodType.FIDO2 });
+        });
+
         it("Converts a TOTP secret into a TOTP method.", () => {
             const route = new TestAuthElevationRoute();
             const result = (route as any).convertSecretToMethod({
@@ -627,6 +773,22 @@ describe("BaseAuthElevationRoute Tests", () => {
     });
 
     describe("getCredentialById", () => {
+        it("Throws if secretRepo is not set.", async () => {
+            const route = new TestAuthElevationRoute();
+
+            await expect((route as any).getCredentialById("cred-1")).rejects.toThrow(/secretRepo is not set/);
+        });
+
+        it("Returns undefined when the matching secret is not of type FIDO2.", async () => {
+            const route = new TestAuthElevationRoute();
+            const findOne = vi.fn().mockResolvedValue({ type: SecretType.TOTP, data: { secret: "AAAA" } });
+            (route as any).secretRepo = { findOne };
+
+            const result = await (route as any).getCredentialById("cred-1");
+
+            expect(result).toBeUndefined();
+        });
+
         it("Returns the .data of a matching secret of type FIDO2.", async () => {
             const route = new TestAuthElevationRoute();
             const findOne = vi.fn().mockResolvedValue({ type: SecretType.FIDO2, data: { id: "cred-1" } });
@@ -650,6 +812,44 @@ describe("BaseAuthElevationRoute Tests", () => {
     });
 
     describe("getMethod", () => {
+        it("Throws if aliasRepo is not set.", async () => {
+            const route = new TestAuthElevationRoute();
+            (route as any).secretRepo = { findOne: vi.fn() };
+
+            await expect((route as any).getMethod("id-1", "user-1")).rejects.toThrow(/aliasRepo is not set/);
+        });
+
+        it("Throws if secretRepo is not set.", async () => {
+            const route = new TestAuthElevationRoute();
+            (route as any).aliasRepo = { findOne: vi.fn() };
+
+            await expect((route as any).getMethod("id-1", "user-1")).rejects.toThrow(/secretRepo is not set/);
+        });
+
+        it("Returns undefined without querying either repo when id or userUid is not a string (NoSQL operator injection guard).", async () => {
+            const route = new TestAuthElevationRoute();
+            const secretFindOne = vi.fn();
+            const aliasFindOne = vi.fn();
+            (route as any).secretRepo = { findOne: secretFindOne };
+            (route as any).aliasRepo = { findOne: aliasFindOne };
+
+            const result = await (route as any).getMethod({ $ne: null }, "user-1");
+
+            expect(result).toBeUndefined();
+            expect(secretFindOne).not.toHaveBeenCalled();
+            expect(aliasFindOne).not.toHaveBeenCalled();
+        });
+
+        it("Returns undefined when neither a matching secret nor a matching alias exists.", async () => {
+            const route = new TestAuthElevationRoute();
+            (route as any).secretRepo = { findOne: vi.fn().mockResolvedValue(undefined) };
+            (route as any).aliasRepo = { findOne: vi.fn().mockResolvedValue(undefined) };
+
+            const result = await (route as any).getMethod("bogus-id", "user-1");
+
+            expect(result).toBeUndefined();
+        });
+
         it("Returns undefined when the matching secret belongs to a different user.", async () => {
             const route = new TestAuthElevationRoute();
             (route as any).secretRepo = {
@@ -675,9 +875,71 @@ describe("BaseAuthElevationRoute Tests", () => {
 
             expect(result).toEqual({ id: "secret-1", data: {}, type: MFAMethodType.TOTP });
         });
+
+        it("Returns the method for a matching, verified alias owned by the given uid.", async () => {
+            const route = new TestAuthElevationRoute();
+            (route as any).secretRepo = { findOne: vi.fn().mockResolvedValue(undefined) };
+            (route as any).aliasRepo = {
+                findOne: vi.fn().mockResolvedValue({
+                    uid: "alias-1",
+                    userUid: "user-1",
+                    alias: "user@example.com",
+                    type: AliasType.EMAIL,
+                    verified: true,
+                }),
+            };
+
+            const result = await (route as any).getMethod("alias-1", "user-1");
+
+            expect(result?.type).toBe(MFAMethodType.OTP);
+        });
+
+        // Regression guard for the same fix as convertAliasToMethod's — getMethod() is the path
+        // beginChallenge() actually calls, so this is what a direct exploit attempt would hit.
+        it("Returns undefined for a matching but unverified alias, even when owned by the given uid.", async () => {
+            const route = new TestAuthElevationRoute();
+            (route as any).secretRepo = { findOne: vi.fn().mockResolvedValue(undefined) };
+            (route as any).aliasRepo = {
+                findOne: vi.fn().mockResolvedValue({
+                    uid: "alias-1",
+                    userUid: "user-1",
+                    alias: "attacker@evil.com",
+                    type: AliasType.EMAIL,
+                    verified: false,
+                }),
+            };
+
+            const result = await (route as any).getMethod("alias-1", "user-1");
+
+            expect(result).toBeUndefined();
+        });
     });
 
     describe("getMethods", () => {
+        it("Throws if aliasRepo is not set.", async () => {
+            const route = new TestAuthElevationRoute();
+            (route as any).secretRepo = { find: vi.fn() };
+            (route as any).userRepo = {};
+
+            await expect((route as any).getMethods("user-1")).rejects.toThrow(/aliasRepo is not set/);
+        });
+
+        it("Throws if secretRepo is not set.", async () => {
+            const route = new TestAuthElevationRoute();
+            (route as any).aliasRepo = { find: vi.fn() };
+            (route as any).userRepo = {};
+
+            await expect((route as any).getMethods("user-1")).rejects.toThrow(/secretRepo is not set/);
+        });
+
+        it("Throws if userRepo is not set.", async () => {
+            const route = new TestAuthElevationRoute();
+            (route as any).aliasRepo = { find: vi.fn() };
+            (route as any).secretRepo = { find: vi.fn() };
+
+            await expect((route as any).getMethods("user-1")).rejects.toThrow(/userRepo is not set/);
+        });
+
         it("Combines eligible secrets and aliases into a list of methods.", async () => {
             const route = new TestAuthElevationRoute();
             (route as any).secretRepo = {
@@ -699,9 +961,34 @@ describe("BaseAuthElevationRoute Tests", () => {
             expect(result[0]).toEqual({ id: "secret-1", data: {}, type: MFAMethodType.TOTP });
             expect(result[1].type).toBe(MFAMethodType.OTP);
         });
+
+        // Regression: an unverified alias must never be offered as an elevation method — see
+        // convertAliasToMethod's regression test for the full exploit this closes.
+        it("Excludes unverified aliases from the list of methods.", async () => {
+            const route = new TestAuthElevationRoute();
+            (route as any).secretRepo = { find: vi.fn().mockResolvedValue([]) };
+            (route as any).aliasRepo = {
+                find: vi.fn().mockResolvedValue([
+                    { uid: "alias-1", alias: "verified@example.com", type: AliasType.EMAIL, verified: true },
+                    { uid: "alias-2", alias: "attacker@evil.com", type: AliasType.EMAIL, verified: false },
+                ]),
+            };
+            (route as any).userRepo = {};
+
+            const result = await (route as any).getMethods("user-1");
+
+            expect(result).toHaveLength(1);
+            expect(result[0].id).toBe("alias-1");
+        });
     });
 
     describe("getUser", () => {
+        it("Throws if userUtils is not set.", async () => {
+            const route = new TestAuthElevationRoute();
+
+            await expect((route as any).getUser("user-1")).rejects.toThrow(/userRepo is not set/);
+        });
+
         it("Delegates to userUtils.lookup().", async () => {
             const route = new TestAuthElevationRoute();
             const lookup = vi.fn().mockResolvedValue({ uid: "user-1" });
@@ -717,12 +1004,60 @@ describe("BaseAuthElevationRoute Tests", () => {
     describe("notifyContact", () => {
         it("Sends an email when the contact type is EMAIL.", async () => {
             const route = new TestAuthElevationRoute();
-            const sendEmail = vi.fn();
+            const sendEmail = vi.fn().mockResolvedValue(undefined);
             (route as any).messagingUtils = { sendEmail, sendSMS: vi.fn() };
 
             await (route as any).notifyContact({ contact: "user@example.com", type: OTPContactType.EMAIL }, "123456");
 
             expect(sendEmail).toHaveBeenCalledWith("login-otp", { totp: "123456" }, { to: "user@example.com" });
+        });
+
+        it("Sends an SMS when the contact type is SMS.", async () => {
+            const route = new TestAuthElevationRoute();
+            const sendSMS = vi.fn().mockResolvedValue(undefined);
+            (route as any).messagingUtils = { sendEmail: vi.fn(), sendSMS };
+
+            await (route as any).notifyContact({ contact: "+15551234567", type: OTPContactType.SMS }, "123456");
+
+            expect(sendSMS).toHaveBeenCalledWith("login-otp", { totp: "123456" }, { to: "+15551234567" });
+        });
+
+        // Regression: a rejected sendEmail/sendSMS promise used to have no .catch(), so under Node's
+        // default `--unhandled-rejections=throw` a single transient messaging-provider failure during an
+        // elevation challenge send would crash the entire process for every user, not just this request.
+        it("Does not throw (and logs instead) when sendEmail rejects.", async () => {
+            const route = new TestAuthElevationRoute();
+            const debug = vi.fn();
+            (route as any).logger = { debug };
+            (route as any).messagingUtils = {
+                sendEmail: vi.fn().mockRejectedValue(new Error("provider unavailable")),
+                sendSMS: vi.fn(),
+            };
+
+            await expect(
+                (route as any).notifyContact({ contact: "user@example.com", type: OTPContactType.EMAIL }, "123456"),
+            ).resolves.toBeUndefined();
+            // Flush the rejected .catch() microtask registered inside notifyContact.
+            await new Promise((resolve) => setImmediate(resolve));
+
+            expect(debug).toHaveBeenCalledWith(expect.stringContaining("Failed to send verification e-mail"));
+        });
+
+        it("Does not throw (and logs instead) when sendSMS rejects.", async () => {
+            const route = new TestAuthElevationRoute();
+            const debug = vi.fn();
+            (route as any).logger = { debug };
+            (route as any).messagingUtils = {
+                sendEmail: vi.fn(),
+                sendSMS: vi.fn().mockRejectedValue(new Error("provider unavailable")),
+            };
+
+            await expect(
+                (route as any).notifyContact({ contact: "+15551234567", type: OTPContactType.SMS }, "123456"),
+            ).resolves.toBeUndefined();
+            await new Promise((resolve) => setImmediate(resolve));
+
+            expect(debug).toHaveBeenCalledWith(expect.stringContaining("Failed to send verification SMS"));
         });
     });
 
@@ -732,9 +1067,40 @@ describe("BaseAuthElevationRoute Tests", () => {
             const result = (route as any).obfuscateAlias("user@example.com", AliasType.EMAIL);
             expect(result).not.toBe("user@example.com");
         });
+
+        it("Obfuscates a NAME alias.", () => {
+            const route = new TestAuthElevationRoute();
+            const result = (route as any).obfuscateAlias("John Doe", AliasType.NAME);
+            expect(result).not.toBe("John Doe");
+        });
+
+        it("Obfuscates a PHONE alias.", () => {
+            const route = new TestAuthElevationRoute();
+            const result = (route as any).obfuscateAlias("+15551234567", AliasType.PHONE);
+            expect(result).not.toBe("+15551234567");
+        });
     });
 
     describe("updateCredentialCounter", () => {
+        it("Throws if secretRepo is not set.", async () => {
+            const route = new TestAuthElevationRoute();
+
+            await expect((route as any).updateCredentialCounter("cred-1", 5)).rejects.toThrow(
+                /secretRepo is not set/,
+            );
+        });
+
+        it("Does nothing if no matching secret is found.", async () => {
+            const route = new TestAuthElevationRoute();
+            const findOne = vi.fn().mockResolvedValue(undefined);
+            const update = vi.fn();
+            (route as any).secretRepo = { findOne, update };
+
+            await (route as any).updateCredentialCounter("cred-1", 5);
+
+            expect(update).not.toHaveBeenCalled();
+        });
+
         it("Updates the secret's counter when a matching secret is found.", async () => {
             const route = new TestAuthElevationRoute();
             const secret = { uid: "secret-1", version: 1, data: { id: "cred-1", counter: 1 } };
@@ -754,6 +1120,25 @@ describe("BaseAuthElevationRoute Tests", () => {
     });
 
     describe("updateSecretTimeStep", () => {
+        it("Throws if secretRepo is not set.", async () => {
+            const route = new TestAuthElevationRoute();
+
+            await expect((route as any).updateSecretTimeStep("secret-1", 42)).rejects.toThrow(
+                /secretRepo is not set/,
+            );
+        });
+
+        it("Does nothing if no matching secret is found.", async () => {
+            const route = new TestAuthElevationRoute();
+            const findOne = vi.fn().mockResolvedValue(undefined);
+            const update = vi.fn();
+            (route as any).secretRepo = { findOne, update };
+
+            await (route as any).updateSecretTimeStep("secret-1", 42);
+
+            expect(update).not.toHaveBeenCalled();
+        });
+
         it("Updates the secret's lastTimeStep when a matching secret is found.", async () => {
             const route = new TestAuthElevationRoute();
             const secret = { uid: "secret-1", version: 1, data: { secret: "abc" } };
@@ -768,6 +1153,20 @@ describe("BaseAuthElevationRoute Tests", () => {
     });
 
     describe("verify", () => {
+        it("Throws if secretRepo is not set.", async () => {
+            const route = new TestAuthElevationRoute();
+            (route as any).userUtils = { lookup: vi.fn() };
+
+            await expect((route as any).verify("user1", "pass1")).rejects.toThrow(/Secret repository not set/);
+        });
+
+        it("Throws if userUtils is not set.", async () => {
+            const route = new TestAuthElevationRoute();
+            (route as any).secretRepo = { find: vi.fn() };
+
+            await expect((route as any).verify("user1", "pass1")).rejects.toThrow(/User repository not set/);
+        });
+
         it("Throws when the user cannot be found.", async () => {
             const route = new TestAuthElevationRoute();
             (route as any).secretRepo = { find: vi.fn() };
@@ -817,6 +1216,20 @@ describe("BaseAuthElevationRoute Tests", () => {
             await expect((route as any).verify("user1", "wrong-password")).rejects.toThrow(
                 /Invalid authorization request/,
             );
+        });
+
+        it("Performs a dummy Argon2 verification (and throws) when the user has no stored password secret.", async () => {
+            const route = new TestAuthElevationRoute();
+            (route as any).secretRepo = { find: vi.fn().mockResolvedValue([]) };
+            (route as any).userUtils = { lookup: vi.fn().mockResolvedValue({ uid: "user-uid-1" }) };
+            const shared = await import("../../src/auth/shared.js");
+            const verifyDummySpy = vi.spyOn(shared, "verifyDummyPassword");
+
+            await expect((route as any).verify("user1", "any-password")).rejects.toThrow(
+                /Invalid authorization request/,
+            );
+
+            expect(verifyDummySpy).toHaveBeenCalledWith("any-password");
         });
     });
 });

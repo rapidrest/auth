@@ -239,7 +239,7 @@ export abstract class BaseUserRoute<T extends User> extends ModelRoute<T> {
     @Auth(["jwt"])
     @Put("/:id")
     @Validate("validateUpdate")
-    @RequiresElevation()
+    @RequiresElevation(60)
     public async update(
         @Param("id") id: string,
         obj: UpdateObject<T>,

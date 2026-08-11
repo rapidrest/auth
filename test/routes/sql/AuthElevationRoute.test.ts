@@ -334,6 +334,67 @@ describe("Route:AuthElevationSQL Tests", () => {
         expect(result.status).toBe(401);
     });
 
+    // Regression/exploit-closing test: an unverified, self-added alias must never be usable to satisfy
+    // elevation — see BaseAuthElevationRoute's convertAliasToMethod/getMethod for the fix. Without it, a
+    // caller holding only a non-elevated access token could add an attacker-controlled, unverified alias
+    // via BaseAliasRoute.create() (no elevation required there) and use it to receive and submit a real
+    // OTP code, minting a fully elevated token without proving anything beyond holding that access token.
+    it("Excludes an unverified alias from the listed elevation methods.", async () => {
+        const user: UserSQL = await createUserSQL();
+        await createPasswordSecretSQL({ userUid: user.uid });
+        await createAliasSQL({ userUid: user.uid, verified: false });
+        const client = agent(server.getApplication());
+        const token = await login(client, user.uid);
+
+        const result = await client.get(baseUrl).set("Authorization", "jwt " + token);
+
+        expect(result.status).toBeGreaterThanOrEqual(200);
+        expect(result.status).toBeLessThan(300);
+        expect(result.body).toEqual([]);
+    });
+
+    it("Cannot begin a challenge using an unverified alias's id, even though the caller owns it.", async () => {
+        const user: UserSQL = await createUserSQL();
+        await createPasswordSecretSQL({ userUid: user.uid });
+        const unverifiedAlias: AliasSQL = await createAliasSQL({ userUid: user.uid, verified: false });
+        const client = agent(server.getApplication());
+        const token = await login(client, user.uid);
+
+        const result = await client
+            .post(baseUrl)
+            .set("Authorization", "jwt " + token)
+            .send({ methodId: unverifiedAlias.uid });
+
+        expect(result.status).toBe(400);
+        expect(messagingUtils.sendEmail).not.toHaveBeenCalled();
+    });
+
+    // Regression: a failed elevation attempt used to unconditionally clear the shared `session.userUid`
+    // field that BaseAuthRefreshRoute depends on, permanently stranding the caller's still-otherwise-valid
+    // refresh token. Elevation state now lives in a dedicated session field instead, so refresh must keep
+    // working after a failed attempt.
+    it("Does not break the caller's ability to refresh their session after a failed OTP elevation attempt.", async () => {
+        const user: UserSQL = await createUserSQL();
+        await createPasswordSecretSQL({ userUid: user.uid });
+        const alias: AliasSQL = await createAliasSQL({ userUid: user.uid });
+        const client = agent(server.getApplication());
+        const loginResult = await client
+            .get(loginUrl)
+            .set("Authorization", `basic ${Buffer.from(user.uid + ":password").toString("base64")}`);
+        const token: string = loginResult.body.token;
+        const refresh: string = loginResult.body.refresh;
+
+        await client.post(baseUrl).set("Authorization", "jwt " + token).send({ methodId: alias.uid });
+        const failedElevate = await client.post(baseUrl).set("Authorization", "jwt " + token).send({ token: "000000" });
+        expect(failedElevate.status).toBe(401);
+
+        const refreshResult = await client.post("/sql/auth/refresh").send({ token: refresh });
+
+        expect(refreshResult.status).toBeGreaterThanOrEqual(200);
+        expect(refreshResult.status).toBeLessThan(300);
+        expect(refreshResult.body.user.uid).toBe(user.uid);
+    });
+
     it("Cannot begin a challenge for a method id that does not belong to the caller.", async () => {
         const user: UserSQL = await createUserSQL();
         await createPasswordSecretSQL({ userUid: user.uid });
