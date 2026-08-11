@@ -10,6 +10,8 @@ password, TOTP, OTP (email/SMS), WebAuthn passkeys, FIDO2 hardware security keys
 OpenID Connect / OAuth 2.0. Using this library you can stand up a fully featured authorization server by writing
 configuration and a handful of one-line route classes.
 
+For complete documentation please visit [RapidREST.dev](https://rapidrest.dev).
+
 ## Features
 
 ### Authentication Strategies:
@@ -54,6 +56,20 @@ with either `Mongo` or `SQL` at the end of the name (e.g. `BaseAliasRoute` becom
 * `BaseAuthOTPRoute` - Implements the `OTPStrategy` authentication strategy
 * `BaseAuthPasskeyRoute` - Implements the `PasskeyStrategy` authentication strategy
 * `BaseAuthTOTPRoute` - Implements the `TOTPStrategy` authentication strategy
+
+## Installation
+
+### NPM
+
+```
+npm i @rapidrest/auth
+```
+
+### Yarn
+
+```
+yarn add @rapidrest/auth
+```
 
 ## Requirements
 
