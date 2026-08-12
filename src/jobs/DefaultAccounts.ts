@@ -6,6 +6,8 @@ import { ACLAction, BackgroundService, ObjectFactory, RepoUtils } from "@rapidre
 import { Alias, AliasType, Contact, ContactType, Profile, Secret, SecretType, User } from "../models/types.js";
 import { PasswordConfig } from "../auth/types.js";
 import { generatePassword, importArgon2 } from "../auth/shared.js";
+import * as path from "path";
+import * as fs from "fs/promises";
 
 const { Config, Init, Inject, Logger } = ObjectDecorators;
 
@@ -56,6 +58,9 @@ export abstract class DefaultAccounts<
 
     @Config("auth:password", new PasswordConfig())
     protected passwordConfig: PasswordConfig = new PasswordConfig();
+
+    @Config("auth:password_file", "passwords")
+    protected passwordFile?: string = "passwords";
 
     protected profileRepo?: RepoUtils<P>;
 
@@ -272,19 +277,32 @@ export abstract class DefaultAccounts<
         }
 
         if (pwCreated) {
-            // Note: We print this out to the console here so that a system administrator will be able to login
-            // to the system after the first boot. This only occurs once and is otherwise safe as its never
-            // exposed to an end-user or client. In the future, perhaps reconsider this by instead writing the
-            // password to a file.
             this.logger.info("================================================================================");
             this.logger.info("!!!IMPORTANT!!! Write down this information. It won't be shown again.");
             this.logger.info("================================================================================");
             this.logger.info("An account has been created with the following details:");
             this.logger.info("------------------------------");
-            this.logger.info(`Name: ${account.name}`);
-            this.logger.info(`Password: ${account.password}`);
-            this.logger.info(`Roles: ${account.roles}`);
-            this.logger.info("================================================================================");
+            // Write the password to a secure file location for the system adminstrator to retrieve. Alternatively,
+            // if `passwordFile` is not present, this gets written exactly once to the log.
+            if (this.passwordFile) {
+                const filePath: string = path.resolve(this.passwordFile);
+                await fs.appendFile(
+                    filePath,
+                    `Name=${account.name},Password=${account.password},Roles=${account.roles}\n`,
+                    {
+                        encoding: "utf-8",
+                    },
+                );
+                this.logger.info(`Name: ${account.name}`);
+                this.logger.info(`Password: See '${filePath}'`);
+                this.logger.info(`Roles: ${account.roles}`);
+                this.logger.info("================================================================================");
+            } else {
+                this.logger.info(`Name: ${account.name}`);
+                this.logger.info(`Password: '${account.password}'`);
+                this.logger.info(`Roles: ${account.roles}`);
+                this.logger.info("================================================================================");
+            }
         }
     }
 }

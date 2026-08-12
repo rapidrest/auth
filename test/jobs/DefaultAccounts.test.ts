@@ -8,6 +8,8 @@ import { RepoUtils } from "@rapidrest/service-core";
 import { DefaultAccounts, DefaultAccountConfig } from "../../src/jobs/DefaultAccounts.js";
 import { PasswordConfig } from "../../src/auth/types.js";
 import { AliasType, ContactType, SecretType } from "../../src/models/types.js";
+import * as path from "path";
+import * as fs from "fs";
 
 class FakeAlias {
     constructor(props: any = {}) {
@@ -54,11 +56,12 @@ function makeProfile(overrides: any = {}) {
  * - An existing password secret (so password generation/hashing is skipped by default).
  * Individual tests override only the repo behavior relevant to what they're exercising.
  */
-function setupRoute(
+function setupDefaultAccounts(
     accounts: DefaultAccountConfig[],
     overrides: {
         trustedRoles?: string[];
         passwordConfig?: PasswordConfig;
+        passwordFile?: string;
         logger?: any;
         aliasRepo?: any;
         profileRepo?: any;
@@ -66,104 +69,110 @@ function setupRoute(
         userRepo?: any;
     } = {},
 ) {
-    const route = new TestDefaultAccounts();
-    (route as any).defaultAccounts = accounts;
-    (route as any).trustedRoles = overrides.trustedRoles ?? ["admin"];
-    (route as any).passwordConfig = overrides.passwordConfig ?? new PasswordConfig();
-    (route as any).logger = overrides.logger ?? { info: vi.fn() };
-    (route as any).aliasRepo = overrides.aliasRepo ?? {
+    const job = new TestDefaultAccounts();
+    (job as any).defaultAccounts = accounts;
+    (job as any).trustedRoles = overrides.trustedRoles ?? ["admin"];
+    (job as any).passwordConfig = overrides.passwordConfig ?? new PasswordConfig();
+    (job as any).passwordFile = "passwordFile" in overrides ? overrides.passwordFile : (job as any).passwordFile;
+    (job as any).logger = overrides.logger ?? { info: vi.fn() };
+    (job as any).aliasRepo = overrides.aliasRepo ?? {
         find: vi.fn().mockResolvedValue([]),
         create: vi.fn().mockResolvedValue(undefined),
     };
-    (route as any).profileRepo = overrides.profileRepo ?? {
+    (job as any).profileRepo = overrides.profileRepo ?? {
         findOne: vi.fn().mockResolvedValue(makeProfile()),
         create: vi.fn(),
         update: vi.fn().mockResolvedValue(undefined),
     };
-    (route as any).secretRepo = overrides.secretRepo ?? {
+    (job as any).secretRepo = overrides.secretRepo ?? {
         find: vi.fn().mockResolvedValue([{ uid: "secret-1" }]),
         create: vi.fn(),
     };
-    (route as any).userRepo = overrides.userRepo ?? {
+    (job as any).userRepo = overrides.userRepo ?? {
         findOne: vi.fn(),
         create: vi.fn().mockResolvedValue({ uid: "user-1", roles: ["admin"] }),
     };
-    return route;
+    return job;
 }
 
 describe("DefaultAccounts Tests", () => {
     afterEach(() => {
         vi.restoreAllMocks();
+
+        const passwordFile: string = path.resolve("passwords");
+        if (fs.existsSync(passwordFile)) {
+            fs.unlinkSync(passwordFile);
+        }
     });
 
     describe("init", () => {
         it("Throws when objectFactory is not set.", async () => {
-            const route = new TestDefaultAccounts();
+            const job = new TestDefaultAccounts();
 
-            await expect((route as any).init()).rejects.toThrow(/objectFactory is not set/);
+            await expect((job as any).init()).rejects.toThrow(/objectFactory is not set/);
         });
 
         it("Creates alias/profile/secret/user repos via the object factory when unset.", async () => {
-            const route = new TestDefaultAccounts();
+            const job = new TestDefaultAccounts();
             const newInstance = vi.fn().mockImplementation((_ctor: any, opts: any) => Promise.resolve({ name: opts.name }));
-            (route as any).objectFactory = { newInstance };
+            (job as any).objectFactory = { newInstance };
 
-            await (route as any).init();
+            await (job as any).init();
 
             expect(newInstance).toHaveBeenCalledWith(RepoUtils, { name: "FakeAlias", args: [FakeAlias] });
             expect(newInstance).toHaveBeenCalledWith(RepoUtils, { name: "FakeProfile", args: [FakeProfile] });
             expect(newInstance).toHaveBeenCalledWith(RepoUtils, { name: "FakeSecret", args: [FakeSecret] });
             expect(newInstance).toHaveBeenCalledWith(RepoUtils, { name: "FakeUser", args: [FakeUser] });
-            expect((route as any).aliasRepo).toEqual({ name: "FakeAlias" });
-            expect((route as any).profileRepo).toEqual({ name: "FakeProfile" });
-            expect((route as any).secretRepo).toEqual({ name: "FakeSecret" });
-            expect((route as any).userRepo).toEqual({ name: "FakeUser" });
+            expect((job as any).aliasRepo).toEqual({ name: "FakeAlias" });
+            expect((job as any).profileRepo).toEqual({ name: "FakeProfile" });
+            expect((job as any).secretRepo).toEqual({ name: "FakeSecret" });
+            expect((job as any).userRepo).toEqual({ name: "FakeUser" });
         });
 
         it("Does not recreate repos that are already set.", async () => {
-            const route = new TestDefaultAccounts();
+            const job = new TestDefaultAccounts();
             const newInstance = vi.fn();
-            (route as any).objectFactory = { newInstance };
+            (job as any).objectFactory = { newInstance };
             const existingAliasRepo = { find: vi.fn() };
             const existingProfileRepo = { findOne: vi.fn() };
             const existingSecretRepo = { find: vi.fn() };
             const existingUserRepo = { findOne: vi.fn() };
-            (route as any).aliasRepo = existingAliasRepo;
-            (route as any).profileRepo = existingProfileRepo;
-            (route as any).secretRepo = existingSecretRepo;
-            (route as any).userRepo = existingUserRepo;
+            (job as any).aliasRepo = existingAliasRepo;
+            (job as any).profileRepo = existingProfileRepo;
+            (job as any).secretRepo = existingSecretRepo;
+            (job as any).userRepo = existingUserRepo;
 
-            await (route as any).init();
+            await (job as any).init();
 
             expect(newInstance).not.toHaveBeenCalled();
-            expect((route as any).aliasRepo).toBe(existingAliasRepo);
-            expect((route as any).profileRepo).toBe(existingProfileRepo);
-            expect((route as any).secretRepo).toBe(existingSecretRepo);
-            expect((route as any).userRepo).toBe(existingUserRepo);
+            expect((job as any).aliasRepo).toBe(existingAliasRepo);
+            expect((job as any).profileRepo).toBe(existingProfileRepo);
+            expect((job as any).secretRepo).toBe(existingSecretRepo);
+            expect((job as any).userRepo).toBe(existingUserRepo);
         });
     });
 
     describe("schedule", () => {
         it("Always returns undefined (single-execution startup job).", () => {
-            const route = new TestDefaultAccounts();
+            const job = new TestDefaultAccounts();
 
-            expect(route.schedule).toBeUndefined();
+            expect(job.schedule).toBeUndefined();
         });
     });
 
     describe("run", () => {
         it("Does nothing.", () => {
-            const route = new TestDefaultAccounts();
+            const job = new TestDefaultAccounts();
 
-            expect(route.run()).toBeUndefined();
+            expect(job.run()).toBeUndefined();
         });
     });
 
     describe("stop", () => {
         it("Does nothing.", () => {
-            const route = new TestDefaultAccounts();
+            const job = new TestDefaultAccounts();
 
-            expect(route.stop()).toBeUndefined();
+            expect(job.stop()).toBeUndefined();
         });
     });
 
@@ -171,12 +180,12 @@ describe("DefaultAccounts Tests", () => {
         describe("roles", () => {
             it("Applies trustedRoles to an account with no roles configured.", async () => {
                 const accounts: DefaultAccountConfig[] = [{ name: "admin", password: VALID_PASSWORD }];
-                const route = setupRoute(accounts, { trustedRoles: ["admin", "superuser"] });
+                const job = setupDefaultAccounts(accounts, { trustedRoles: ["admin", "superuser"] });
 
-                await route.start();
+                await job.start();
 
                 expect(accounts[0].roles).toEqual(["admin", "superuser"]);
-                expect((route as any).userRepo.create).toHaveBeenCalledWith(
+                expect((job as any).userRepo.create).toHaveBeenCalledWith(
                     expect.objectContaining({ roles: ["admin", "superuser"] }),
                     expect.anything(),
                 );
@@ -184,12 +193,12 @@ describe("DefaultAccounts Tests", () => {
 
             it("Preserves an explicitly empty roles array instead of applying trustedRoles.", async () => {
                 const accounts: DefaultAccountConfig[] = [{ name: "admin", password: VALID_PASSWORD, roles: [] }];
-                const route = setupRoute(accounts, { trustedRoles: ["admin"] });
+                const job = setupDefaultAccounts(accounts, { trustedRoles: ["admin"] });
 
-                await route.start();
+                await job.start();
 
                 expect(accounts[0].roles).toEqual([]);
-                expect((route as any).userRepo.create).toHaveBeenCalledWith(
+                expect((job as any).userRepo.create).toHaveBeenCalledWith(
                     expect.objectContaining({ roles: [] }),
                     expect.anything(),
                 );
@@ -199,9 +208,9 @@ describe("DefaultAccounts Tests", () => {
                 const accounts: DefaultAccountConfig[] = [
                     { name: "admin", password: VALID_PASSWORD, roles: ["editor"] },
                 ];
-                const route = setupRoute(accounts);
+                const job = setupDefaultAccounts(accounts);
 
-                await route.start();
+                await job.start();
 
                 expect(accounts[0].roles).toEqual(["editor"]);
             });
@@ -210,11 +219,11 @@ describe("DefaultAccounts Tests", () => {
         describe("user creation/lookup", () => {
             it("Creates a new user granting full owner ACL when no alias exists for the account name.", async () => {
                 const accounts: DefaultAccountConfig[] = [{ name: "admin", password: VALID_PASSWORD }];
-                const route = setupRoute(accounts);
+                const job = setupDefaultAccounts(accounts);
 
-                await route.start();
+                await job.start();
 
-                const userRepo = (route as any).userRepo;
+                const userRepo = (job as any).userRepo;
                 expect(userRepo.create).toHaveBeenCalledTimes(1);
                 const [newUser, createOptions] = userRepo.create.mock.calls[0];
                 expect(newUser).toEqual(expect.objectContaining({ roles: ["admin"] }));
@@ -241,11 +250,11 @@ describe("DefaultAccounts Tests", () => {
 
             it("Looks up an existing alias for the account name before deciding whether to create a user.", async () => {
                 const accounts: DefaultAccountConfig[] = [{ name: "admin", password: VALID_PASSWORD }];
-                const route = setupRoute(accounts);
+                const job = setupDefaultAccounts(accounts);
 
-                await route.start();
+                await job.start();
 
-                expect((route as any).aliasRepo.find).toHaveBeenCalledWith({ alias: "admin" }, { ignoreACL: true });
+                expect((job as any).aliasRepo.find).toHaveBeenCalledWith({ alias: "admin" }, { ignoreACL: true });
             });
 
             it("Reuses the existing user found via alias lookup instead of creating a new one.", async () => {
@@ -258,12 +267,12 @@ describe("DefaultAccounts Tests", () => {
                 });
                 const userFindOne = vi.fn().mockResolvedValue({ uid: "existing-1", roles: ["admin"] });
                 const userCreate = vi.fn();
-                const route = setupRoute(accounts, {
+                const job = setupDefaultAccounts(accounts, {
                     aliasRepo: { find: aliasFind, create: vi.fn().mockResolvedValue(undefined) },
                     userRepo: { findOne: userFindOne, create: userCreate },
                 });
 
-                await route.start();
+                await job.start();
 
                 expect(userFindOne).toHaveBeenCalledWith("existing-1", { ignoreACL: true });
                 expect(userCreate).not.toHaveBeenCalled();
@@ -279,12 +288,12 @@ describe("DefaultAccounts Tests", () => {
                 });
                 const userFindOne = vi.fn().mockResolvedValue(undefined);
                 const userCreate = vi.fn().mockResolvedValue({ uid: "user-1", roles: ["admin"] });
-                const route = setupRoute(accounts, {
+                const job = setupDefaultAccounts(accounts, {
                     aliasRepo: { find: aliasFind, create: vi.fn().mockResolvedValue(undefined) },
                     userRepo: { findOne: userFindOne, create: userCreate },
                 });
 
-                await route.start();
+                await job.start();
 
                 expect(userCreate).toHaveBeenCalledTimes(1);
             });
@@ -295,12 +304,12 @@ describe("DefaultAccounts Tests", () => {
                 const aliasFind = vi.fn().mockImplementation((query: any) =>
                     "alias" in query ? Promise.resolve(undefined) : Promise.resolve([]),
                 );
-                const route = setupRoute(accounts, {
+                const job = setupDefaultAccounts(accounts, {
                     aliasRepo: { find: aliasFind, create: vi.fn().mockResolvedValue(undefined) },
                     userRepo: { findOne: vi.fn(), create: userCreate },
                 });
 
-                await route.start();
+                await job.start();
 
                 expect(userCreate).toHaveBeenCalledTimes(1);
             });
@@ -312,7 +321,7 @@ describe("DefaultAccounts Tests", () => {
                 const accounts: DefaultAccountConfig[] = [
                     { name: "admin", password: VALID_PASSWORD, email: "admin@example.com" },
                 ];
-                const route = setupRoute(accounts, {
+                const job = setupDefaultAccounts(accounts, {
                     profileRepo: {
                         findOne: vi.fn().mockResolvedValue(undefined),
                         create: vi.fn().mockResolvedValue(undefined),
@@ -320,7 +329,7 @@ describe("DefaultAccounts Tests", () => {
                     },
                 });
 
-                await route.start();
+                await job.start();
 
                 expect(profileUpdate).not.toHaveBeenCalled();
             });
@@ -328,7 +337,7 @@ describe("DefaultAccounts Tests", () => {
             it("Creates a profile with a default given name when the user has none yet.", async () => {
                 const profileCreate = vi.fn().mockImplementation((obj: any) => Promise.resolve(obj));
                 const accounts: DefaultAccountConfig[] = [{ name: "admin", password: VALID_PASSWORD }];
-                const route = setupRoute(accounts, {
+                const job = setupDefaultAccounts(accounts, {
                     profileRepo: {
                         findOne: vi.fn().mockResolvedValue(undefined),
                         create: profileCreate,
@@ -336,7 +345,7 @@ describe("DefaultAccounts Tests", () => {
                     },
                 });
 
-                await route.start();
+                await job.start();
 
                 expect(profileCreate).toHaveBeenCalledTimes(1);
                 const [newProfile] = profileCreate.mock.calls[0];
@@ -348,7 +357,7 @@ describe("DefaultAccounts Tests", () => {
             it("Does not create a profile when one already exists.", async () => {
                 const profileCreate = vi.fn();
                 const accounts: DefaultAccountConfig[] = [{ name: "admin", password: VALID_PASSWORD }];
-                const route = setupRoute(accounts, {
+                const job = setupDefaultAccounts(accounts, {
                     profileRepo: {
                         findOne: vi.fn().mockResolvedValue(makeProfile()),
                         create: profileCreate,
@@ -356,7 +365,7 @@ describe("DefaultAccounts Tests", () => {
                     },
                 });
 
-                await route.start();
+                await job.start();
 
                 expect(profileCreate).not.toHaveBeenCalled();
             });
@@ -366,7 +375,7 @@ describe("DefaultAccounts Tests", () => {
                 const accounts: DefaultAccountConfig[] = [
                     { name: "admin", password: VALID_PASSWORD, email: "Admin@Example.com" },
                 ];
-                const route = setupRoute(accounts, {
+                const job = setupDefaultAccounts(accounts, {
                     profileRepo: {
                         findOne: vi.fn().mockResolvedValue(makeProfile({ contacts: [] })),
                         create: vi.fn(),
@@ -374,7 +383,7 @@ describe("DefaultAccounts Tests", () => {
                     },
                 });
 
-                await route.start();
+                await job.start();
 
                 const [updatedFields] = profileUpdate.mock.calls[0];
                 expect(updatedFields.contacts).toEqual([
@@ -388,7 +397,7 @@ describe("DefaultAccounts Tests", () => {
                 const accounts: DefaultAccountConfig[] = [
                     { name: "admin", password: VALID_PASSWORD, email: "Admin@Example.com" },
                 ];
-                const route = setupRoute(accounts, {
+                const job = setupDefaultAccounts(accounts, {
                     profileRepo: {
                         findOne: vi.fn().mockResolvedValue(makeProfile({ contacts: existingContacts })),
                         create: vi.fn(),
@@ -396,7 +405,7 @@ describe("DefaultAccounts Tests", () => {
                     },
                 });
 
-                await route.start();
+                await job.start();
 
                 const [updatedFields] = profileUpdate.mock.calls[0];
                 expect(updatedFields.contacts).toEqual(existingContacts);
@@ -407,7 +416,7 @@ describe("DefaultAccounts Tests", () => {
                 const accounts: DefaultAccountConfig[] = [
                     { name: "admin", password: VALID_PASSWORD, phone: "555-1234" },
                 ];
-                const route = setupRoute(accounts, {
+                const job = setupDefaultAccounts(accounts, {
                     profileRepo: {
                         findOne: vi.fn().mockResolvedValue(makeProfile({ contacts: [] })),
                         create: vi.fn(),
@@ -415,7 +424,7 @@ describe("DefaultAccounts Tests", () => {
                     },
                 });
 
-                await route.start();
+                await job.start();
 
                 const [updatedFields] = profileUpdate.mock.calls[0];
                 expect(updatedFields.contacts).toEqual([
@@ -429,7 +438,7 @@ describe("DefaultAccounts Tests", () => {
                 const accounts: DefaultAccountConfig[] = [
                     { name: "admin", password: VALID_PASSWORD, phone: "555-1234" },
                 ];
-                const route = setupRoute(accounts, {
+                const job = setupDefaultAccounts(accounts, {
                     profileRepo: {
                         findOne: vi.fn().mockResolvedValue(makeProfile({ contacts: existingContacts })),
                         create: vi.fn(),
@@ -437,7 +446,7 @@ describe("DefaultAccounts Tests", () => {
                     },
                 });
 
-                await route.start();
+                await job.start();
 
                 const [updatedFields] = profileUpdate.mock.calls[0];
                 expect(updatedFields.contacts).toEqual(existingContacts);
@@ -448,11 +457,11 @@ describe("DefaultAccounts Tests", () => {
             it("Creates a missing name alias, trimmed and lowercased.", async () => {
                 const aliasCreate = vi.fn().mockResolvedValue(undefined);
                 const accounts: DefaultAccountConfig[] = [{ name: " Admin ", password: VALID_PASSWORD }];
-                const route = setupRoute(accounts, {
+                const job = setupDefaultAccounts(accounts, {
                     aliasRepo: { find: vi.fn().mockResolvedValue([]), create: aliasCreate },
                 });
 
-                await route.start();
+                await job.start();
 
                 expect(aliasCreate).toHaveBeenCalledWith(
                     { alias: "admin", type: AliasType.NAME, userUid: "user-1", verified: true },
@@ -463,11 +472,11 @@ describe("DefaultAccounts Tests", () => {
             it("Does not create a name alias when account.name is falsy.", async () => {
                 const aliasCreate = vi.fn().mockResolvedValue(undefined);
                 const accounts: DefaultAccountConfig[] = [{ name: "", password: VALID_PASSWORD }];
-                const route = setupRoute(accounts, {
+                const job = setupDefaultAccounts(accounts, {
                     aliasRepo: { find: vi.fn().mockResolvedValue([]), create: aliasCreate },
                 });
 
-                await route.start();
+                await job.start();
 
                 expect(aliasCreate).not.toHaveBeenCalledWith(
                     expect.objectContaining({ type: AliasType.NAME }),
@@ -478,18 +487,20 @@ describe("DefaultAccounts Tests", () => {
             it("Skips creating a name alias when one already exists.", async () => {
                 const aliasCreate = vi.fn().mockResolvedValue(undefined);
                 const accounts: DefaultAccountConfig[] = [{ name: "admin", password: VALID_PASSWORD }];
-                const route = setupRoute(accounts, {
+                const job = setupDefaultAccounts(accounts, {
                     aliasRepo: {
-                        find: vi.fn().mockImplementation((query: any) =>
-                            "alias" in query
-                                ? Promise.resolve([])
-                                : Promise.resolve([{ type: AliasType.NAME, alias: "admin" }]),
-                        ),
+                        find: vi
+                            .fn()
+                            .mockImplementation((query: any) =>
+                                "alias" in query
+                                    ? Promise.resolve([])
+                                    : Promise.resolve([{ type: AliasType.NAME, alias: "admin" }]),
+                            ),
                         create: aliasCreate,
                     },
                 });
 
-                await route.start();
+                await job.start();
 
                 expect(aliasCreate).not.toHaveBeenCalledWith(
                     expect.objectContaining({ type: AliasType.NAME }),
@@ -502,11 +513,11 @@ describe("DefaultAccounts Tests", () => {
                 const accounts: DefaultAccountConfig[] = [
                     { name: "admin", password: VALID_PASSWORD, email: " Admin@Example.com " },
                 ];
-                const route = setupRoute(accounts, {
+                const job = setupDefaultAccounts(accounts, {
                     aliasRepo: { find: vi.fn().mockResolvedValue([]), create: aliasCreate },
                 });
 
-                await route.start();
+                await job.start();
 
                 expect(aliasCreate).toHaveBeenCalledWith(
                     { alias: "admin@example.com", type: AliasType.EMAIL, userUid: "user-1", verified: true },
@@ -519,18 +530,20 @@ describe("DefaultAccounts Tests", () => {
                 const accounts: DefaultAccountConfig[] = [
                     { name: "admin", password: VALID_PASSWORD, email: "admin@example.com" },
                 ];
-                const route = setupRoute(accounts, {
+                const job = setupDefaultAccounts(accounts, {
                     aliasRepo: {
-                        find: vi.fn().mockImplementation((query: any) =>
-                            "alias" in query
-                                ? Promise.resolve([])
-                                : Promise.resolve([{ type: AliasType.EMAIL, alias: "admin@example.com" }]),
-                        ),
+                        find: vi
+                            .fn()
+                            .mockImplementation((query: any) =>
+                                "alias" in query
+                                    ? Promise.resolve([])
+                                    : Promise.resolve([{ type: AliasType.EMAIL, alias: "admin@example.com" }]),
+                            ),
                         create: aliasCreate,
                     },
                 });
 
-                await route.start();
+                await job.start();
 
                 expect(aliasCreate).not.toHaveBeenCalledWith(
                     expect.objectContaining({ type: AliasType.EMAIL }),
@@ -543,11 +556,11 @@ describe("DefaultAccounts Tests", () => {
                 const accounts: DefaultAccountConfig[] = [
                     { name: "admin", password: VALID_PASSWORD, phone: " 555-1234 " },
                 ];
-                const route = setupRoute(accounts, {
+                const job = setupDefaultAccounts(accounts, {
                     aliasRepo: { find: vi.fn().mockResolvedValue([]), create: aliasCreate },
                 });
 
-                await route.start();
+                await job.start();
 
                 expect(aliasCreate).toHaveBeenCalledWith(
                     { alias: "555-1234", type: AliasType.PHONE, userUid: "user-1", verified: true },
@@ -560,18 +573,20 @@ describe("DefaultAccounts Tests", () => {
                 const accounts: DefaultAccountConfig[] = [
                     { name: "admin", password: VALID_PASSWORD, phone: "555-1234" },
                 ];
-                const route = setupRoute(accounts, {
+                const job = setupDefaultAccounts(accounts, {
                     aliasRepo: {
-                        find: vi.fn().mockImplementation((query: any) =>
-                            "alias" in query
-                                ? Promise.resolve([])
-                                : Promise.resolve([{ type: AliasType.PHONE, alias: "555-1234" }]),
-                        ),
+                        find: vi
+                            .fn()
+                            .mockImplementation((query: any) =>
+                                "alias" in query
+                                    ? Promise.resolve([])
+                                    : Promise.resolve([{ type: AliasType.PHONE, alias: "555-1234" }]),
+                            ),
                         create: aliasCreate,
                     },
                 });
 
-                await route.start();
+                await job.start();
 
                 expect(aliasCreate).not.toHaveBeenCalledWith(
                     expect.objectContaining({ type: AliasType.PHONE }),
@@ -585,12 +600,12 @@ describe("DefaultAccounts Tests", () => {
                 const secretCreate = vi.fn();
                 const accounts: DefaultAccountConfig[] = [{ name: "admin", password: VALID_PASSWORD }];
                 const logger = { info: vi.fn() };
-                const route = setupRoute(accounts, {
+                const job = setupDefaultAccounts(accounts, {
                     logger,
                     secretRepo: { find: vi.fn().mockResolvedValue([{ uid: "secret-1" }]), create: secretCreate },
                 });
 
-                await route.start();
+                await job.start();
 
                 expect(secretCreate).not.toHaveBeenCalled();
                 expect(logger.info).not.toHaveBeenCalled();
@@ -599,11 +614,11 @@ describe("DefaultAccounts Tests", () => {
             it("Creates a hashed password secret using the configured password when none exists yet.", async () => {
                 const secretCreate = vi.fn().mockResolvedValue(undefined);
                 const accounts: DefaultAccountConfig[] = [{ name: "admin", password: VALID_PASSWORD }];
-                const route = setupRoute(accounts, {
+                const job = setupDefaultAccounts(accounts, {
                     secretRepo: { find: vi.fn().mockResolvedValue([]), create: secretCreate },
                 });
 
-                await route.start();
+                await job.start();
 
                 expect(secretCreate).toHaveBeenCalledTimes(1);
                 const [secret, options] = secretCreate.mock.calls[0];
@@ -620,13 +635,13 @@ describe("DefaultAccounts Tests", () => {
                 const passwordConfig = new PasswordConfig();
                 const accounts: DefaultAccountConfig[] = [{ name: "admin" }];
                 const logger = { info: vi.fn() };
-                const route = setupRoute(accounts, {
+                const job = setupDefaultAccounts(accounts, {
                     passwordConfig,
                     logger,
                     secretRepo: { find: vi.fn().mockResolvedValue([]), create: secretCreate },
                 });
 
-                await route.start();
+                await job.start();
 
                 expect(generatePasswordSpy).toHaveBeenCalledWith(passwordConfig);
                 expect(accounts[0].password).toBe("Gener@ted1Pw");
@@ -634,26 +649,60 @@ describe("DefaultAccounts Tests", () => {
                 await expect(argon2.verify(secret.data, "Gener@ted1Pw")).resolves.toBe(true);
             });
 
-            it("Logs the generated account information once a password secret is created.", async () => {
+            it("Writes the generated account information to default file once a password secret is created.", async () => {
+                const secretCreate = vi.fn().mockResolvedValue(undefined);
+                const accounts: DefaultAccountConfig[] = [
+                    { name: "admin", password: VALID_PASSWORD, roles: ["admin"] },
+                ];
+                const job = setupDefaultAccounts(accounts, {
+                    secretRepo: { find: vi.fn().mockResolvedValue([]), create: secretCreate },
+                });
+
+                await job.start();
+
+                const filePath: string = path.resolve((job as any).passwordFile);
+                const fileContents: string = fs.readFileSync(filePath, { encoding: "utf-8" });
+                expect(fileContents).toContain(`Name=admin,Password=${VALID_PASSWORD}`);
+
+                fs.unlinkSync(filePath);
+            });
+
+            it("Writes the generated account information to custom file once a password secret is created.", async () => {
+                const passwordFile: string = path.resolve("custom-password-file");
+                const secretCreate = vi.fn().mockResolvedValue(undefined);
+                const accounts: DefaultAccountConfig[] = [
+                    { name: "admin", password: VALID_PASSWORD, roles: ["admin"] },
+                ];
+                const job = setupDefaultAccounts(accounts, {
+                    secretRepo: { find: vi.fn().mockResolvedValue([]), create: secretCreate },
+                    passwordFile,
+                });
+
+                await job.start();
+
+                const fileContents: string = fs.readFileSync(passwordFile, { encoding: "utf-8" });
+                expect(fileContents).toContain(`Name=admin,Password=${VALID_PASSWORD}`);
+
+                fs.unlinkSync(passwordFile);
+            });
+
+            it("Logs the generated account information when no passwordFile is set once a password secret is created.", async () => {
                 const secretCreate = vi.fn().mockResolvedValue(undefined);
                 const accounts: DefaultAccountConfig[] = [
                     { name: "admin", password: VALID_PASSWORD, roles: ["admin"] },
                 ];
                 const logger = { info: vi.fn() };
-                const route = setupRoute(accounts, {
+                const job = setupDefaultAccounts(accounts, {
                     logger,
+                    passwordFile: undefined,
                     secretRepo: { find: vi.fn().mockResolvedValue([]), create: secretCreate },
                 });
 
-                await route.start();
+                await job.start();
 
                 const loggedLines = logger.info.mock.calls.map((call: any[]) => call[0]);
                 expect(loggedLines).toEqual(
-                    expect.arrayContaining([
-                        `Name: admin`,
-                        `Password: ${VALID_PASSWORD}`,
-                        `Roles: admin`,
-                    ]),
+                    expect.arrayContaining([`Name: admin`, `Password: '${VALID_PASSWORD}'`, `Roles: admin`]),
                 );
             });
         });
@@ -667,11 +716,11 @@ describe("DefaultAccounts Tests", () => {
                 .fn()
                 .mockResolvedValueOnce({ uid: "user-1", roles: ["admin"] })
                 .mockResolvedValueOnce({ uid: "user-2", roles: ["admin"] });
-            const route = setupRoute(accounts, {
+            const job = setupDefaultAccounts(accounts, {
                 userRepo: { findOne: vi.fn(), create: userCreate },
             });
 
-            await route.start();
+            await job.start();
 
             expect(userCreate).toHaveBeenCalledTimes(2);
         });
