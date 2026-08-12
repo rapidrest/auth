@@ -411,11 +411,20 @@ describe("MFAStrategy Tests", () => {
     });
 
     describe("verifyBasic (phase 1)", () => {
-        it("Throws when no Basic auth header is present, even if the dispatch payload has id/password.", async () => {
+        it("Authenticates using body-supplied credentials when no Basic auth header is present.", async () => {
+            // The frontend's real sign-in call posts `{id, password}` as a JSON body with no Authorization
+            // header at all — verifyBasic must accept the same body-aware payload that authenticate()'s
+            // dispatch condition (`payload.id && payload.password`) already matched against, not silently
+            // require a header the dispatcher never checked for.
             const req = makeReq({ body: { id: "user-uid-1", password: "password" } });
+            options.require2FA = false;
+            (options.verify as any).mockResolvedValue(jwtUser);
+            (options.getMethods as any).mockResolvedValue([]);
 
-            await expect(strategy.authenticate(req, makeRes())).rejects.toThrow(/Invalid user id or password/);
-            expect(options.verify).not.toHaveBeenCalled();
+            const result = await strategy.authenticate(req, makeRes());
+
+            expect(result?.user).toEqual(jwtUser);
+            expect(options.verify).toHaveBeenCalledWith("user-uid-1", "password");
         });
 
         it("Throws when verify() resolves undefined.", async () => {

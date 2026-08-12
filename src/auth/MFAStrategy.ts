@@ -7,7 +7,6 @@ import { OTPContact, PasskeyConfig, StoredPasskeyCredential } from "./types.js";
 import {
     generateOTP,
     generatePasskeyChallenge,
-    getBasicData,
     getRequestData,
     isOTPResponse,
     isPasskeyResponse,
@@ -149,8 +148,9 @@ export class MFAStrategyOptions {
  *
  * The login flow has three phases:
  *
- * 1. Verify Basic - The client sends a request with `Authorization` header containing the user's id and password. The
- * server returns `{ uid, methods }`: the user's internal uid (needed to identify subsequent phase 2/3 requests as
+ * 1. Verify Basic - The client sends a request with the user's id and password, either as a JSON/form body
+ * (`{ id, password }`) or via an `Authorization: Basic` header. The server returns `{ uid, methods }`: the
+ * user's internal uid (needed to identify subsequent phase 2/3 requests as
  * this session's, regardless of what login identifier — email, alias, etc. — was used for phase 1) and the list of
  * available secondary authentication methods.
  * 2. Challenge - The client requests a selected 2FA challenge, submitting the `uid` from phase 1 as `id` and
@@ -204,7 +204,7 @@ export class MFAStrategy implements AuthStrategy {
                 };
             }
         } else if (payload.id && payload.password) {
-            const user: JWTUser | undefined = await this.verifyBasic(req, res);
+            const user: JWTUser | undefined = await this.verifyBasic(payload, req, res);
             if (user) {
                 return {
                     data,
@@ -305,8 +305,11 @@ export class MFAStrategy implements AuthStrategy {
         }
     }
 
-    protected async verifyBasic(req: HttpRequest, res: HttpResponse): Promise<JWTUser | undefined> {
-        const requestData: any = getBasicData(req);
+    protected async verifyBasic(payload: any, req: HttpRequest, res: HttpResponse): Promise<JWTUser | undefined> {
+        // `payload` comes from authenticate()'s `getRequestData(req)`, which already covers both a JSON/form
+        // body and an `Authorization: Basic` header — re-deriving via `getBasicData(req)` here would silently
+        // ignore body-supplied credentials (the shape the frontend actually sends), rejecting every login.
+        const requestData: any = payload;
 
         if (!requestData || !requestData.id || !requestData.password) {
             throw new Error("Invalid user id or password.");
