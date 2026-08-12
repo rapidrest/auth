@@ -8,6 +8,7 @@ import { PasswordConfig } from "../auth/types.js";
 import { generatePassword, importArgon2 } from "../auth/shared.js";
 import * as path from "path";
 import * as fs from "fs/promises";
+import { existsSync } from "fs";
 
 const { Config, Init, Inject, Logger } = ObjectDecorators;
 
@@ -103,6 +104,15 @@ export abstract class DefaultAccounts<
                 name: this.userClass.name,
                 args: [this.userClass],
             });
+        }
+
+        // The passwords file should only exist for a short time after it was first written.
+        // So if the server was restarted we remove it to prevent unauthorized access.
+        if (this.passwordFile) {
+            const filePath: string = path.resolve(this.passwordFile);
+            if (existsSync(filePath)) {
+                await fs.unlink(filePath);
+            }
         }
     }
 
