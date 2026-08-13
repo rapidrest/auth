@@ -427,6 +427,18 @@ describe("MFAStrategy Tests", () => {
             expect(options.verify).toHaveBeenCalledWith("user-uid-1", "password");
         });
 
+        // authenticate()'s dispatch condition (`payload.id && payload.password`) already guarantees both
+        // are present before verifyBasic() is ever reached through the public API — this guard only
+        // protects verifyBasic() itself as a directly-callable protected method (e.g. for a subclass that
+        // invokes it with a payload it hasn't already validated).
+        it("Throws when called directly with a payload missing id or password.", async () => {
+            const req = makeReq({});
+
+            await expect((strategy as any).verifyBasic({ id: "user-uid-1" }, req, makeRes())).rejects.toThrow(
+                /Invalid user id or password/,
+            );
+        });
+
         it("Throws when verify() resolves undefined.", async () => {
             const req = makeReq({
                 headers: { authorization: basicHeader("user-uid-1", "bogus") },

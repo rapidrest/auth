@@ -37,11 +37,16 @@ describe("Route:AliasSQL Tests", () => {
     const admin: any = {
         uid: uuid.v4(),
         roles: ["admin"],
+        // BaseAliasRoute's create()/delete() require an elevated token (@RequiresElevation). This file
+        // exercises CRUD/ownership/verification behavior, not elevation enforcement itself (see
+        // BaseAuthElevationRoute's own tests for that), so tokens are minted pre-elevated throughout.
+        elevated: Date.now(),
     };
     const adminToken = JWTUtils.createTokenSync(config.get("auth"), admin);
     const user: any = {
         uid: uuid.v4(),
         roles: [],
+        elevated: Date.now(),
     };
     const userToken = JWTUtils.createTokenSync(config.get("auth"), user);
 
@@ -196,6 +201,45 @@ describe("Route:AliasSQL Tests", () => {
         // Validate the contents were removed
         const count: number = await repo.count({ where: { uid: obj.uid } });
         expect(count).toBe(0);
+    });
+
+    // Regression guard: create()/delete() are @RequiresElevation(60)-gated. A plain, non-elevated access
+    // token — the kind issued by a normal login — must not be able to satisfy them; only a token minted by
+    // BaseAuthElevationRoute (see AuthElevationRoute.test.ts) can.
+    it("Cannot make create request with a non-elevated token.", async () => {
+        const nonElevated: any = { uid: uuid.v4(), roles: [] };
+        const nonElevatedToken = JWTUtils.createTokenSync(config.get("auth"), nonElevated);
+        const obj: Partial<AliasSQL> = {
+            alias: uuid.v4(),
+            type: AliasType.NAME,
+            userUid: nonElevated.uid,
+        };
+
+        const result = await request(server.getApplication())
+            .post(baseUrl)
+            .set("Authorization", "jwt " + nonElevatedToken)
+            .send(obj);
+
+        expect(result.status).toBe(403);
+
+        const count: number = await repo.count({ where: { alias: obj.alias } });
+        expect(count).toBe(0);
+    });
+
+    it("Cannot make delete request with a non-elevated token.", async () => {
+        const nonElevated: any = { uid: uuid.v4(), roles: [] };
+        const nonElevatedToken = JWTUtils.createTokenSync(config.get("auth"), nonElevated);
+        const obj: AliasSQL = await createAliasSQL({ userUid: nonElevated.uid });
+        const url = baseUrl + "/" + obj.uid;
+
+        const result = await request(server.getApplication())
+            .delete(url)
+            .set("Authorization", "jwt " + nonElevatedToken);
+
+        expect(result.status).toBe(403);
+
+        const count: number = await repo.count({ where: { uid: obj.uid } });
+        expect(count).toBe(1);
     });
 
     it("Can make findAll request (with admin token).", async () => {

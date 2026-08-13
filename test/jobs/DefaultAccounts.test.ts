@@ -150,6 +150,19 @@ describe("DefaultAccounts Tests", () => {
             expect((job as any).secretRepo).toBe(existingSecretRepo);
             expect((job as any).userRepo).toBe(existingUserRepo);
         });
+
+        it("Skips the stale password file cleanup when no passwordFile is configured.", async () => {
+            const job = new TestDefaultAccounts();
+            const newInstance = vi.fn();
+            (job as any).objectFactory = { newInstance };
+            (job as any).aliasRepo = { find: vi.fn() };
+            (job as any).profileRepo = { findOne: vi.fn() };
+            (job as any).secretRepo = { find: vi.fn() };
+            (job as any).userRepo = { findOne: vi.fn() };
+            (job as any).passwordFile = undefined;
+
+            await expect((job as any).init()).resolves.toBeUndefined();
+        });
     });
 
     describe("schedule", () => {

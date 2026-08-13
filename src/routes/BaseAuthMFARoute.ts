@@ -159,6 +159,13 @@ export abstract class BaseAuthMFARoute<U extends User, S extends Secret, A exten
     }
 
     protected convertAliasToMethod(alias: Alias, obfuscate?: boolean): MFAMethod | undefined {
+        // A 2FA method must already be a proven point of contact. Without this, any caller holding a mere
+        // (possibly stolen) password could add a brand-new, self-controlled, unverified email/phone alias to
+        // their own account via BaseAliasRoute.create().
+        if (!alias.verified) {
+            return undefined;
+        }
+
         switch (alias.type) {
             case AliasType.EMAIL:
                 return {
@@ -302,7 +309,7 @@ export abstract class BaseAuthMFARoute<U extends User, S extends Secret, A exten
 
         // Now add all eligible aliases to our list of methods (e.g. email, phone).
         for (const alias of aliases) {
-            const method: MFAMethod | undefined = this.convertAliasToMethod(alias);
+            const method: MFAMethod | undefined = this.convertAliasToMethod(alias, true);
             if (method) {
                 results.push(method);
             }

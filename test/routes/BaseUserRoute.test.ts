@@ -357,6 +357,19 @@ describe("BaseUserRoute Tests", () => {
             expect(obj.roles).toEqual([]);
         });
 
+        it("Resets roles to an empty array when no existing user record is found.", async () => {
+            vi.spyOn(ModelRoute.prototype as any, "validate").mockResolvedValue(undefined);
+            const route = new TestUserRoute();
+            const findOne = vi.fn().mockResolvedValue(undefined);
+            (route as any).repoUtils = { findOne };
+            (route as any).authConfig = {};
+            const obj: any = { uid: "user-1", roles: ["admin"] };
+
+            await (route as any).validateUpdate("user-1", obj, { uid: "user-1", roles: [] });
+
+            expect(obj.roles).toEqual([]);
+        });
+
         it("Resolves the 'me' keyword to the caller's own uid when looking up the persisted roles.", async () => {
             vi.spyOn(ModelRoute.prototype as any, "validate").mockResolvedValue(undefined);
             const route = new TestUserRoute();

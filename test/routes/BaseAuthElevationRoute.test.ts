@@ -707,6 +707,22 @@ describe("BaseAuthElevationRoute Tests", () => {
             });
         });
 
+        it("Obfuscates the contact for a PHONE alias when obfuscate is true.", () => {
+            const route = new TestAuthElevationRoute();
+            const result = (route as any).convertAliasToMethod(
+                {
+                    uid: "alias-1",
+                    alias: "+15551234567",
+                    type: AliasType.PHONE,
+                    verified: true,
+                },
+                true,
+            );
+
+            expect(result?.data.contact).toBe((route as any).obfuscateAlias("+15551234567", AliasType.PHONE));
+            expect(result?.data.contact).not.toBe("+15551234567");
+        });
+
         // Regression: an elevation method must be a *proven* point of contact. Without this check, a
         // caller holding only a non-elevated (possibly stolen) access token could add a brand-new,
         // self-controlled, unverified email/phone alias via BaseAliasRoute.create() (which requires no
@@ -979,6 +995,26 @@ describe("BaseAuthElevationRoute Tests", () => {
 
             expect(result).toHaveLength(1);
             expect(result[0].id).toBe("alias-1");
+        });
+
+        // Regression: this list is returned directly to the client by listMethods() (see the class doc
+        // comment above getMethods()), so a real contact value here would leak a compromised account's
+        // email/phone to whoever holds the (possibly stolen) access token.
+        it("Obfuscates alias contact info in the returned methods.", async () => {
+            const route = new TestAuthElevationRoute();
+            (route as any).secretRepo = { find: vi.fn().mockResolvedValue([]) };
+            (route as any).aliasRepo = {
+                find: vi.fn().mockResolvedValue([
+                    { uid: "alias-1", alias: "user@example.com", type: AliasType.EMAIL, verified: true },
+                ]),
+            };
+            (route as any).userRepo = {};
+
+            const result = await (route as any).getMethods("user-1");
+
+            expect(result).toHaveLength(1);
+            expect(result[0].data.contact).not.toBe("user@example.com");
+            expect(result[0].data.contact).toBe((route as any).obfuscateAlias("user@example.com", AliasType.EMAIL));
         });
     });
 

@@ -213,6 +213,30 @@ describe("BaseAuthOIDCRoute Tests", () => {
             expect(user).toEqual({ uid: "existing-user" });
         });
 
+        it("Falls through to account creation when a matched verified alias references a user that no longer exists.", async () => {
+            const aliasCreate = vi.fn();
+            const aliasFindOne = vi.fn().mockResolvedValue({
+                type: AliasType.EMAIL,
+                verified: true,
+                userUid: "deleted-user",
+            });
+            const userCreate = vi.fn().mockResolvedValue({ uid: "new-user" });
+            const userFindOne = vi.fn().mockResolvedValue(undefined);
+            const { getUser } = await setupRoute(
+                { create: aliasCreate, findOne: aliasFindOne },
+                { create: vi.fn() },
+                { create: userCreate, findOne: userFindOne },
+                { lookup: vi.fn().mockResolvedValue(undefined) },
+            );
+            const profile: OIDCProfile = { ...baseProfile, email: "user@example.com", email_verified: true };
+
+            const user = await getUser("token", profile);
+
+            expect(userFindOne).toHaveBeenCalledWith("deleted-user", { ignoreACL: true });
+            expect(user).toEqual({ uid: "new-user" });
+            expect(userCreate).toHaveBeenCalled();
+        });
+
         it("Does not attempt to link an existing account via an unverified email claim.", async () => {
             // The oauth-alias lookup finds no one, and the alias-lookup fallback must never even be
             // attempted since the provider didn't assert the email as verified — an attacker

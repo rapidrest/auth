@@ -229,6 +229,23 @@ describe("BaseProfileRoute Tests", () => {
                 expect(findOne).toHaveBeenCalledWith("user-1", { ignoreACL: true, user, skipCache: true });
             });
 
+            it("Forces verified:false on every contact when no existing profile is found.", async () => {
+                const route = new TestProfileRoute();
+                (route as any).repoUtils = {
+                    validate: vi.fn().mockResolvedValue(undefined),
+                    findOne: vi.fn().mockResolvedValue(undefined),
+                };
+                const obj: any = {
+                    contacts: [{ contact: "victim@example.com", type: ContactType.EMAIL, verified: true }],
+                };
+
+                await (route as any).validateUpdate("user-1", obj, { uid: "user-1" });
+
+                expect(obj.contacts).toEqual([
+                    { contact: "victim@example.com", type: ContactType.EMAIL, verified: false },
+                ]);
+            });
+
             it("Does not touch obj.contacts when the update doesn't include contacts.", async () => {
                 const route = new TestProfileRoute();
                 (route as any).repoUtils = { validate: vi.fn().mockResolvedValue(undefined), findOne: vi.fn() };

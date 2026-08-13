@@ -123,6 +123,13 @@ describe("BaseAuthRefreshRoute Tests", () => {
 
             expect((route as any).getToken(req)).toBeUndefined();
         });
+
+        it("Skips both cookie checks entirely when neither cookies nor signedCookies is present on the request.", async () => {
+            const { route } = await setupRoute();
+            const req = makeReq({ body: {}, cookies: undefined, signedCookies: undefined });
+
+            expect((route as any).getToken(req)).toBeUndefined();
+        });
     });
 
     describe("authenticate", () => {

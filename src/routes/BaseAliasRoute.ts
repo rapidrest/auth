@@ -19,7 +19,7 @@ import { RateLimiter } from "../auth/RateLimiter.js";
 
 const { Config, Init, Inject } = ObjectDecorators;
 const { Description, Returns, Summary } = DocDecorators;
-const { Auth, Get, Param, Post, Query, Request, User } = RouteDecorators;
+const { Auth, Get, Param, Post, Query, Request, RequiresElevation, User } = RouteDecorators;
 
 /**
  * @author Jean-Philippe Steinmetz
@@ -118,6 +118,7 @@ export abstract class BaseAliasRoute<T extends Alias> extends CRUDRoute<T> {
         }
     }
 
+    @RequiresElevation(60)
     public async create(obj: T | T[], @Request req: HttpRequest, @User user?: JWTUser): Promise<T | Array<T>> {
         const result = await super.create(obj, req, user);
 
@@ -130,6 +131,17 @@ export abstract class BaseAliasRoute<T extends Alias> extends CRUDRoute<T> {
         }
 
         return result;
+    }
+
+    @RequiresElevation(60)
+    public delete(
+        @Param("id") id: string,
+        @Query("version") version: string | undefined,
+        @Query("purge") purge: string | undefined,
+        @Request req: HttpRequest,
+        @User user?: JWTUser,
+    ): Promise<void> {
+        return super.delete(id, version, purge, req, user);
     }
 
     public async find(@Param() params: any, @Query() query: any, @User user?: JWTUser): Promise<T[]> {

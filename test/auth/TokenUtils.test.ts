@@ -402,5 +402,13 @@ describe("TokenUtils Tests", () => {
 
             expect(value).toBe("jwt=token-value; Path=/; SameSite=Lax");
         });
+
+        it("Falls back to the 'jwt' cookie name when none is configured.", () => {
+            const tokenUtils = makeTokenUtils();
+
+            const value = (tokenUtils as any).buildCookie("token-value", {});
+
+            expect(value).toBe("jwt=token-value; Path=/; SameSite=Lax; HttpOnly");
+        });
     });
 });

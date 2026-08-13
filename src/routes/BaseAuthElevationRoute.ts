@@ -532,7 +532,7 @@ export abstract class BaseAuthElevationRoute<U extends User, S extends Secret, A
 
         // Now add all eligible aliases to our list of methods (e.g. email, phone).
         for (const alias of aliases) {
-            const method: MFAMethod | undefined = this.convertAliasToMethod(alias);
+            const method: MFAMethod | undefined = this.convertAliasToMethod(alias, true);
             if (method) {
                 results.push(method);
             }

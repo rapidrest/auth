@@ -321,6 +321,17 @@ describe("BaseAliasRoute Tests", () => {
 
                 expect(obj.verified).toBe(true);
             });
+
+            it("Skips the format check when alias is not a string, but still marks it verified.", async () => {
+                vi.spyOn(CRUDRoute.prototype as any, "validateCreate").mockResolvedValue(undefined);
+                const route = new TestAliasRoute();
+                (route as any).repoUtils = { find: vi.fn().mockResolvedValue([]) };
+                const obj: any = { type: AliasType.NAME };
+
+                await (route as any).validateCreate(obj, { uid: "user-1" });
+
+                expect(obj.verified).toBe(true);
+            });
         });
     });
 
@@ -375,6 +386,22 @@ describe("BaseAliasRoute Tests", () => {
 
             expect(sendVerificationCode).toHaveBeenCalledTimes(1);
             expect(sendVerificationCode).toHaveBeenCalledWith(unverified, req);
+        });
+    });
+
+    // create()/delete() are @RequiresElevation(60)-gated (enforced by middleware at HTTP dispatch, before
+    // this method body ever runs — see AliasRoute.test.ts for the enforcement itself). This override exists
+    // only to carry that decorator; it otherwise delegates straight to CRUDRoute.delete().
+    describe("delete", () => {
+        it("Delegates to CRUDRoute.delete() with the same arguments.", async () => {
+            const spy = vi.spyOn(CRUDRoute.prototype as any, "delete").mockResolvedValue(undefined);
+            const route = new TestAliasRoute();
+            const req: any = {};
+            const user: any = { uid: "user-1" };
+
+            await route.delete("alias-1", "1", "true", req, user);
+
+            expect(spy).toHaveBeenCalledWith("alias-1", "1", "true", req, user);
         });
     });
 

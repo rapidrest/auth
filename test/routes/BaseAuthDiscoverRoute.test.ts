@@ -91,6 +91,16 @@ describe("BaseAuthDiscoverRoute Tests", () => {
             expect(result).toEqual(EMPTY_RESULT);
         });
 
+        it("Treats verified aliases as empty when aliasRepo is unavailable.", async () => {
+            const route = new TestAuthDiscoverRoute();
+            (route as any).userUtils = { lookup: vi.fn().mockResolvedValue({ uid: "user-1" }) };
+            (route as any).secretRepo = { find: vi.fn().mockResolvedValue([]) };
+
+            const result = await route.discover("user-1");
+
+            expect(result).toEqual(EMPTY_RESULT);
+        });
+
         it("Returns the equalized empty result immediately when no id is given.", async () => {
             const route = new TestAuthDiscoverRoute();
             const result = await route.discover(undefined);

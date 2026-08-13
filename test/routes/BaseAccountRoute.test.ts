@@ -115,6 +115,30 @@ describe("BaseAccountRoute Tests", () => {
         });
     });
 
+    describe("cleanSecretData", () => {
+        it("Strips the data property from every secret when given an array.", () => {
+            const route = new TestAccountRoute();
+            const secrets: any[] = [
+                { uid: "secret-1", data: "sensitive-1" },
+                { uid: "secret-2", data: "sensitive-2" },
+            ];
+
+            (route as any).cleanSecretData(secrets);
+
+            expect(secrets[0].data).toBeUndefined();
+            expect(secrets[1].data).toBeUndefined();
+        });
+
+        it("Strips the data property when given a single secret.", () => {
+            const route = new TestAccountRoute();
+            const secret: any = { uid: "secret-1", data: "sensitive-1" };
+
+            (route as any).cleanSecretData(secret);
+
+            expect(secret.data).toBeUndefined();
+        });
+    });
+
     describe("get", () => {
         it("Throws AUTH_PERMISSION_FAILURE when a non-trusted caller requests another user's account.", async () => {
             const route = new TestAccountRoute();

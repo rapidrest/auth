@@ -124,12 +124,12 @@ describe("BaseAuthMFARoute Tests", () => {
                 uid: "alias-1",
                 alias: "+15551234567",
                 type: AliasType.PHONE,
-                verified: false,
+                verified: true,
             });
 
             expect(result).toEqual({
                 id: "alias-1",
-                data: { contact: "+15551234567", type: OTPContactType.SMS, verified: false },
+                data: { contact: "+15551234567", type: OTPContactType.SMS, verified: true },
                 type: MFAMethodType.OTP,
             });
         });
@@ -137,7 +137,7 @@ describe("BaseAuthMFARoute Tests", () => {
         it("Obfuscates a PHONE alias's contact when requested.", () => {
             const route = new TestAuthMFARoute();
             const result = (route as any).convertAliasToMethod(
-                { uid: "alias-1", alias: "+15551234567", type: AliasType.PHONE, verified: false },
+                { uid: "alias-1", alias: "+15551234567", type: AliasType.PHONE, verified: true },
                 true,
             );
 
@@ -150,6 +150,35 @@ describe("BaseAuthMFARoute Tests", () => {
                 uid: "alias-1",
                 alias: "John Doe",
                 type: AliasType.NAME,
+                verified: true,
+            });
+
+            expect(result).toBeUndefined();
+        });
+
+        // Regression: a 2FA method must be a *proven* point of contact. Without this check, a caller
+        // holding only the account's password could add a brand-new, self-controlled, unverified
+        // email/phone alias via BaseAliasRoute.create() (which requires no elevation), then use it as a
+        // 2FA method to receive and submit a real OTP code — completing 2FA without ever proving anything
+        // beyond knowledge of the password. Mirrors BaseAuthElevationRoute.convertAliasToMethod()'s guard.
+        it("Returns undefined for an unverified EMAIL alias, even though it would otherwise convert.", () => {
+            const route = new TestAuthMFARoute();
+            const result = (route as any).convertAliasToMethod({
+                uid: "alias-1",
+                alias: "attacker@evil.com",
+                type: AliasType.EMAIL,
+                verified: false,
+            });
+
+            expect(result).toBeUndefined();
+        });
+
+        it("Returns undefined for an unverified PHONE alias, even though it would otherwise convert.", () => {
+            const route = new TestAuthMFARoute();
+            const result = (route as any).convertAliasToMethod({
+                uid: "alias-1",
+                alias: "+15551234567",
+                type: AliasType.PHONE,
                 verified: false,
             });
 
@@ -387,6 +416,45 @@ describe("BaseAuthMFARoute Tests", () => {
             expect(result).toHaveLength(2);
             expect(result[0]).toEqual({ id: "secret-1", data: {}, type: MFAMethodType.TOTP });
             expect(result[1].type).toBe(MFAMethodType.OTP);
+        });
+
+        // Regression: this list is returned to the client (see the class doc comment above getMethods()),
+        // so a real contact value here would leak a compromised account's email/phone to whoever holds the
+        // (possibly stolen) access token.
+        it("Obfuscates alias contact info in the returned methods.", async () => {
+            const route = new TestAuthMFARoute();
+            (route as any).secretRepo = { find: vi.fn().mockResolvedValue([]) };
+            (route as any).aliasRepo = {
+                find: vi.fn().mockResolvedValue([
+                    { uid: "alias-1", alias: "user@example.com", type: AliasType.EMAIL, verified: true },
+                ]),
+            };
+            (route as any).userRepo = {};
+
+            const result = await (route as any).getMethods("user-1");
+
+            expect(result).toHaveLength(1);
+            expect(result[0].data.contact).not.toBe("user@example.com");
+            expect(result[0].data.contact).toBe((route as any).obfuscateAlias("user@example.com", AliasType.EMAIL));
+        });
+
+        // Regression: an unverified alias must never be offered as a 2FA method — see
+        // convertAliasToMethod's regression test for the full exploit this closes.
+        it("Excludes unverified aliases from the list of methods.", async () => {
+            const route = new TestAuthMFARoute();
+            (route as any).secretRepo = { find: vi.fn().mockResolvedValue([]) };
+            (route as any).aliasRepo = {
+                find: vi.fn().mockResolvedValue([
+                    { uid: "alias-1", alias: "verified@example.com", type: AliasType.EMAIL, verified: true },
+                    { uid: "alias-2", alias: "attacker@evil.com", type: AliasType.EMAIL, verified: false },
+                ]),
+            };
+            (route as any).userRepo = {};
+
+            const result = await (route as any).getMethods("user-1");
+
+            expect(result).toHaveLength(1);
+            expect(result[0].id).toBe("alias-1");
         });
     });
 
