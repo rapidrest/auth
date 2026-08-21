@@ -1,5 +1,6 @@
 ////////////////////////////////////////////////////////////////////////////////
 // Copyright (C) 2026 Jean-Philippe Steinmetz
+// SPDX-License-Identifier: MPL-2.0
 ////////////////////////////////////////////////////////////////////////////////
 import { ApiError, MemoryStore, ObjectDecorators } from "@rapidrest/core";
 import { ApiErrors, ConnectionManager } from "@rapidrest/service-core";

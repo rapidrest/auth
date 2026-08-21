@@ -1,5 +1,6 @@
 ///////////////////////////////////////////////////////////////////////////////
 // Copyright (C) 2026 Jean-Philippe Steinmetz
+// SPDX-License-Identifier: MPL-2.0
 ///////////////////////////////////////////////////////////////////////////////
 // The real cryptographic verification is SimpleWebAuthn's own tested responsibility (see
 // test/auth/PasskeyStrategy.test.ts for isolated strategy-orchestration tests against a mocked

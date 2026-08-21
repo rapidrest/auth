@@ -1,5 +1,6 @@
 ///////////////////////////////////////////////////////////////////////////////
 // Copyright (C) 2026 Jean-Philippe Steinmetz
+// SPDX-License-Identifier: MPL-2.0
 ///////////////////////////////////////////////////////////////////////////////
 // Isolated unit tests for OIDCStrategy — no HTTP server, no database. The provider is a third-party
 // HTTP service (mocked via axios) and JWT/JWKS verification is mocked too (that's jsonwebtoken's and

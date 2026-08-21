@@ -1,5 +1,6 @@
 ///////////////////////////////////////////////////////////////////////////////
 // Copyright (C) 2026 Jean-Philippe Steinmetz
+// SPDX-License-Identifier: MPL-2.0
 ///////////////////////////////////////////////////////////////////////////////
 // Isolated unit test — no HTTP server, no database. `DefaultAccountsMongo` is a thin subclass that
 // only wires the Mongo model classes onto the base `DefaultAccounts` job; its behavior is already

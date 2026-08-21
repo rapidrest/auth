@@ -1,5 +1,6 @@
 ///////////////////////////////////////////////////////////////////////////////
 // Copyright (C) 2026 Jean-Philippe Steinmetz
+// SPDX-License-Identifier: MPL-2.0
 ///////////////////////////////////////////////////////////////////////////////
 // Isolated unit tests for BaseSecretRoute — no HTTP server, no database. `ModelRoute`'s own `do*`
 // behaviors are mocked directly on its prototype (BaseSecretRoute never overrides them, it only calls

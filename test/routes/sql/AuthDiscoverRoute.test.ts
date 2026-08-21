@@ -1,5 +1,6 @@
 ///////////////////////////////////////////////////////////////////////////////
 // Copyright (C) 2026 Jean-Philippe Steinmetz
+// SPDX-License-Identifier: MPL-2.0
 ///////////////////////////////////////////////////////////////////////////////
 // Isolated unit test for the trivial BaseAuthDiscoverRouteSQL model-binding class — no HTTP server, no
 // database. The actual discover logic is exercised by test/routes/BaseAuthDiscoverRoute.test.ts; this

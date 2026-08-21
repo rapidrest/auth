@@ -1,5 +1,6 @@
 ///////////////////////////////////////////////////////////////////////////////
 // Copyright (C) 2026 Jean-Philippe Steinmetz
+// SPDX-License-Identifier: MPL-2.0
 ///////////////////////////////////////////////////////////////////////////////
 // The OIDC provider is a third-party HTTP service — we mock axios (the only transport OIDCStrategy
 // uses to talk to it) so the route can be exercised end to end without a real provider. The test

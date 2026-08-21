@@ -1,5 +1,6 @@
 ///////////////////////////////////////////////////////////////////////////////
 // Copyright (C) 2026 Jean-Philippe Steinmetz
+// SPDX-License-Identifier: MPL-2.0
 ///////////////////////////////////////////////////////////////////////////////
 // Isolated unit tests for BaseProfileRoute — no HTTP server, no database. otplib is real (the
 // established pattern in this test suite, see BaseRegistrationRoute.test.ts), so the contact

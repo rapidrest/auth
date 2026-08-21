@@ -1,5 +1,6 @@
 ///////////////////////////////////////////////////////////////////////////////
 // Copyright (C) 2026 Jean-Philippe Steinmetz
+// SPDX-License-Identifier: MPL-2.0
 ///////////////////////////////////////////////////////////////////////////////
 // Isolated unit tests for OTPStrategy — no HTTP server, no database. Uses the real shared.ts OTP
 // helpers (and real otplib), exactly as the HTTP-level AuthOTPRoute suites do.

@@ -1,5 +1,6 @@
 ///////////////////////////////////////////////////////////////////////////////
 // Copyright (C) 2026 Jean-Philippe Steinmetz. All rights reserved.
+// SPDX-License-Identifier: MPL-2.0
 ///////////////////////////////////////////////////////////////////////////////
 // Isolated unit tests for PasskeyStrategy — no HTTP server, no database. SimpleWebAuthn's own
 // ceremony functions are mocked here; these tests verify PasskeyStrategy's own orchestration

@@ -1,5 +1,6 @@
 ///////////////////////////////////////////////////////////////////////////////
 // Copyright (C) 2026 Jean-Philippe Steinmetz
+// SPDX-License-Identifier: MPL-2.0
 ///////////////////////////////////////////////////////////////////////////////
 // Isolated unit tests for BaseRegistrationRoute — no HTTP server, no database. otplib is real (it's
 // already exercised this way throughout the auth test suites), so `start()`/`verify()` are tested

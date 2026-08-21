@@ -1,5 +1,6 @@
 ///////////////////////////////////////////////////////////////////////////////
 // Copyright (C) 2026 Jean-Philippe Steinmetz
+// SPDX-License-Identifier: MPL-2.0
 ///////////////////////////////////////////////////////////////////////////////
 // Isolated unit tests for TOTPStrategy — no HTTP server, no database. Uses the real shared.ts
 // verifyTOTP/otplib, exactly as the HTTP-level AuthTOTPRoute suites do.

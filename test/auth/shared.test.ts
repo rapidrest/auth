@@ -1,5 +1,6 @@
 ///////////////////////////////////////////////////////////////////////////////
 // Copyright (C) 2026 Jean-Philippe Steinmetz
+// SPDX-License-Identifier: MPL-2.0
 ///////////////////////////////////////////////////////////////////////////////
 // Isolated unit tests for the shared.ts auth helpers. otplib is real (it's already exercised this
 // way throughout the auth test suites); @simplewebauthn/server is mocked since its own cryptographic

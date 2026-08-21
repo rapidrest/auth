@@ -1,5 +1,6 @@
 ///////////////////////////////////////////////////////////////////////////////
 // Copyright (C) 2026 Jean-Philippe Steinmetz
+// SPDX-License-Identifier: MPL-2.0
 ///////////////////////////////////////////////////////////////////////////////
 // Isolated unit tests for BaseAuthBasicRoute — no HTTP server, no database. ObjectFactory and
 // AuthMiddleware are mocked directly so initialize() and the verify() closure it builds can be
