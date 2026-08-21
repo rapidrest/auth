@@ -60,8 +60,8 @@
         "parse-duration": "^2.1.8"
     },
     "devDependencies": {
-        "@rapidrest/core": "^5.0.0",
-        "@rapidrest/service-core": "^1.2.0",
+        "@rapidrest/core": "^5.0.1",
+        "@rapidrest/service-core": "^1.2.1",
         "@simplewebauthn/server": "^13.3.2",
         "@swc/core": "^1.15.41",
         "@types/cross-spawn": "^6.0.6",
