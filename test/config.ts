@@ -32,7 +32,7 @@ conf.defaults({
             synchronize: true,
         },
         sql: {
-            type: "sqlite",
+            type: "better-sqlite3",
             host: "localhost",
             database: "rrst-test",
             synchronize: true,

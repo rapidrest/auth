@@ -135,7 +135,7 @@ describe("BaseAuthElevationRoute Tests", () => {
 
         it("Does not recreate repos/utils if initialize() runs again.", async () => {
             const route = new TestAuthElevationRoute();
-            (route as any).objectFactory = makeMockObjectFactory({}, {}, {}, {});
+            (route as any)._objectFactory = makeMockObjectFactory({}, {}, {}, {});
             const existingAliasRepo = { find: vi.fn() };
             const existingSecretRepo = { find: vi.fn() };
             const existingUserRepo = { find: vi.fn() };

@@ -1,6 +1,5 @@
 ////////////////////////////////////////////////////////////////////////////////
 // Copyright (C) 2026 Jean-Philippe Steinmetz
-// SPDX-License-Identifier: MPL-2.0
 ////////////////////////////////////////////////////////////////////////////////
 import { ApiError, JWTUser, MessagingUtils, ObjectDecorators, UserUtils } from "@rapidrest/core";
 import {
@@ -31,6 +30,9 @@ export abstract class BaseAccountRoute<U extends User, A extends Alias, P extend
     protected abstract secretClass: any;
     protected abstract userClass: any;
 
+    // Automatically injected by ObjectFactory on instantiation
+    private _objectFactory?: ObjectFactory;
+
     @Config("auth:default_scopes", [])
     protected defaultScopes: string[] = [];
 
@@ -46,9 +48,6 @@ export abstract class BaseAccountRoute<U extends User, A extends Alias, P extend
     @Inject(MessagingUtils)
     protected messagingUtils?: MessagingUtils;
 
-    @Inject(ObjectFactory)
-    protected objectFactory?: ObjectFactory;
-
     @Inject(TokenUtils)
     protected tokenUtils?: TokenUtils;
 
@@ -62,33 +61,33 @@ export abstract class BaseAccountRoute<U extends User, A extends Alias, P extend
 
     @Init
     protected async initialize(): Promise<void> {
-        if (!this.objectFactory) {
+        if (!this._objectFactory) {
             throw new Error("objectFactory is not set.");
         }
 
         if (!this.aliasRepo && this.aliasClass) {
-            this.aliasRepo = await this.objectFactory.newInstance(RepoUtils, {
+            this.aliasRepo = await this._objectFactory.newInstance(RepoUtils, {
                 name: this.aliasClass.name,
                 args: [this.aliasClass],
             });
         }
 
         if (!this.profileRepo && this.profileClass) {
-            this.profileRepo = await this.objectFactory.newInstance(RepoUtils, {
+            this.profileRepo = await this._objectFactory.newInstance(RepoUtils, {
                 name: this.profileClass.name,
                 args: [this.profileClass],
             });
         }
 
         if (!this.secretRepo && this.secretClass) {
-            this.secretRepo = await this.objectFactory.newInstance(RepoUtils, {
+            this.secretRepo = await this._objectFactory.newInstance(RepoUtils, {
                 name: this.secretClass.name,
                 args: [this.secretClass],
             });
         }
 
         if (!this.userRepo && this.userClass) {
-            this.userRepo = await this.objectFactory.newInstance(RepoUtils, {
+            this.userRepo = await this._objectFactory.newInstance(RepoUtils, {
                 name: this.userClass.name,
                 args: [this.userClass],
             });

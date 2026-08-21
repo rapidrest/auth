@@ -8,7 +8,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     container:
-      image: node:lts-trixie-slim
+      image: node:lts-bookworm-slim
     steps:
       - uses: actions/checkout@v6
 
@@ -38,7 +38,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     container:
-      image: node:lts-trixie-slim
+      image: node:lts-bookworm-slim
     needs: build
     steps:
       - uses: actions/checkout@v6
@@ -79,7 +79,7 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     container:
-      image: node:lts-trixie-slim
+      image: node:lts-bookworm-slim
     needs: build
     continue-on-error: true
     steps:

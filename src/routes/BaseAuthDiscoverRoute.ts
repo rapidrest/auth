@@ -52,11 +52,11 @@ export abstract class BaseAuthDiscoverRoute<U extends User, A extends Alias, S e
     protected abstract secretClass: any;
     protected abstract userClass: any;
 
+    // Automatically injected by ObjectFactory on instantiation
+    private _objectFactory?: ObjectFactory;
+
     protected aliasRepo?: RepoUtils<A>;
     protected secretRepo?: RepoUtils<S>;
-
-    @Inject(ObjectFactory)
-    protected objectFactory?: ObjectFactory;
 
     @Inject(RateLimiter)
     protected rateLimiter?: RateLimiter;
@@ -65,26 +65,26 @@ export abstract class BaseAuthDiscoverRoute<U extends User, A extends Alias, S e
 
     @Init
     protected async initialize(): Promise<void> {
-        if (!this.objectFactory) {
+        if (!this._objectFactory) {
             throw new Error("objectFactory is not set.");
         }
 
         if (!this.aliasRepo && this.aliasClass) {
-            this.aliasRepo = await this.objectFactory.newInstance(RepoUtils, {
+            this.aliasRepo = await this._objectFactory.newInstance(RepoUtils, {
                 name: this.aliasClass.name,
                 args: [this.aliasClass],
             });
         }
 
         if (!this.secretRepo && this.secretClass) {
-            this.secretRepo = await this.objectFactory.newInstance(RepoUtils, {
+            this.secretRepo = await this._objectFactory.newInstance(RepoUtils, {
                 name: this.secretClass.name,
                 args: [this.secretClass],
             });
         }
 
         if (!this.userUtils && this.userClass && this.aliasClass) {
-            this.userUtils = await this.objectFactory.newInstance(UserUtils, {
+            this.userUtils = await this._objectFactory.newInstance(UserUtils, {
                 name: "default",
                 args: [this.userClass, this.aliasClass],
             });

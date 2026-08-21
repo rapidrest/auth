@@ -23,16 +23,13 @@
         "postversion": "git push && git push --tags"
     },
     "peerDependencies": {
-        "@rapidrest/core": "1.x",
+        "@rapidrest/core": "5.x",
         "@rapidrest/service-core": "1.x",
         "@simplewebauthn/server": ">=13.0.0",
         "@vitejs/plugin-react": ">=4.0.0",
         "argon2": "0.x",
         "jwks-rsa": "4.x",
-        "nodemon": ">=3.0.0",
         "otplib": ">=13.0.0",
-        "react": "19.x",
-        "react-dom": "19.x",
         "tsx": ">=4.0.0"
     },
     "peerDependenciesMeta": {
@@ -46,9 +43,6 @@
             "optional": true
         },
         "jwks-rsa": {
-            "optional": true
-        },
-        "nodemon": {
             "optional": true
         },
         "otplib": {
@@ -66,8 +60,8 @@
         "parse-duration": "^2.1.8"
     },
     "devDependencies": {
-        "@rapidrest/core": "^1.15.0",
-        "@rapidrest/service-core": "1.0.0-rc.35",
+        "@rapidrest/core": "^5.0.0",
+        "@rapidrest/service-core": "^1.2.0",
         "@simplewebauthn/server": "^13.3.2",
         "@swc/core": "^1.15.41",
         "@types/cross-spawn": "^6.0.6",
@@ -75,31 +69,30 @@
         "@types/speakeasy": "^2",
         "@typescript-eslint/eslint-plugin": "^8.61.0",
         "@typescript-eslint/parser": "^8.61.0",
-        "@vitejs/plugin-react": "^6.0.3",
+        "@vitejs/plugin-react": "^6.1.0",
         "@vitest/coverage-v8": "^4.1.8",
-        "argon2": "^0.44.0",
+        "argon2": "^0.45.1",
+        "better-sqlite3": "^13.0.3",
         "eslint": "^10.4.1",
         "eslint-config-prettier": "^10.1.8",
         "eslint-plugin-import": "^2.32.0",
         "eslint-plugin-jsdoc": "^63.0.2",
         "globals": "^17.6.0",
-        "ioredis": "^5.11.1",
-        "ioredis-mock": "^8.13.1",
         "jwks-rsa": "^4.1.0",
         "lodash-es": "^4.18.1",
         "mongodb": "^7.5.0",
         "mongodb-memory-server": "^11.2.0",
         "nconf": "^0.13.0",
         "openapi3-ts": "^4.6.0",
-        "otplib": "^13.4.1",
+        "otplib": "^13.5.0",
         "prom-client": "^15.1.3",
+        "redis": "^6.2.1",
         "reflect-metadata": "^0.2.2",
         "rimraf": "^6.1.3",
         "speakeasy": "^2.0.0",
-        "sqlite3": "^6.0.1",
         "ts-node": "^10.9.2",
-        "tsx": "^4.19.3",
-        "typeorm": "^0.3.20",
+        "tsx": "^4.23.12",
+        "typeorm": "^1.1.0",
         "typescript": "^6.0.3",
         "unplugin-swc": "^1.5.9",
         "uuid": "^14.0.1",

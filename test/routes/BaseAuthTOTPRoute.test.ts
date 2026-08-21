@@ -44,7 +44,7 @@ function makeMockObjectFactory(secretRepo: any, userUtils: any) {
 describe("BaseAuthTOTPRoute Tests", () => {
     it("Throws during initialize() if authMiddleware was not injected.", async () => {
         const route = new TestAuthTOTPRoute();
-        (route as any).objectFactory = makeMockObjectFactory({}, {});
+        (route as any)._objectFactory = makeMockObjectFactory({}, {});
 
         await expect((route as any).initialize()).rejects.toThrow(/authMiddleware is not set/);
     });
@@ -59,7 +59,7 @@ describe("BaseAuthTOTPRoute Tests", () => {
     it("Does not recreate secretRepo/userUtils if initialize() runs again.", async () => {
         const route = new TestAuthTOTPRoute();
         (route as any).authMiddleware = { register: vi.fn() };
-        (route as any).objectFactory = makeMockObjectFactory({}, {});
+        (route as any)._objectFactory = makeMockObjectFactory({}, {});
         const existingSecretRepo = { find: vi.fn() };
         const existingUserUtils = { lookup: vi.fn() };
         (route as any).secretRepo = existingSecretRepo;
@@ -75,7 +75,7 @@ describe("BaseAuthTOTPRoute Tests", () => {
         const register = vi.fn();
         const route = new TestAuthTOTPRoute();
         (route as any).authMiddleware = { register };
-        (route as any).objectFactory = makeMockObjectFactory({}, {});
+        (route as any)._objectFactory = makeMockObjectFactory({}, {});
 
         await (route as any).initialize();
 

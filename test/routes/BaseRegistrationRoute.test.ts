@@ -76,7 +76,7 @@ describe("BaseRegistrationRoute Tests", () => {
             const aliasRepo = { find: vi.fn() };
             const userRepo = { create: vi.fn() };
             const route = new TestRegistrationRoute();
-            (route as any).objectFactory = makeMockObjectFactory(aliasRepo, userRepo);
+            (route as any)._objectFactory = makeMockObjectFactory(aliasRepo, userRepo);
 
             await (route as any).initialize();
 
@@ -86,7 +86,7 @@ describe("BaseRegistrationRoute Tests", () => {
 
         it("Does not recreate repos if initialize() runs again.", async () => {
             const route = new TestRegistrationRoute();
-            (route as any).objectFactory = makeMockObjectFactory({}, {});
+            (route as any)._objectFactory = makeMockObjectFactory({}, {});
             const existingAliasRepo = { find: vi.fn() };
             const existingUserRepo = { create: vi.fn() };
             (route as any).aliasRepo = existingAliasRepo;

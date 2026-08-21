@@ -44,7 +44,7 @@ describe("UserUtils Tests", () => {
             const aliasRepo = { findOne: vi.fn() };
             const userRepo = { findOne: vi.fn() };
             const userUtils = new UserUtils(FakeUserClass, FakeAliasClass);
-            (userUtils as any).objectFactory = makeMockObjectFactory(aliasRepo, userRepo);
+            (userUtils as any)._objectFactory = makeMockObjectFactory(aliasRepo, userRepo);
 
             await (userUtils as any).init();
 
@@ -54,7 +54,7 @@ describe("UserUtils Tests", () => {
 
         it("Does not recreate aliasRepo/userRepo if init() runs again.", async () => {
             const userUtils = new UserUtils(FakeUserClass, FakeAliasClass);
-            (userUtils as any).objectFactory = makeMockObjectFactory({}, {});
+            (userUtils as any)._objectFactory = makeMockObjectFactory({}, {});
             const existingAliasRepo = { findOne: vi.fn() };
             const existingUserRepo = { findOne: vi.fn() };
             (userUtils as any).aliasRepo = existingAliasRepo;

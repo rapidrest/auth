@@ -35,6 +35,9 @@ export abstract class BaseAuthMFARoute<U extends User, S extends Secret, A exten
     protected abstract secretClass: any;
     protected abstract userClass: any;
 
+    // Automatically injected by ObjectFactory on instantiation
+    private _objectFactory?: ObjectFactory;
+
     protected aliasRepo?: RepoUtils<A>;
 
     @Inject(AuthMiddleware)
@@ -60,9 +63,6 @@ export abstract class BaseAuthMFARoute<U extends User, S extends Secret, A exten
 
     @Logger
     protected logger: any;
-
-    @Inject(ObjectFactory)
-    protected objectFactory?: ObjectFactory;
 
     @Inject(MessagingUtils)
     protected messagingUtils?: MessagingUtils;
@@ -90,33 +90,33 @@ export abstract class BaseAuthMFARoute<U extends User, S extends Secret, A exten
         if (!this.authMiddleware) {
             throw new Error("authMiddleware is not set.");
         }
-        if (!this.objectFactory) {
+        if (!this._objectFactory) {
             throw new Error("objectFactory is not set.");
         }
 
         if (!this.aliasRepo && this.aliasClass) {
-            this.aliasRepo = await this.objectFactory.newInstance(RepoUtils, {
+            this.aliasRepo = await this._objectFactory.newInstance(RepoUtils, {
                 name: this.aliasClass.name,
                 args: [this.aliasClass],
             });
         }
 
         if (!this.secretRepo && this.secretClass) {
-            this.secretRepo = await this.objectFactory.newInstance(RepoUtils, {
+            this.secretRepo = await this._objectFactory.newInstance(RepoUtils, {
                 name: this.secretClass.name,
                 args: [this.secretClass],
             });
         }
 
         if (!this.userRepo && this.userClass) {
-            this.userRepo = await this.objectFactory.newInstance(RepoUtils, {
+            this.userRepo = await this._objectFactory.newInstance(RepoUtils, {
                 name: this.userClass.name,
                 args: [this.userClass],
             });
         }
 
         if (!this.userUtils && this.userClass && this.aliasClass) {
-            this.userUtils = await this.objectFactory.newInstance(UserUtils, {
+            this.userUtils = await this._objectFactory.newInstance(UserUtils, {
                 name: "default",
                 args: [this.userClass, this.aliasClass],
             });
@@ -133,7 +133,7 @@ export abstract class BaseAuthMFARoute<U extends User, S extends Secret, A exten
         options.updateCredentialCounter = this.updateCredentialCounter.bind(this);
         options.updateSecretTimeStep = this.updateSecretTimeStep.bind(this);
         options.verify = this.verify.bind(this);
-        const strategy: MFAStrategy = await this.objectFactory.newInstance(MFAStrategy, {
+        const strategy: MFAStrategy = await this._objectFactory.newInstance(MFAStrategy, {
             name: "default",
             args: [options],
         });
@@ -343,9 +343,7 @@ export abstract class BaseAuthMFARoute<U extends User, S extends Secret, A exten
             case OTPContactType.SMS:
                 this.messagingUtils
                     ?.sendSMS(this.template, { totp }, { to: contact.contact })
-                    .catch((err) =>
-                        this.logger?.debug(`[BaseAuthMFARoute] Failed to send verification SMS: ${err}`),
-                    );
+                    .catch((err) => this.logger?.debug(`[BaseAuthMFARoute] Failed to send verification SMS: ${err}`));
                 break;
         }
     }

@@ -48,6 +48,9 @@ export abstract class BaseRegistrationRoute<U extends User, A extends Alias> {
     protected abstract aliasClass: any;
     protected abstract userClass: any;
 
+    // Automatically injected by ObjectFactory on instantiation
+    private _objectFactory?: ObjectFactory;
+
     @Config("auth:default_scopes", [])
     protected defaultScopes: string[] = [];
 
@@ -60,9 +63,6 @@ export abstract class BaseRegistrationRoute<U extends User, A extends Alias> {
     @Inject(MessagingUtils)
     protected messagingUtils?: MessagingUtils;
 
-    @Inject(ObjectFactory)
-    protected objectFactory?: ObjectFactory;
-
     @Inject(TokenUtils)
     protected tokenUtils?: TokenUtils;
 
@@ -74,19 +74,19 @@ export abstract class BaseRegistrationRoute<U extends User, A extends Alias> {
 
     @Init
     protected async initialize(): Promise<void> {
-        if (!this.objectFactory) {
+        if (!this._objectFactory) {
             throw new Error("objectFactory is not set.");
         }
 
         if (!this.aliasRepo && this.aliasClass) {
-            this.aliasRepo = await this.objectFactory.newInstance(RepoUtils, {
+            this.aliasRepo = await this._objectFactory.newInstance(RepoUtils, {
                 name: this.aliasClass.name,
                 args: [this.aliasClass],
             });
         }
 
         if (!this.userRepo && this.userClass) {
-            this.userRepo = await this.objectFactory.newInstance(RepoUtils, {
+            this.userRepo = await this._objectFactory.newInstance(RepoUtils, {
                 name: this.userClass.name,
                 args: [this.userClass],
             });
@@ -184,11 +184,7 @@ export abstract class BaseRegistrationRoute<U extends User, A extends Alias> {
     @Summary("Verify registration e-mail code")
     @Description("Verifies the one-time code sent to the claimed e-mail address so that registration can be completed.")
     @Post("/verify")
-    public async verify(
-        body: VerifyBody,
-        @Request req: HttpRequest,
-        @Response res: HttpResponse,
-    ): Promise<AuthResult> {
+    public async verify(body: VerifyBody, @Request req: HttpRequest, @Response res: HttpResponse): Promise<AuthResult> {
         if (!this.aliasRepo) {
             throw new Error("aliasRepo is not set.");
         }

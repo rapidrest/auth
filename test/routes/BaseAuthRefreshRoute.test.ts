@@ -49,7 +49,7 @@ describe("BaseAuthRefreshRoute Tests", () => {
             const route = new TestAuthRefreshRoute();
             const userRepoInstance = { findOne: vi.fn() };
             const newInstance = vi.fn().mockResolvedValue(userRepoInstance);
-            (route as any).objectFactory = { newInstance };
+            (route as any)._objectFactory = { newInstance };
 
             await (route as any).initialize();
 
@@ -65,7 +65,7 @@ describe("BaseAuthRefreshRoute Tests", () => {
             const existing = { findOne: vi.fn() };
             (route as any).userRepo = existing;
             const newInstance = vi.fn();
-            (route as any).objectFactory = { newInstance };
+            (route as any)._objectFactory = { newInstance };
 
             await (route as any).initialize();
 

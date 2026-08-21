@@ -28,7 +28,7 @@ describe("BaseAccountRoute Tests", () => {
         it("Creates alias/profile/secret/user repos via the object factory when unset.", async () => {
             const route = new TestAccountRoute();
             const newInstance = vi.fn().mockImplementation((_ctor: any, opts: any) => Promise.resolve({ name: opts.name }));
-            (route as any).objectFactory = { newInstance };
+            (route as any)._objectFactory = { newInstance };
 
             await (route as any).initialize();
 
@@ -51,7 +51,7 @@ describe("BaseAccountRoute Tests", () => {
         it("Does not recreate repos that are already set.", async () => {
             const route = new TestAccountRoute();
             const newInstance = vi.fn();
-            (route as any).objectFactory = { newInstance };
+            (route as any)._objectFactory = { newInstance };
             const existingAliasRepo = { find: vi.fn() };
             const existingProfileRepo = { findOne: vi.fn() };
             const existingSecretRepo = { find: vi.fn() };

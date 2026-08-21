@@ -31,7 +31,7 @@ describe("BaseAliasRoute Tests", () => {
         it("Does not recreate profileRepo if init() runs again.", async () => {
             const route = new TestAliasRoute();
             const newInstance = vi.fn();
-            (route as any).objectFactory = { newInstance };
+            (route as any)._objectFactory = { newInstance };
             const existingProfileRepo = { findOne: vi.fn() };
             (route as any).profileRepo = existingProfileRepo;
 
@@ -45,7 +45,7 @@ describe("BaseAliasRoute Tests", () => {
             const route = new TestAliasRoute();
             const profileRepo = { findOne: vi.fn() };
             const newInstance = vi.fn().mockResolvedValue(profileRepo);
-            (route as any).objectFactory = { newInstance };
+            (route as any)._objectFactory = { newInstance };
 
             await (route as any).init();
 

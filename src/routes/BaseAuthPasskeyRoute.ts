@@ -34,6 +34,9 @@ export abstract class BaseAuthPasskeyRoute<U extends User, A extends Alias, S ex
     protected abstract secretClass: any;
     protected abstract userClass: any;
 
+    // Automatically injected by ObjectFactory on instantiation
+    private _objectFactory?: ObjectFactory;
+
     protected aliasRepo?: RepoUtils<A>;
 
     @Inject(AuthMiddleware)
@@ -44,9 +47,6 @@ export abstract class BaseAuthPasskeyRoute<U extends User, A extends Alias, S ex
 
     @Config("auth")
     protected jwtConfig?: any;
-
-    @Inject(ObjectFactory)
-    protected objectFactory?: ObjectFactory;
 
     @Inject(MessagingUtils)
     protected messagingUtils?: MessagingUtils;
@@ -78,33 +78,33 @@ export abstract class BaseAuthPasskeyRoute<U extends User, A extends Alias, S ex
         if (!this.authMiddleware) {
             throw new Error("authMiddleware is not set.");
         }
-        if (!this.objectFactory) {
+        if (!this._objectFactory) {
             throw new Error("objectFactory is not set.");
         }
 
         if (!this.aliasRepo && this.aliasClass) {
-            this.aliasRepo = await this.objectFactory.newInstance(RepoUtils, {
+            this.aliasRepo = await this._objectFactory.newInstance(RepoUtils, {
                 name: this.aliasClass.name,
                 args: [this.aliasClass],
             });
         }
 
         if (!this.secretRepo && this.secretClass) {
-            this.secretRepo = await this.objectFactory.newInstance(RepoUtils, {
+            this.secretRepo = await this._objectFactory.newInstance(RepoUtils, {
                 name: this.secretClass.name,
                 args: [this.secretClass],
             });
         }
 
         if (!this.userRepo && this.userClass) {
-            this.userRepo = await this.objectFactory.newInstance(RepoUtils, {
+            this.userRepo = await this._objectFactory.newInstance(RepoUtils, {
                 name: this.userClass.name,
                 args: [this.userClass],
             });
         }
 
         if (!this.userUtils && this.userClass && this.aliasClass) {
-            this.userUtils = await this.objectFactory.newInstance(UserUtils, {
+            this.userUtils = await this._objectFactory.newInstance(UserUtils, {
                 name: "default",
                 args: [this.userClass, this.aliasClass],
             });
@@ -116,7 +116,7 @@ export abstract class BaseAuthPasskeyRoute<U extends User, A extends Alias, S ex
         options.getCredentials = this.getCredentials.bind(this);
         options.updateCredentialCounter = this.updateCredentialCounter.bind(this);
         options.getUser = this.getUser.bind(this);
-        const strategy: PasskeyStrategy = await this.objectFactory.newInstance(PasskeyStrategy, {
+        const strategy: PasskeyStrategy = await this._objectFactory.newInstance(PasskeyStrategy, {
             name: "default",
             args: [options],
         });

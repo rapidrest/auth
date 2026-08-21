@@ -26,6 +26,9 @@ const { Get, Post, Response, Request } = RouteDecorators;
 export abstract class BaseAuthRefreshRoute<U extends User> {
     protected abstract readonly userClass: any;
 
+    // Automatically injected by ObjectFactory on instantiation
+    private _objectFactory?: ObjectFactory;
+
     @Config("auth")
     protected authConfig: any;
 
@@ -34,9 +37,6 @@ export abstract class BaseAuthRefreshRoute<U extends User> {
 
     @Config("auth:default_scopes", [])
     protected defaultScopes: string[] = [];
-
-    @Inject(ObjectFactory)
-    protected objectFactory?: ObjectFactory;
 
     @Inject(TokenUtils)
     protected tokenUtils?: TokenUtils;
@@ -49,7 +49,7 @@ export abstract class BaseAuthRefreshRoute<U extends User> {
     @Init
     protected async initialize() {
         if (!this.userRepo && this.userClass) {
-            this.userRepo = await this.objectFactory!.newInstance(RepoUtils, {
+            this.userRepo = await this._objectFactory!.newInstance(RepoUtils, {
                 name: this.userClass.name,
                 args: [this.userClass],
             });

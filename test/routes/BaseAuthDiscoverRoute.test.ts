@@ -54,7 +54,7 @@ describe("BaseAuthDiscoverRoute Tests", () => {
             const secretRepo = { find: vi.fn() };
             const userUtils = { lookup: vi.fn() };
             const route = new TestAuthDiscoverRoute();
-            (route as any).objectFactory = makeMockObjectFactory(aliasRepo, secretRepo, userUtils);
+            (route as any)._objectFactory = makeMockObjectFactory(aliasRepo, secretRepo, userUtils);
 
             await (route as any).initialize();
 
@@ -65,7 +65,7 @@ describe("BaseAuthDiscoverRoute Tests", () => {
 
         it("Does not recreate repos/utils if initialize() runs again.", async () => {
             const route = new TestAuthDiscoverRoute();
-            (route as any).objectFactory = makeMockObjectFactory({}, {}, {});
+            (route as any)._objectFactory = makeMockObjectFactory({}, {}, {});
             const existingAliasRepo = { find: vi.fn() };
             const existingSecretRepo = { find: vi.fn() };
             const existingUserUtils = { lookup: vi.fn() };

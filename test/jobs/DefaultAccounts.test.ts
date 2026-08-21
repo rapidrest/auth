@@ -116,7 +116,7 @@ describe("DefaultAccounts Tests", () => {
         it("Creates alias/profile/secret/user repos via the object factory when unset.", async () => {
             const job = new TestDefaultAccounts();
             const newInstance = vi.fn().mockImplementation((_ctor: any, opts: any) => Promise.resolve({ name: opts.name }));
-            (job as any).objectFactory = { newInstance };
+            (job as any)._objectFactory = { newInstance };
 
             await (job as any).init();
 
@@ -133,7 +133,7 @@ describe("DefaultAccounts Tests", () => {
         it("Does not recreate repos that are already set.", async () => {
             const job = new TestDefaultAccounts();
             const newInstance = vi.fn();
-            (job as any).objectFactory = { newInstance };
+            (job as any)._objectFactory = { newInstance };
             const existingAliasRepo = { find: vi.fn() };
             const existingProfileRepo = { findOne: vi.fn() };
             const existingSecretRepo = { find: vi.fn() };
@@ -155,7 +155,7 @@ describe("DefaultAccounts Tests", () => {
         it("Skips the stale password file cleanup when no passwordFile is configured.", async () => {
             const job = new TestDefaultAccounts();
             const newInstance = vi.fn();
-            (job as any).objectFactory = { newInstance };
+            (job as any)._objectFactory = { newInstance };
             (job as any).aliasRepo = { find: vi.fn() };
             (job as any).profileRepo = { findOne: vi.fn() };
             (job as any).secretRepo = { find: vi.fn() };

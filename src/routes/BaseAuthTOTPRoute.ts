@@ -34,6 +34,9 @@ export abstract class BaseAuthTOTPRoute<U extends User, A extends Alias, S exten
     protected abstract secretClass: any;
     protected abstract userClass: any;
 
+    // Automatically injected by ObjectFactory on instantiation
+    private _objectFactory?: ObjectFactory;
+
     @Inject(AuthMiddleware)
     protected authMiddleware?: AuthMiddleware;
 
@@ -42,9 +45,6 @@ export abstract class BaseAuthTOTPRoute<U extends User, A extends Alias, S exten
 
     @Config("auth")
     protected jwtConfig?: any;
-
-    @Inject(ObjectFactory)
-    protected objectFactory?: ObjectFactory;
 
     @Inject(MessagingUtils)
     protected messagingUtils?: MessagingUtils;
@@ -70,19 +70,19 @@ export abstract class BaseAuthTOTPRoute<U extends User, A extends Alias, S exten
         if (!this.authMiddleware) {
             throw new Error("authMiddleware is not set.");
         }
-        if (!this.objectFactory) {
+        if (!this._objectFactory) {
             throw new Error("objectFactory is not set.");
         }
 
         if (!this.secretRepo && this.secretClass) {
-            this.secretRepo = await this.objectFactory.newInstance(RepoUtils, {
+            this.secretRepo = await this._objectFactory.newInstance(RepoUtils, {
                 name: this.secretClass.name,
                 args: [this.secretClass],
             });
         }
 
         if (!this.userUtils && this.userClass && this.aliasClass) {
-            this.userUtils = await this.objectFactory.newInstance(UserUtils, {
+            this.userUtils = await this._objectFactory.newInstance(UserUtils, {
                 name: "default",
                 args: [this.userClass, this.aliasClass],
             });
@@ -93,7 +93,7 @@ export abstract class BaseAuthTOTPRoute<U extends User, A extends Alias, S exten
         options.getSecrets = this.getSecrets.bind(this);
         options.getUser = this.getUser.bind(this);
         options.updateSecretTimeStep = this.updateSecretTimeStep.bind(this);
-        const strategy: TOTPStrategy = await this.objectFactory.newInstance(TOTPStrategy, {
+        const strategy: TOTPStrategy = await this._objectFactory.newInstance(TOTPStrategy, {
             name: "default",
             args: [options],
         });

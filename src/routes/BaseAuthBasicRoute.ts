@@ -34,6 +34,9 @@ export abstract class BaseAuthBasicRoute<U extends User, S extends Secret, A ext
     protected abstract secretClass: any;
     protected abstract userClass: any;
 
+    // Automatically injected by ObjectFactory on instantiation
+    private _objectFactory?: ObjectFactory;
+
     @Inject(AuthMiddleware)
     protected authMiddleware?: AuthMiddleware;
 
@@ -42,9 +45,6 @@ export abstract class BaseAuthBasicRoute<U extends User, S extends Secret, A ext
 
     @Config("auth")
     protected jwtConfig?: any;
-
-    @Inject(ObjectFactory)
-    protected objectFactory?: ObjectFactory;
 
     @Inject(RateLimiter)
     protected rateLimiter?: RateLimiter;
@@ -64,19 +64,19 @@ export abstract class BaseAuthBasicRoute<U extends User, S extends Secret, A ext
         if (!this.authMiddleware) {
             throw new Error("authMiddleware is not set.");
         }
-        if (!this.objectFactory) {
+        if (!this._objectFactory) {
             throw new Error("objectFactory is not set.");
         }
 
         if (!this.secretRepo && this.secretClass) {
-            this.secretRepo = await this.objectFactory.newInstance(RepoUtils, {
+            this.secretRepo = await this._objectFactory.newInstance(RepoUtils, {
                 name: this.secretClass.name,
                 args: [this.secretClass],
             });
         }
 
         if (!this.userUtils && this.userClass && this.aliasClass) {
-            this.userUtils = await this.objectFactory.newInstance(UserUtils, {
+            this.userUtils = await this._objectFactory.newInstance(UserUtils, {
                 name: "default",
                 args: [this.userClass, this.aliasClass],
             });
@@ -140,7 +140,7 @@ export abstract class BaseAuthBasicRoute<U extends User, S extends Secret, A ext
 
             return user;
         };
-        const strategy: BasicStrategy = await this.objectFactory.newInstance(BasicStrategy, {
+        const strategy: BasicStrategy = await this._objectFactory.newInstance(BasicStrategy, {
             name: "default",
             args: [options],
         });

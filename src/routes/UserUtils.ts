@@ -16,8 +16,8 @@ export class UserUtils<U extends User, A extends Alias> {
     protected userClass: any;
     protected userRepo?: RepoUtils<U>;
 
-    @Inject(ObjectFactory)
-    protected objectFactory?: ObjectFactory;
+    // Automatically injected by ObjectFactory on instantiation
+    private _objectFactory?: ObjectFactory;
 
     constructor(userClass: any, aliasClass: any) {
         this.aliasClass = aliasClass;
@@ -26,19 +26,19 @@ export class UserUtils<U extends User, A extends Alias> {
 
     @Init
     protected async init() {
-        if (!this.objectFactory) {
+        if (!this._objectFactory) {
             throw new Error("objectFactory is not set.");
         }
 
         if (!this.aliasRepo) {
-            this.aliasRepo = await this.objectFactory.newInstance(RepoUtils, {
+            this.aliasRepo = await this._objectFactory.newInstance(RepoUtils, {
                 name: `${RepoUtils.name}:${this.aliasClass.name}`,
                 args: [this.aliasClass],
             });
         }
 
         if (!this.userRepo) {
-            this.userRepo = await this.objectFactory.newInstance(RepoUtils, {
+            this.userRepo = await this._objectFactory.newInstance(RepoUtils, {
                 name: `${RepoUtils.name}:${this.userClass.name}`,
                 args: [this.userClass],
             });

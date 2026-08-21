@@ -48,7 +48,7 @@ function makeMockObjectFactory(secretRepo: any, userUtils: any) {
 describe("BaseAuthBasicRoute Tests", () => {
     it("Throws during initialize() if authMiddleware was not injected.", async () => {
         const route = new TestAuthBasicRoute();
-        (route as any).objectFactory = makeMockObjectFactory({}, {}).objectFactory;
+        (route as any)._objectFactory = makeMockObjectFactory({}, {}).objectFactory;
 
         await expect((route as any).initialize()).rejects.toThrow(/authMiddleware is not set/);
     });
@@ -64,7 +64,7 @@ describe("BaseAuthBasicRoute Tests", () => {
         const route = new TestAuthBasicRoute();
         (route as any).authMiddleware = { register: vi.fn() };
         const { objectFactory } = makeMockObjectFactory({}, {});
-        (route as any).objectFactory = objectFactory;
+        (route as any)._objectFactory = objectFactory;
         const existingSecretRepo = { find: vi.fn() };
         const existingUserUtils = { lookup: vi.fn() };
         (route as any).secretRepo = existingSecretRepo;
@@ -81,7 +81,7 @@ describe("BaseAuthBasicRoute Tests", () => {
         const route = new TestAuthBasicRoute();
         (route as any).authMiddleware = { register };
         const { objectFactory } = makeMockObjectFactory({}, {});
-        (route as any).objectFactory = objectFactory;
+        (route as any)._objectFactory = objectFactory;
 
         await (route as any).initialize();
 
@@ -96,7 +96,7 @@ describe("BaseAuthBasicRoute Tests", () => {
             const route = new TestAuthBasicRoute();
             (route as any).authMiddleware = { register };
             const { objectFactory, getOptions } = makeMockObjectFactory(secretRepo, userUtils);
-            (route as any).objectFactory = objectFactory;
+            (route as any)._objectFactory = objectFactory;
 
             await (route as any).initialize();
 

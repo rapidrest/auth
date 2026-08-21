@@ -31,9 +31,6 @@ export abstract class BaseAliasRoute<T extends Alias> extends CRUDRoute<T> {
 
     protected profileRepo?: RepoUtils<Profile>;
 
-    @Inject(ObjectFactory)
-    protected objectFactory?: ObjectFactory;
-
     @Inject(MessagingUtils)
     protected messagingUtils?: MessagingUtils;
 
@@ -45,8 +42,8 @@ export abstract class BaseAliasRoute<T extends Alias> extends CRUDRoute<T> {
 
     @Init
     protected async init(): Promise<void> {
-        if (!this.profileRepo && this.profileClass && this.objectFactory) {
-            this.profileRepo = await this.objectFactory.newInstance(RepoUtils, {
+        if (!this.profileRepo && this.profileClass && this._objectFactory) {
+            this.profileRepo = await this._objectFactory.newInstance(RepoUtils, {
                 name: this.profileClass.name,
                 args: [this.profileClass],
             });

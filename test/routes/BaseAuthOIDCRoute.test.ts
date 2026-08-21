@@ -58,7 +58,7 @@ function makeMockObjectFactory(aliasRepo: any, profileRepo: any, userRepo: any, 
 describe("BaseAuthOIDCRoute Tests", () => {
     it("Throws during initialize() if authMiddleware was not injected.", async () => {
         const route = new TestAuthOIDCRoute();
-        (route as any).objectFactory = makeMockObjectFactory({}, {}, {}, {}).objectFactory;
+        (route as any)._objectFactory = makeMockObjectFactory({}, {}, {}, {}).objectFactory;
 
         await expect((route as any).initialize()).rejects.toThrow(/authMiddleware is not set/);
     });
@@ -74,7 +74,7 @@ describe("BaseAuthOIDCRoute Tests", () => {
         const route = new TestAuthOIDCRoute();
         (route as any).authMiddleware = { register: vi.fn() };
         const { objectFactory } = makeMockObjectFactory({}, {}, {}, {});
-        (route as any).objectFactory = objectFactory;
+        (route as any)._objectFactory = objectFactory;
         const existingAliasRepo = { find: vi.fn() };
         const existingProfileRepo = { find: vi.fn() };
         const existingUserRepo = { find: vi.fn() };
@@ -97,7 +97,7 @@ describe("BaseAuthOIDCRoute Tests", () => {
         const route = new TestAuthOIDCRoute();
         (route as any).authMiddleware = { register };
         const { objectFactory } = makeMockObjectFactory({}, {}, {}, {});
-        (route as any).objectFactory = objectFactory;
+        (route as any)._objectFactory = objectFactory;
 
         await (route as any).initialize();
 
@@ -110,7 +110,7 @@ describe("BaseAuthOIDCRoute Tests", () => {
             const route = new TestAuthOIDCRoute();
             (route as any).authMiddleware = { register };
             const { objectFactory, getOptions } = makeMockObjectFactory(aliasRepo, profileRepo, userRepo, userUtils);
-            (route as any).objectFactory = objectFactory;
+            (route as any)._objectFactory = objectFactory;
 
             await (route as any).initialize();
 
