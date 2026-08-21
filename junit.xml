@@ -1,37 +1,19 @@
 <?xml version="1.0" encoding="UTF-8" ?>
-<testsuites name="vitest tests" tests="5" failures="0" errors="0" time="1.2478325">
-    <testsuite name="test/routes/sql/AuthPasskeyRoute.test.ts" timestamp="2026-08-21T21:51:57.365Z" hostname="Jane" tests="5" failures="0" errors="0" skipped="0" time="1.2478325">
-        <testcase classname="test/routes/sql/AuthPasskeyRoute.test.ts" name="Route:AuthPasskeySQL Tests &gt; Can begin a passkey ceremony and receive challenge options." time="0.0266916">
+<testsuites name="vitest tests" tests="4" failures="0" errors="0" time="1.74674">
+    <testsuite name="test/routes/mongo/AuthBasicRoute.test.ts" timestamp="2026-08-21T22:04:43.564Z" hostname="Jane" tests="4" failures="0" errors="0" skipped="0" time="1.74674">
+        <testcase classname="test/routes/mongo/AuthBasicRoute.test.ts" name="Route:AuthBasicMongo Tests &gt; Can authenticate with valid user id and password." time="0.085503">
+        </testcase>
+        <testcase classname="test/routes/mongo/AuthBasicRoute.test.ts" name="Route:AuthBasicMongo Tests &gt; Can authenticate with valid user id and password when multiple passwords exist." time="0.1636559">
+        </testcase>
+        <testcase classname="test/routes/mongo/AuthBasicRoute.test.ts" name="Route:AuthBasicMongo Tests &gt; Cannot authenticate with invalid user id and password." time="0.0732814">
             <system-out>
-[DerivedLogger.emit] 2026-08-21T21:51:57.017Z [34mdebug[39m: undefined
+[DerivedLogger.emit] 2026-08-21T22:04:43.190Z [34mdebug[39m: undefined
 
             </system-out>
         </testcase>
-        <testcase classname="test/routes/sql/AuthPasskeyRoute.test.ts" name="Route:AuthPasskeySQL Tests &gt; Can complete a passkey ceremony with a valid assertion and authenticate." time="0.030115">
+        <testcase classname="test/routes/mongo/AuthBasicRoute.test.ts" name="Route:AuthBasicMongo Tests &gt; Cannot authenticate via basic auth when the account requires MFA, even with the correct password." time="0.0704925">
             <system-out>
-[DerivedLogger.emit] 2026-08-21T21:51:57.040Z [34mdebug[39m: undefined
-
-            </system-out>
-        </testcase>
-        <testcase classname="test/routes/sql/AuthPasskeyRoute.test.ts" name="Route:AuthPasskeySQL Tests &gt; Cannot authenticate with an unknown credential id." time="0.0105519">
-            <system-out>
-[DerivedLogger.emit] 2026-08-21T21:51:57.059Z [34mdebug[39m: undefined
-
-[DerivedLogger.emit] 2026-08-21T21:51:57.061Z [34mdebug[39m: undefined
-
-            </system-out>
-        </testcase>
-        <testcase classname="test/routes/sql/AuthPasskeyRoute.test.ts" name="Route:AuthPasskeySQL Tests &gt; Cannot authenticate when SimpleWebAuthn fails to verify the assertion." time="0.0174976">
-            <system-out>
-[DerivedLogger.emit] 2026-08-21T21:51:57.076Z [34mdebug[39m: undefined
-
-[DerivedLogger.emit] 2026-08-21T21:51:57.079Z [34mdebug[39m: undefined
-
-            </system-out>
-        </testcase>
-        <testcase classname="test/routes/sql/AuthPasskeyRoute.test.ts" name="Route:AuthPasskeySQL Tests &gt; Cannot authenticate with a malformed assertion response." time="0.0080534">
-            <system-out>
-[DerivedLogger.emit] 2026-08-21T21:51:57.086Z [34mdebug[39m: undefined
+[DerivedLogger.emit] 2026-08-21T22:04:43.261Z [34mdebug[39m: undefined
 
             </system-out>
         </testcase>

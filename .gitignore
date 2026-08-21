@@ -26,3 +26,4 @@ test\.dir/
 !.yarn/sdks
 !.yarn/versions
 openapi.*
+passwords
