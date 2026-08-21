@@ -91,10 +91,19 @@ export abstract class BaseAliasRoute<T extends Alias> extends CRUDRoute<T> {
             throw new ApiError(ApiErrors.AUTH_PERMISSION_FAILURE, 403, ApiErrorMessages.AUTH_PERMISSION_FAILURE);
         }
 
-        // Make sure the alias is unique
+        // Make sure the alias is unique. An *unverified* alias is only a pending, unproven claim on the
+        // value. It must not let anyone permanently reserve (squat) an e-mail/phone they don't control and
+        // block the real owner's later registration/claim (see `BaseRegistrationRoute.verify()`). Only an
+        // already-verified alias is a real conflict; stale unverified claims for the same value are displaced
+        // so that whoever actually proves ownership via OTP is the one who ends up with the alias.
         const existing: T[] | undefined = await this.repoUtils?.find({ alias: obj.alias }, { ignoreACL: true });
         if (existing && existing.length > 0) {
-            throw new ApiError(ApiErrors.IDENTIFIER_EXISTS, 403, ApiErrorMessages.IDENTIFIER_EXISTS);
+            if (existing.some((e) => e.verified)) {
+                throw new ApiError(ApiErrors.IDENTIFIER_EXISTS, 403, ApiErrorMessages.IDENTIFIER_EXISTS);
+            }
+            for (const e of existing) {
+                await this.repoUtils?.delete(e.uid, { ignoreACL: true });
+            }
         }
 
         if (obj.type === AliasType.NAME) {

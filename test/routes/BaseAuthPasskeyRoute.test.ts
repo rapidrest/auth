@@ -156,12 +156,14 @@ describe("BaseAuthPasskeyRoute Tests", () => {
             await expect((route as any).getCredentials("user-1")).rejects.toThrow(/userUtils is not set/);
         });
 
-        it("Throws if the user cannot be found.", async () => {
+        it("Returns an empty array (not a throw) if the user cannot be found, to avoid leaking account existence.", async () => {
             const route = new TestAuthPasskeyRoute();
-            (route as any).secretRepo = { find: vi.fn() };
+            const find = vi.fn();
+            (route as any).secretRepo = { find };
             (route as any).userUtils = { lookup: vi.fn().mockResolvedValue(undefined) };
 
-            await expect((route as any).getCredentials("unknown")).rejects.toThrow(/Invalid authentication request/);
+            await expect((route as any).getCredentials("unknown")).resolves.toEqual([]);
+            expect(find).not.toHaveBeenCalled();
         });
 
         it("Returns the .data of all matching PASSKEY secrets for the user.", async () => {

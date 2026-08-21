@@ -364,6 +364,14 @@ export abstract class BaseProfileRoute<T extends Profile> extends CRUDRoute<T> {
         } else if (obj.uid !== user.uid && !UserUtils.hasRoles(user, this.trustedRoles)) {
             throw new ApiError(ApiErrors.AUTH_PERMISSION_FAILURE, 403, ApiErrorMessages.AUTH_PERMISSION_FAILURE);
         }
+
+        // Same reasoning as the `contacts[].verified` reconciliation in `validateUpdate()` below: a contact's
+        // `verified` flag must only ever flip via `verifyContact()`'s real OTP check, never via a
+        // client-supplied value here. There's no pre-existing record to reconcile against on create (it's
+        // brand new), so every contact simply starts unverified.
+        if (obj.contacts) {
+            obj.contacts = obj.contacts.map((c) => ({ ...c, verified: false }));
+        }
     }
 
     protected async validateUpdate(id: string, obj: UpdateObject<T>, user?: JWTUser): Promise<void> {

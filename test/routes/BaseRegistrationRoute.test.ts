@@ -456,7 +456,7 @@ describe("BaseRegistrationRoute Tests", () => {
             // The OTP is still valid/unconsumed since verifyOTP() was never reached — a subsequent, properly
             // rate-limited attempt with the same token must still succeed.
             const route2 = new TestRegistrationRoute();
-            (route2 as any).aliasRepo = { create: vi.fn().mockResolvedValue(undefined) };
+            (route2 as any).aliasRepo = { find: vi.fn().mockResolvedValue([]), create: vi.fn().mockResolvedValue(undefined) };
             (route2 as any).userRepo = { create: vi.fn().mockResolvedValue({ uid: "user-1", roles: [], scopes: [] }) };
             const tokenUtils2 = new TokenUtils();
             (tokenUtils2 as any).jwtConfig = { secret: "test-secret", refresh: { expiresIn: "14 days" } };
@@ -492,7 +492,7 @@ describe("BaseRegistrationRoute Tests", () => {
                 callOrder.push("user");
                 return Promise.resolve(user);
             });
-            (route as any).aliasRepo = { create: aliasCreate };
+            (route as any).aliasRepo = { find: vi.fn().mockResolvedValue([]), create: aliasCreate };
             (route as any).userRepo = { create: userCreate };
             const tokenUtils = new TokenUtils();
             (tokenUtils as any).jwtConfig = { secret: "test-secret", refresh: { expiresIn: "14 days" } };
@@ -540,7 +540,7 @@ describe("BaseRegistrationRoute Tests", () => {
             const route = new TestRegistrationRoute();
             const aliasCreate = vi.fn().mockRejectedValue(new Error("IDENTIFIER_EXISTS"));
             const userCreate = vi.fn();
-            (route as any).aliasRepo = { create: aliasCreate };
+            (route as any).aliasRepo = { find: vi.fn().mockResolvedValue([]), create: aliasCreate };
             (route as any).userRepo = { create: userCreate };
             const tokenUtils = new TokenUtils();
             (tokenUtils as any).jwtConfig = { secret: "test-secret", refresh: { expiresIn: "14 days" } };
@@ -560,7 +560,7 @@ describe("BaseRegistrationRoute Tests", () => {
 
             const route = new TestRegistrationRoute();
             const user = { uid: "user-1", roles: [], scopes: [] };
-            (route as any).aliasRepo = { create: vi.fn().mockResolvedValue(undefined) };
+            (route as any).aliasRepo = { find: vi.fn().mockResolvedValue([]), create: vi.fn().mockResolvedValue(undefined) };
             (route as any).userRepo = { create: vi.fn().mockResolvedValue(user) };
             const tokenUtils = new TokenUtils();
             (tokenUtils as any).jwtConfig = { secret: "test-secret", refresh: { expiresIn: "14 days" } };
@@ -588,7 +588,7 @@ describe("BaseRegistrationRoute Tests", () => {
             const aliasCreate = vi.fn().mockResolvedValue(undefined);
             const user = { uid: "new-user-uid", roles: [], scopes: [] };
             const userCreate = vi.fn().mockResolvedValue(user);
-            (route as any).aliasRepo = { create: aliasCreate };
+            (route as any).aliasRepo = { find: vi.fn().mockResolvedValue([]), create: aliasCreate };
             (route as any).userRepo = { create: userCreate };
             const tokenUtils = new TokenUtils();
             (tokenUtils as any).jwtConfig = { secret: "test-secret", refresh: { expiresIn: "14 days" } };
@@ -609,7 +609,7 @@ describe("BaseRegistrationRoute Tests", () => {
             const token = await generateOTP(req, { id: "user@example.com" });
 
             const route = new TestRegistrationRoute();
-            (route as any).aliasRepo = { create: vi.fn().mockResolvedValue(undefined) };
+            (route as any).aliasRepo = { find: vi.fn().mockResolvedValue([]), create: vi.fn().mockResolvedValue(undefined) };
             (route as any).userRepo = { create: vi.fn().mockResolvedValue({ uid: "user-1", roles: [], scopes: [] }) };
             const tokenUtils = new TokenUtils();
             (tokenUtils as any).jwtConfig = { secret: "test-secret", refresh: { expiresIn: "14 days" } };

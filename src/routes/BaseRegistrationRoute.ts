@@ -231,13 +231,30 @@ export abstract class BaseRegistrationRoute<U extends User, A extends Alias> {
         // that follows it fails.
         const newUser = new this.userClass({ verified: true });
         const options = { ignoreACL: true, user: newUser };
+        // This bypasses `BaseAliasRoute.validateCreate()` (it calls the repo directly, since there's no
+        // authenticated actor yet to route the request through), so it must repeat that method's own
+        // displacement of stale *unverified* alias claims for the same value here - otherwise an attacker who
+        // squatted this e-mail/phone as an unverified alias (see `BaseAliasRoute.validateCreate()`) would
+        // permanently block this legitimate, just-OTP-verified registration on the DB's uniqueness constraint.
         if (email) {
+            const existing = await this.aliasRepo.find({ alias: email }, { ignoreACL: true });
+            for (const e of existing) {
+                if (!e.verified) {
+                    await this.aliasRepo.delete(e.uid, { ignoreACL: true });
+                }
+            }
             await this.aliasRepo.create(
                 { alias: email, type: AliasType.EMAIL, userUid: newUser.uid, verified: true } as any,
                 options,
             );
         }
         if (phone) {
+            const existing = await this.aliasRepo.find({ alias: phone }, { ignoreACL: true });
+            for (const e of existing) {
+                if (!e.verified) {
+                    await this.aliasRepo.delete(e.uid, { ignoreACL: true });
+                }
+            }
             await this.aliasRepo.create(
                 { alias: phone, type: AliasType.PHONE, userUid: newUser.uid, verified: true } as any,
                 options,

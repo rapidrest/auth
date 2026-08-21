@@ -169,7 +169,11 @@ export abstract class BaseAuthPasskeyRoute<U extends User, A extends Alias, S ex
 
         const user: U | undefined = await this.userUtils.lookup(id);
         if (!user) {
-            throw new Error("Invalid authentication request.");
+            // Must equalize with the "real user, zero credentials" case below (an empty array), not throw -
+            // `PasskeyStrategy.challenge()` calls this unauthenticated with a client-suppliable uid hint and
+            // relies on both cases being indistinguishable to avoid leaking account existence via a 401 vs.
+            // 200 status-code side channel (see the comment in `challenge()`).
+            return [];
         }
 
         // Retrieve all passkey secrets associated with this user

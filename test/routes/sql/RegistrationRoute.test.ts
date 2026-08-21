@@ -188,23 +188,20 @@ describe("Route:RegistrationSQL Tests", () => {
     });
 
     it(
-        "Does not leave an orphaned User row when the e-mail alias collides during verify() " +
-            "(regression: alias creation now happens before user creation, so a collision — whether from a " +
-            "pre-existing/squatted alias or a genuine registration race — fails before any User row is " +
-            "written; previously the User was created first and left behind, permanently unusable, whenever " +
-            "the alias creation that followed it failed).",
+        "Displaces a stale unverified alias squatting on the address and completes registration " +
+            "(regression: an unverified alias is only a pending, unproven claim - e.g. from an attacker " +
+            "squatting a victim's e-mail via BaseAliasRoute.create(), or an abandoned prior attempt - and must " +
+            "not permanently block the real owner's registration once they actually prove ownership via OTP; " +
+            "see the displacement logic in BaseRegistrationRoute.verify()).",
         async () => {
             const client = agent(server.getApplication());
             const email = `${uuid.v4()}@example.com`;
 
-            // Simulate a collision at the exact moment verify() tries to create the alias — e.g. a race
-            // between two concurrent registration attempts for the same address, or (absent the separate
-            // anti-squatting fix in BaseAliasRoute) an attacker-planted `name` alias. The alias is left
-            // unverified, so start()'s verified-only pre-check doesn't short-circuit and a real OTP still
-            // gets sent, reaching the actual collision inside verify().
-            const otherUser: UserSQL = await userRepo.save(new UserSQL({ roles: [], scopes: [], verified: false }));
+            // The alias is left unverified, so start()'s verified-only pre-check doesn't short-circuit and a
+            // real OTP still gets sent to the actual owner.
+            const squatter: UserSQL = await userRepo.save(new UserSQL({ roles: [], scopes: [], verified: false }));
             await aliasRepo.save(
-                new AliasSQL({ alias: email, type: AliasType.EMAIL, userUid: otherUser.uid, verified: false }),
+                new AliasSQL({ alias: email, type: AliasType.EMAIL, userUid: squatter.uid, verified: false }),
             );
 
             const startResult = await client.post(`${baseUrl}/start`).send({ email });
@@ -214,6 +211,47 @@ describe("Route:RegistrationSQL Tests", () => {
             const sendEmailMock = messagingUtils.sendEmail as any;
             const lastCall = sendEmailMock.mock.calls[sendEmailMock.mock.calls.length - 1];
             const token: string = lastCall[1].totp;
+
+            const verifyResult = await client.post(`${baseUrl}/verify`).send({ email, token });
+
+            expect(verifyResult.status).toBeGreaterThanOrEqual(200);
+            expect(verifyResult.status).toBeLessThan(300);
+
+            // The squatter's stale unverified alias was displaced - the address now belongs, verified, to the
+            // newly registered (real) user, and the squatter's own account row is untouched.
+            const aliasesForEmail: AliasSQL[] = await aliasRepo.find({ where: { alias: email } });
+            expect(aliasesForEmail).toHaveLength(1);
+            expect(aliasesForEmail[0].verified).toBe(true);
+            expect(aliasesForEmail[0].userUid).not.toBe(squatter.uid);
+
+            const allUsers: UserSQL[] = await userRepo.find();
+            expect(allUsers).toHaveLength(2);
+            expect(allUsers.some((u) => u.uid === squatter.uid)).toBe(true);
+        },
+    );
+
+    it(
+        "Rejects verify() when the alias for the address is already verified (a genuine conflict, e.g. a race " +
+            "between two concurrent registration attempts for the same address) and leaves no orphaned User row.",
+        async () => {
+            const client = agent(server.getApplication());
+            const email = `${uuid.v4()}@example.com`;
+
+            const otherUser: UserSQL = await userRepo.save(new UserSQL({ roles: [], scopes: [], verified: true }));
+
+            const startResult = await client.post(`${baseUrl}/start`).send({ email });
+            expect(startResult.status).toBeGreaterThanOrEqual(200);
+            expect(startResult.status).toBeLessThan(300);
+
+            const sendEmailMock = messagingUtils.sendEmail as any;
+            const lastCall = sendEmailMock.mock.calls[sendEmailMock.mock.calls.length - 1];
+            const token: string = lastCall[1].totp;
+
+            // Simulate the race: another registration for the same address completes, verified, in between
+            // this attempt's `start()` and `verify()` calls.
+            await aliasRepo.save(
+                new AliasSQL({ alias: email, type: AliasType.EMAIL, userUid: otherUser.uid, verified: true }),
+            );
 
             const verifyResult = await client.post(`${baseUrl}/verify`).send({ email, token });
 

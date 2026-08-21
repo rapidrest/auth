@@ -204,10 +204,10 @@ describe("BaseAliasRoute Tests", () => {
         // leave an orphaned `User` row behind in `BaseRegistrationRoute`, since the collision wasn't detected
         // until the insert itself. The check now runs once, up front, for every alias type.
         describe("uniqueness check (all types)", () => {
-            it("Throws IDENTIFIER_EXISTS when a name alias with the same value already exists.", async () => {
+            it("Throws IDENTIFIER_EXISTS when a name alias with the same value already exists and is verified.", async () => {
                 vi.spyOn(CRUDRoute.prototype as any, "validateCreate").mockResolvedValue(undefined);
                 const route = new TestAliasRoute();
-                const find = vi.fn().mockResolvedValue([{ uid: "existing-alias" }]);
+                const find = vi.fn().mockResolvedValue([{ uid: "existing-alias", verified: true }]);
                 (route as any).repoUtils = { find };
                 const obj: any = { type: AliasType.NAME, alias: "taken-name" };
 
@@ -228,10 +228,10 @@ describe("BaseAliasRoute Tests", () => {
                 expect(obj.verified).toBe(true);
             });
 
-            it("Throws IDENTIFIER_EXISTS when an email alias with the same value already exists.", async () => {
+            it("Throws IDENTIFIER_EXISTS when an email alias with the same value already exists and is verified.", async () => {
                 vi.spyOn(CRUDRoute.prototype as any, "validateCreate").mockResolvedValue(undefined);
                 const route = new TestAliasRoute();
-                const find = vi.fn().mockResolvedValue([{ uid: "existing-alias" }]);
+                const find = vi.fn().mockResolvedValue([{ uid: "existing-alias", verified: true }]);
                 (route as any).repoUtils = { find };
                 const findOne = vi.fn();
                 (route as any).profileRepo = { findOne };
@@ -245,15 +245,36 @@ describe("BaseAliasRoute Tests", () => {
                 expect(findOne).not.toHaveBeenCalled();
             });
 
-            it("Throws IDENTIFIER_EXISTS when a phone alias with the same value already exists.", async () => {
+            it("Throws IDENTIFIER_EXISTS when a phone alias with the same value already exists and is verified.", async () => {
                 vi.spyOn(CRUDRoute.prototype as any, "validateCreate").mockResolvedValue(undefined);
                 const route = new TestAliasRoute();
-                (route as any).repoUtils = { find: vi.fn().mockResolvedValue([{ uid: "existing-alias" }]) };
+                (route as any).repoUtils = {
+                    find: vi.fn().mockResolvedValue([{ uid: "existing-alias", verified: true }]),
+                };
                 const obj: any = { type: AliasType.PHONE, alias: "+14155552671" };
 
                 await expect((route as any).validateCreate(obj, { uid: "user-1" })).rejects.toThrow(
                     /already exists/i,
                 );
+            });
+
+            // Regression: an unverified alias is only a pending, unproven claim - it must not let anyone
+            // permanently squat an e-mail/phone they don't control and block the real owner's later
+            // registration/claim (see BaseRegistrationRoute.verify()). A stale unverified claim for the same
+            // value is displaced rather than treated as a conflict.
+            it("Displaces a stale unverified email alias claim for the same value instead of throwing.", async () => {
+                vi.spyOn(CRUDRoute.prototype as any, "validateCreate").mockResolvedValue(undefined);
+                const route = new TestAliasRoute();
+                const find = vi.fn().mockResolvedValue([{ uid: "squatter-alias", verified: false }]);
+                const del = vi.fn().mockResolvedValue(undefined);
+                (route as any).repoUtils = { find, delete: del };
+                (route as any).profileRepo = { findOne: vi.fn().mockResolvedValue(undefined) };
+                const obj: any = { type: AliasType.EMAIL, alias: "victim@example.com" };
+
+                await (route as any).validateCreate(obj, { uid: "user-1" });
+
+                expect(del).toHaveBeenCalledWith("squatter-alias", { ignoreACL: true });
+                expect(obj.verified).toBe(false);
             });
 
             it("Proceeds to the verified-contact check when no colliding alias exists.", async () => {
