@@ -92,4 +92,4 @@ error (naming the missing package) if it isn't installed, rather than failing at
 
 ## License
 
-MIT — see [LICENSE](./LICENSE).
+MPL v2.0 — see [LICENSE](./LICENSE).
