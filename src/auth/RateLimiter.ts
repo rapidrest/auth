@@ -68,18 +68,14 @@ export class RateLimiter {
     }
 
     private async incrementStore(key: string, windowSeconds: number): Promise<number> {
-        if (!this.cache) {
-            throw new Error("Cache not injected.");
-        }
-
-        let entry: CacheEntry | undefined = (await this.cache.load(key)) as CacheEntry | undefined;
+        let entry: CacheEntry | undefined = (await this.cache!.load(key)) as CacheEntry | undefined;
         if (!entry) {
             entry = new CacheEntry();
         } else {
             entry.count += 1;
         }
 
-        await this.cache.save(key, entry, windowSeconds);
+        await this.cache!.save(key, entry, windowSeconds);
 
         return entry.count;
     }
