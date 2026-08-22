@@ -25,7 +25,7 @@ export interface TokenCookieConfig {
     maxAge?: number;
     /** The `SameSite` attribute of the cookie. Default is `Lax`. */
     sameSite?: "Strict" | "Lax" | "None";
-    /** Set to `true` to mark the cookie `Secure` (HTTPS only). Default is `false`. */
+    /** Set to `false` to omit the `Secure` (HTTPS only) attribute. Default is `true`. */
     secure?: boolean;
     /** Set to `false` to omit the `HttpOnly` attribute. Default is `true`. */
     httpOnly?: boolean;
@@ -77,7 +77,7 @@ export class TokenUtils {
         if (config.httpOnly !== false) {
             parts.push("HttpOnly");
         }
-        if (config.secure) {
+        if (config.secure !== false) {
             parts.push("Secure");
         }
         return parts.join("; ");

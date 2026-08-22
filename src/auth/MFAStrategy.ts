@@ -2,15 +2,17 @@
 // Copyright (C) 2026 Jean-Philippe Steinmetz
 // SPDX-License-Identifier: MPL-2.0
 ////////////////////////////////////////////////////////////////////////////////
-import type { JWTUser } from "@rapidrest/core";
-import { AuthStrategy, HttpRequest, HttpResponse, AuthResult } from "@rapidrest/service-core";
-import { OTPContact, PasskeyConfig, StoredPasskeyCredential } from "./types.js";
+import { ApiError, type JWTUser } from "@rapidrest/core";
+import { ApiErrors, AuthStrategy, HttpRequest, HttpResponse, AuthResult } from "@rapidrest/service-core";
+import { OTPContact, PasskeyConfig, RecoveryCodesSecret, StoredPasskeyCredential } from "./types.js";
 import {
     generateOTP,
     generatePasskeyChallenge,
     getRequestData,
+    importArgon2,
     isOTPResponse,
     isPasskeyResponse,
+    verifyDummyPassword,
     verifyOTP,
     verifyPasskeyChallenge,
     verifyTOTP,
@@ -22,6 +24,7 @@ import {
 export enum MFAMethodType {
     FIDO2 = "fido2",
     OTP = "otp",
+    RECOVERY_CODE = "recovery_code",
     TOTP = "totp",
 }
 
@@ -116,6 +119,16 @@ export class MFAStrategyOptions {
      */
     public updateSecretTimeStep?(uid: string, timeStep: number): Promise<void>;
     /**
+     * Persists that the recovery code at `codeIndex` within the identified `recovery-codes` secret has been
+     * consumed, so it can never be used again. Called once, only after `verifyRecoveryCode()` has already
+     * matched the submitted code against that entry's hash. Optional — required only to support the
+     * `RECOVERY_CODE` secondary authentication method; without it, a verified code would remain usable
+     * indefinitely.
+     * @param uid The unique id of the secondary auth method (== the underlying secret's id) that was verified.
+     * @param codeIndex The index, within that secret's `codes` array, of the entry that was matched.
+     */
+    public consumeRecoveryCode?(uid: string, codeIndex: number): Promise<void>;
+    /**
      * Sends a notification to the specified contact with the provided MFA code.
      * NOTE: You must override this function when using this strategy.
      * @param contact The contact to send the MFA code to.
@@ -181,11 +194,17 @@ export class MFAStrategy implements AuthStrategy {
         const { data, payload } = getRequestData(req);
 
         if (isOTPResponse(payload)) {
-            // OTP and TOTP submissions share the exact same `{id, token}` shape — route based on
-            // which method was selected during phase 2's challenge(), recorded in the session.
-            const user: JWTUser | undefined = req.session?.mfaMethodId
-                ? await this.verifyTOTP(payload, req, res)
-                : await this.verifyOTP(payload, req, res);
+            // OTP, TOTP, and RECOVERY_CODE submissions all share the exact same `{id, token}` shape —
+            // route based on which method was selected during phase 2's challenge(), recorded in the
+            // session as `mfaMethodType` (not just the presence of `mfaMethodId`, which doesn't
+            // distinguish TOTP from RECOVERY_CODE — both record an id for phase 3 to re-fetch the method).
+            const methodType: MFAMethodType | undefined = req.session?.mfaMethodType;
+            const user: JWTUser | undefined =
+                methodType === MFAMethodType.TOTP
+                    ? await this.verifyTOTP(payload, req, res)
+                    : methodType === MFAMethodType.RECOVERY_CODE
+                      ? await this.verifyRecoveryCode(payload, req, res)
+                      : await this.verifyOTP(payload, req, res);
             if (user) {
                 return {
                     data,
@@ -227,12 +246,14 @@ export class MFAStrategy implements AuthStrategy {
     }
 
     public authenticateSync(req: HttpRequest, res: HttpResponse, required?: boolean): AuthResult | undefined {
-        throw new Error("Not supported. This auth strategy must be used asynchronously.");
+        throw new ApiError(ApiErrors.INTERNAL_ERROR, 500, "Not supported. This auth strategy must be used asynchronously.");
     }
 
     protected async challenge(payload: any, req: HttpRequest, res: HttpResponse): Promise<void> {
         if (!req.session) {
-            throw new Error(
+            throw new ApiError(
+                ApiErrors.INTERNAL_ERROR,
+                500,
                 "MFAStrategy requires session support. Configure the `session` config block so the " +
                     "session middleware is registered.",
             );
@@ -262,7 +283,7 @@ export class MFAStrategy implements AuthStrategy {
             case MFAMethodType.FIDO2:
                 {
                     if (!this.options.fidoConfig) {
-                        throw new Error("No configuration exists for MFA method: FIDO2");
+                        throw new ApiError(ApiErrors.INTERNAL_ERROR, 500, "No configuration exists for MFA method: FIDO2");
                     }
                     // Scope the challenge to only the specific credential the client selected — this
                     // also means an authenticator holding a different (unselected) registered
@@ -274,16 +295,18 @@ export class MFAStrategy implements AuthStrategy {
                     // Recorded so phase 3 can confirm the submitted assertion is for this same
                     // credential, not some other one belonging to the same user.
                     req.session.mfaMethodId = method.id;
+                    req.session.mfaMethodType = method.type;
                     res.status(200);
                     res.json(result);
                 }
                 break;
             case MFAMethodType.OTP:
                 {
-                    // Clear any stale `mfaMethodId` left over from a previous TOTP/FIDO2 challenge
-                    // selection in this session — otherwise authenticate()'s routing check would
-                    // misroute this OTP submission into verifyTOTP(), which always fails.
+                    // Clear any stale `mfaMethodId`/`mfaMethodType` left over from a previous TOTP/FIDO2/
+                    // RECOVERY_CODE challenge selection in this session — otherwise authenticate()'s
+                    // routing check would misroute this OTP submission into the wrong verify method.
                     delete req.session.mfaMethodId;
+                    req.session.mfaMethodType = method.type;
                     const totp: string = await generateOTP(req, payload);
                     await this.options.notifyContact(method.data, totp);
                     res.status(200);
@@ -295,14 +318,28 @@ export class MFAStrategy implements AuthStrategy {
                     // No challenge or notification is needed — the client's authenticator app already
                     // has the current code. Record which secret was selected so phase 3 knows which
                     // one to verify the submitted code against, and so a `{id, token}` submission can
-                    // be routed to TOTP verification instead of OTP (both share the same shape).
+                    // be routed to TOTP verification instead of OTP/RECOVERY_CODE (all three share the
+                    // same shape).
                     req.session.mfaMethodId = method.id;
+                    req.session.mfaMethodType = method.type;
+                    res.status(200);
+                    res.json({});
+                }
+                break;
+            case MFAMethodType.RECOVERY_CODE:
+                {
+                    // No challenge or notification is needed — the user already has their own list of
+                    // codes. Record which secret was selected so phase 3 knows which one to verify the
+                    // submitted code against, and so a `{id, token}` submission can be routed to recovery
+                    // code verification instead of OTP/TOTP (all three share the same shape).
+                    req.session.mfaMethodId = method.id;
+                    req.session.mfaMethodType = method.type;
                     res.status(200);
                     res.json({});
                 }
                 break;
             default:
-                throw new Error("Unsupported MFA method: " + method.type);
+                throw new ApiError(ApiErrors.INTERNAL_ERROR, 500, "Unsupported MFA method: " + method.type);
         }
     }
 
@@ -340,7 +377,7 @@ export class MFAStrategy implements AuthStrategy {
                 res.json({ uid: user.uid, methods });
                 return undefined;
             } else if (this.options.require2FA) {
-                throw new Error("No secondary authentication methods available.");
+                throw new ApiError(ApiErrors.AUTH_FAILED, 401, "No secondary authentication methods available.");
             }
 
             return user;
@@ -351,7 +388,9 @@ export class MFAStrategy implements AuthStrategy {
 
     protected async verifyFIDO(payload: any, req: HttpRequest, res: HttpResponse): Promise<JWTUser | undefined> {
         if (!req.session) {
-            throw new Error(
+            throw new ApiError(
+                ApiErrors.INTERNAL_ERROR,
+                500,
                 "MFAStrategy requires session support. Configure the `session` config block so the " +
                     "session middleware is registered.",
             );
@@ -377,7 +416,7 @@ export class MFAStrategy implements AuthStrategy {
             return undefined;
         }
         if (!this.options.fidoConfig) {
-            throw new Error("No configuration exists for MFA method: FIDO2");
+            throw new ApiError(ApiErrors.INTERNAL_ERROR, 500, "No configuration exists for MFA method: FIDO2");
         }
 
         const credential: StoredPasskeyCredential | undefined = await this.options.getCredentialById(payload.id);
@@ -433,6 +472,7 @@ export class MFAStrategy implements AuthStrategy {
         const methodId: string | undefined = req.session?.mfaMethodId;
         delete req.session?.userUid;
         delete req.session?.mfaMethodId;
+        delete req.session?.mfaMethodType;
 
         if (!userUid || !methodId || payload.id !== userUid) {
             return undefined;
@@ -452,6 +492,64 @@ export class MFAStrategy implements AuthStrategy {
 
         if (this.options.updateSecretTimeStep) {
             await this.options.updateSecretTimeStep(methodId, result.timeStep);
+        }
+
+        return await this.options.getUser(userUid);
+    }
+
+    protected async verifyRecoveryCode(
+        payload: any,
+        req: HttpRequest,
+        res: HttpResponse,
+    ): Promise<JWTUser | undefined> {
+        if (this.options.checkRateLimit) {
+            await this.options.checkRateLimit(payload.id, req);
+        }
+
+        // The phase-1-verified identity and the phase-2-selected secret are both single-use —
+        // cleared once phase 3 completes, regardless of outcome, mirroring verifyTOTP().
+        const userUid: string | undefined = req.session?.userUid;
+        const methodId: string | undefined = req.session?.mfaMethodId;
+        delete req.session?.userUid;
+        delete req.session?.mfaMethodId;
+        delete req.session?.mfaMethodType;
+
+        if (!userUid || !methodId || payload.id !== userUid) {
+            return undefined;
+        }
+
+        // Re-fetch the specific secret selected during phase 2 — this also re-confirms it still
+        // belongs to the phase-1-verified identity and is actually a recovery-codes method.
+        const method: MFAMethod | undefined = await this.options.getMethod(methodId, userUid);
+        if (!method || method.type !== MFAMethodType.RECOVERY_CODE) {
+            return undefined;
+        }
+
+        // Codes aren't individually identifiable — the submitted value has to be checked against every
+        // unused entry's hash. Burn the same amount of time (via verifyDummyPassword()) when nothing
+        // matches so a wrong code isn't distinguishable, by timing, from one checked against a shorter
+        // remaining list (e.g. an account close to exhausting its codes).
+        const argon = await importArgon2();
+        const secret = method.data as RecoveryCodesSecret;
+        let matchedIndex = -1;
+        for (let i = 0; i < secret.codes.length; i++) {
+            const entry = secret.codes[i];
+            if (entry.usedAt) {
+                continue;
+            }
+            if (await argon.verify(entry.hash, payload.token)) {
+                matchedIndex = i;
+                break;
+            }
+        }
+
+        if (matchedIndex < 0) {
+            await verifyDummyPassword(payload.token);
+            return undefined;
+        }
+
+        if (this.options.consumeRecoveryCode) {
+            await this.options.consumeRecoveryCode(methodId, matchedIndex);
         }
 
         return await this.options.getUser(userUid);

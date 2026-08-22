@@ -17,6 +17,7 @@ import { Secret, SecretType } from "../models/types.js";
 import { ApiError, JWTUser, ObjectDecorators, UserUtils } from "@rapidrest/core";
 import {
     generatePasskeyRegistrationOptions,
+    generateRecoveryCodes,
     generateTOTPURI,
     importArgon2,
     importOTPLib,
@@ -24,7 +25,14 @@ import {
     isValidTOTPSecret,
     verifyPasskeyRegistrationResponse,
 } from "../auth/shared.js";
-import { PasskeyConfig, PasswordConfig, StoredPasskeyCredential, TOTPConfig, TOTPSecret } from "../auth/types.js";
+import {
+    PasskeyConfig,
+    PasswordConfig,
+    RecoveryCodesSecret,
+    StoredPasskeyCredential,
+    TOTPConfig,
+    TOTPSecret,
+} from "../auth/types.js";
 
 const { Config, Init } = ObjectDecorators;
 const { Description, Returns, Summary } = DocDecorators;
@@ -155,7 +163,7 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
                     if (typeof obj.data === "string") {
                         this.validatePassword(obj.data);
                         const argon = await importArgon2();
-                        obj.data = await argon.hash(obj.data);
+                        obj.data = await argon.hash(obj.data, this.argon2Options());
                     } else {
                         throw new ApiError(
                             ApiErrors.INVALID_REQUEST,
@@ -165,10 +173,25 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
                     }
                 }
                 break;
+            case SecretType.RECOVERY_CODES:
+                await this.validateRecoveryCodesCreate(obj, req);
+                break;
             case SecretType.TOTP:
                 await this.validateTOTPCreate(obj);
                 break;
         }
+    }
+
+    /**
+     * Builds the argon2 hashing options from `passwordConfig`. `argon2.verify()` doesn't need these - the
+     * cost parameters are embedded in the hash string itself - so this is only ever passed to `argon2.hash()`.
+     */
+    private argon2Options(): { memoryCost: number; timeCost: number; parallelism: number } {
+        return {
+            memoryCost: this.passwordConfig.hash_memory_cost,
+            timeCost: this.passwordConfig.hash_time_cost,
+            parallelism: this.passwordConfig.hash_parallelism,
+        };
     }
 
     private validatePassword(password: string) {
@@ -321,6 +344,31 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
     }
 
     /**
+     * Generates a fresh batch of MFA recovery/backup codes for the account, discarding any client-supplied
+     * `data` entirely - unlike a TOTP secret, there's no legitimate reason for a caller to bring their own
+     * codes here; accepting caller-chosen values would let an attacker who can currently write to this
+     * secret pre-plant known codes for later use. Only each code's argon2 hash is persisted (see
+     * `RecoveryCodesSecret`); the plaintext is stashed on `req` so `sanitizeSecretForResponse()` can return
+     * it to the caller exactly once, in the `create()` response - it can never be retrieved again after
+     * that, since it's never written to the datastore.
+     *
+     * @param obj The secret being created.
+     * @param req The source HTTP request, used to stash the plaintext codes for the `create()` response only.
+     */
+    protected async validateRecoveryCodesCreate(obj: Partial<T>, req: HttpRequest): Promise<void> {
+        const plaintextCodes: string[] = generateRecoveryCodes();
+        const argon = await importArgon2();
+        const codes = await Promise.all(
+            plaintextCodes.map(async (code) => ({ hash: await argon.hash(code, this.argon2Options()) })),
+        );
+
+        const recoveryCodesSecret: RecoveryCodesSecret = { codes };
+        obj.data = recoveryCodesSecret;
+
+        (req as any).generatedRecoveryCodes = plaintextCodes;
+    }
+
+    /**
      * Begins a WebAuthn registration ceremony for the authenticated user: generates a set of
      * `PublicKeyCredentialCreationOptions` (RFC/spec compliant per https://www.w3.org/TR/webauthn-2/), scoped
      * to exclude any credentials of the given type the user already has registered, and stores the challenge
@@ -418,7 +466,7 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
         // returned back to the client.
         const objs: Array<T> = Array.isArray(result) ? result : [result];
         for (const obj of objs) {
-            await this.sanitizeSecretForResponse(obj);
+            await this.sanitizeSecretForResponse(obj, req);
         }
 
         return result;
@@ -428,8 +476,12 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
      * Strips or augments the `data` field of a persisted secret before it is returned to the client. Shared
      * by `create()` and `update()` so that a response for either operation never leaks a `password` hash or
      * raw WebAuthn/TOTP credential material back over the wire.
+     *
+     * @param req The originating request, used only to recover the plaintext codes
+     * `validateRecoveryCodesCreate()` stashed on it for a `recovery-codes` secret - omit for `update()`,
+     * which never reaches a `recovery-codes` secret (see `validateUpdate()`).
      */
-    private async sanitizeSecretForResponse(obj: T): Promise<T> {
+    private async sanitizeSecretForResponse(obj: T, req?: HttpRequest): Promise<T> {
         if ([SecretType.FIDO2, SecretType.PASSKEY, SecretType.PASSWORD].includes(obj.type)) {
             delete obj.data;
         } else if (obj.type === SecretType.TOTP && obj.data) {
@@ -440,6 +492,11 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
                 obj.userUid,
                 obj.data as TOTPSecret,
             );
+        } else if (obj.type === SecretType.RECOVERY_CODES) {
+            // The hashed `data` persisted by validateRecoveryCodesCreate() is never returned - only the
+            // plaintext it stashed on `req`, and only this once; it isn't recoverable after this response.
+            (obj as any).codes = (req as any)?.generatedRecoveryCodes;
+            delete obj.data;
         }
         return obj;
     }
@@ -573,7 +630,7 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
                         if (typeof obj.data === "string") {
                             this.validatePassword(obj.data);
                             const argon = await importArgon2();
-                            obj.data = await argon.hash(obj.data);
+                            obj.data = await argon.hash(obj.data, this.argon2Options());
                         } else {
                             throw new ApiError(
                                 ApiErrors.INVALID_REQUEST,
@@ -583,6 +640,15 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
                         }
                     }
                     break;
+                case SecretType.RECOVERY_CODES:
+                    // Do not allow changing recovery codes' data - a client-supplied value here would
+                    // write attacker-controlled plaintext straight into `data` unhashed (validateCreate()'s
+                    // hashing only runs on create). Recovery codes must be deleted and re-created.
+                    throw new ApiError(
+                        ApiErrors.INVALID_REQUEST,
+                        400,
+                        "Recovery codes cannot be updated. Delete and create a new secret to regenerate them.",
+                    );
                 case SecretType.TOTP:
                     await this.validateTOTPCreate(obj);
                     break;

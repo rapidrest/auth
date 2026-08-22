@@ -2,8 +2,8 @@
 // Copyright (C) 2026 Jean-Philippe Steinmetz
 // SPDX-License-Identifier: MPL-2.0
 ////////////////////////////////////////////////////////////////////////////////
-import type { JWTUser } from "@rapidrest/core";
-import { AuthResult, AuthStrategy, HttpRequest, HttpResponse } from "@rapidrest/service-core";
+import { ApiError, type JWTUser } from "@rapidrest/core";
+import { ApiErrors, AuthResult, AuthStrategy, HttpRequest, HttpResponse } from "@rapidrest/service-core";
 import { getRequestData, verifyDummyTOTP, verifyTOTP } from "./shared.js";
 import { TOTPSecret } from "./types.js";
 
@@ -102,7 +102,7 @@ export class TOTPStrategy implements AuthStrategy {
     }
 
     public authenticateSync(req: HttpRequest, res: HttpResponse, required?: boolean): AuthResult | undefined {
-        throw new Error("Not supported. This auth strategy must be used asynchronously.");
+        throw new ApiError(ApiErrors.INTERNAL_ERROR, 500, "Not supported. This auth strategy must be used asynchronously.");
     }
 
     protected async verify(payload: any, req?: HttpRequest): Promise<JWTUser | undefined> {

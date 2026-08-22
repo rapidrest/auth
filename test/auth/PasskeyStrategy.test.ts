@@ -235,13 +235,23 @@ describe("PasskeyStrategy Tests", () => {
 
         it("Throws if req.session is missing.", async () => {
             const req = makeReq({ body: makeAssertionBody(), session: undefined });
-            await expect(strategy.authenticate(req, undefined as any)).rejects.toThrow(/session support/);
+            // Regression: this is a deployment misconfiguration, not a client-caused auth failure - it
+            // must surface as a distinguishable 500, not get flattened into a generic 401.
+            await expect(strategy.authenticate(req, undefined as any)).rejects.toMatchObject({
+                status: 500,
+                message: expect.stringMatching(/session support/),
+            });
             expect(options.getCredentialById).not.toHaveBeenCalled();
         });
 
         it("Throws if there is no challenge stored in the session.", async () => {
             const req = makeReq({ body: makeAssertionBody(), session: {} });
-            await expect(strategy.authenticate(req, undefined as any)).rejects.toThrow(/No passkey ceremony/);
+            // Regression: an out-of-sequence verify call is malformed client input, not an auth failure -
+            // it must surface as a 400, not get flattened into a generic 401.
+            await expect(strategy.authenticate(req, undefined as any)).rejects.toMatchObject({
+                status: 400,
+                message: expect.stringMatching(/No passkey ceremony/),
+            });
             expect(options.getCredentialById).not.toHaveBeenCalled();
         });
 
@@ -250,7 +260,10 @@ describe("PasskeyStrategy Tests", () => {
                 body: { id: "cred-id-1", response: { clientDataJSON: "x" } }, // missing authenticatorData/signature
                 session: { challenge: "stored-challenge" },
             });
-            await expect(strategy.authenticate(req, undefined as any)).rejects.toThrow(/Malformed/);
+            await expect(strategy.authenticate(req, undefined as any)).rejects.toMatchObject({
+                status: 400,
+                message: expect.stringMatching(/Malformed/),
+            });
             expect(options.getCredentialById).not.toHaveBeenCalled();
             expect(mockVerifyAuthenticationResponse).not.toHaveBeenCalled();
         });

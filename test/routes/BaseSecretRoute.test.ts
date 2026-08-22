@@ -243,6 +243,23 @@ describe("BaseSecretRoute Tests", () => {
 
             expect(result.data).toBeUndefined();
         });
+
+        // Regression: the hashed `data` persisted for a recovery-codes secret must never be returned - only
+        // the plaintext `validateRecoveryCodesCreate()` stashed on `req`, and only this once (it's never
+        // persisted, so it can't be recovered on any later read).
+        it("Attaches the plaintext codes from req and strips the hashed data for a RECOVERY_CODES result.", async () => {
+            vi.spyOn(ModelRoute.prototype as any, "doCreate").mockResolvedValue({
+                type: SecretType.RECOVERY_CODES,
+                data: { codes: [{ hash: "$argon2id$fake-hash" }] },
+            });
+            const route = new TestSecretRoute();
+            const req: any = { generatedRecoveryCodes: ["ABCDE-12345", "FGHJK-67890"] };
+
+            const result: any = await route.create({} as any, req);
+
+            expect(result.codes).toEqual(["ABCDE-12345", "FGHJK-67890"]);
+            expect(result.data).toBeUndefined();
+        });
     });
 
     describe("validateCreate", () => {
@@ -254,6 +271,25 @@ describe("BaseSecretRoute Tests", () => {
 
             expect(obj.data).not.toBe(VALID_PASSWORD);
             expect(typeof obj.data).toBe("string");
+        });
+
+        // Regression: argon2.hash() used to be called with no options, always using the library's
+        // compiled-in cost defaults regardless of `passwordConfig`. argon2 embeds its cost parameters
+        // directly in the hash string (e.g. `$argon2id$v=19$m=...,t=...,p=...$...`), so a configured,
+        // non-default cost is verifiable straight from the persisted hash without mocking argon2 itself.
+        it("Hashes a PASSWORD secret using the configured argon2 cost parameters.", async () => {
+            const route = new TestSecretRoute();
+            (route as any).passwordConfig = {
+                ...new PasswordConfig(),
+                hash_memory_cost: 1024,
+                hash_time_cost: 2,
+                hash_parallelism: 1,
+            };
+            const obj: any = { type: SecretType.PASSWORD, data: VALID_PASSWORD };
+
+            await (route as any).validateCreate(obj, {} as any);
+
+            expect(obj.data).toContain("m=1024,p=1,t=2");
         });
 
         it("Throws for a PASSWORD secret with non-string data.", async () => {
@@ -293,6 +329,17 @@ describe("BaseSecretRoute Tests", () => {
             await (route as any).validateCreate(obj, {} as any);
 
             expect(spy).toHaveBeenCalledWith(obj);
+        });
+
+        it("Delegates RECOVERY_CODES secrets to validateRecoveryCodesCreate().", async () => {
+            const route = new TestSecretRoute();
+            const spy = vi.spyOn(route as any, "validateRecoveryCodesCreate").mockResolvedValue(undefined);
+            const obj: any = { type: SecretType.RECOVERY_CODES };
+            const req: any = {};
+
+            await (route as any).validateCreate(obj, req);
+
+            expect(spy).toHaveBeenCalledWith(obj, req);
         });
 
         it("Throws for a PASSWORD secret shorter than the configured minimum length.", async () => {
@@ -569,6 +616,55 @@ describe("BaseSecretRoute Tests", () => {
         });
     });
 
+    describe("validateRecoveryCodesCreate", () => {
+        it("Generates 10 codes, persists only their argon2 hashes, and stashes the plaintext on req.", async () => {
+            const route = new TestSecretRoute();
+            const obj: any = { type: SecretType.RECOVERY_CODES };
+            const req: any = {};
+
+            await (route as any).validateRecoveryCodesCreate(obj, req);
+
+            expect(req.generatedRecoveryCodes).toHaveLength(10);
+            expect(obj.data.codes).toHaveLength(10);
+            // Every plaintext code must actually verify against its corresponding persisted hash.
+            const argon = await import("argon2");
+            for (let i = 0; i < 10; i++) {
+                expect(obj.data.codes[i].usedAt).toBeUndefined();
+                expect(obj.data.codes[i].hash).not.toBe(req.generatedRecoveryCodes[i]);
+                await expect(argon.verify(obj.data.codes[i].hash, req.generatedRecoveryCodes[i])).resolves.toBe(true);
+            }
+            // No two generated codes collide.
+            expect(new Set(req.generatedRecoveryCodes).size).toBe(10);
+        });
+
+        it("Discards any client-supplied data entirely, always generating fresh codes.", async () => {
+            const route = new TestSecretRoute();
+            const obj: any = { type: SecretType.RECOVERY_CODES, data: { codes: [{ hash: "attacker-controlled" }] } };
+            const req: any = {};
+
+            await (route as any).validateRecoveryCodesCreate(obj, req);
+
+            expect(obj.data.codes).not.toEqual([{ hash: "attacker-controlled" }]);
+            expect(obj.data.codes).toHaveLength(10);
+        });
+
+        it("Hashes codes using the configured argon2 cost parameters.", async () => {
+            const route = new TestSecretRoute();
+            (route as any).passwordConfig = {
+                ...new PasswordConfig(),
+                hash_memory_cost: 1024,
+                hash_time_cost: 2,
+                hash_parallelism: 1,
+            };
+            const obj: any = { type: SecretType.RECOVERY_CODES };
+            const req: any = {};
+
+            await (route as any).validateRecoveryCodesCreate(obj, req);
+
+            expect(obj.data.codes[0].hash).toContain("m=1024,p=1,t=2");
+        });
+    });
+
     describe("update", () => {
         it("Throws INTERNAL_ERROR when repoUtils is not set.", async () => {
             const route = new TestSecretRoute();
@@ -732,6 +828,16 @@ describe("BaseSecretRoute Tests", () => {
 
             await expect((route as any).validateUpdate(obj, existing, { uid: "u1" })).rejects.toThrow(
                 /Passkey secrets cannot be modified/,
+            );
+        });
+
+        it("Rejects modifying a RECOVERY_CODES secret's data, even when obj.type is omitted.", async () => {
+            const route = new TestSecretRoute();
+            const existing: any = { uid: "id-1", type: SecretType.RECOVERY_CODES, userUid: "u1" };
+            const obj: any = { uid: "id-1", data: { codes: [{ hash: "attacker-controlled" }] } };
+
+            await expect((route as any).validateUpdate(obj, existing, { uid: "u1" })).rejects.toThrow(
+                /Recovery codes cannot be updated/,
             );
         });
 

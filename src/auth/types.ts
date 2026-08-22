@@ -89,6 +89,13 @@ export class PasswordConfig {
     // The set of special characters that will be used to validate passwords. Kept with `-` last so it's
     // safe to interpolate directly into a regex character class (`[...]`) without being misread as a range.
     public readonly special_chars: string = "!@#$%^&*_+?-";
+    // The argon2 memory cost, in KiB, used when hashing a password. Defaults match argon2's own library
+    // defaults, so leaving this unconfigured is a no-op — raise it to scale hashing cost with server capacity.
+    public readonly hash_memory_cost: number = 65536;
+    // The argon2 time cost (number of iterations) used when hashing a password.
+    public readonly hash_time_cost: number = 3;
+    // The argon2 parallelism (number of threads/lanes) used when hashing a password.
+    public readonly hash_parallelism: number = 4;
 }
 
 /**
@@ -170,4 +177,26 @@ export interface TOTPSecret {
      * more than one TOTP secret is checked for a user in a single verification.
      */
     uid?: string;
+}
+
+/**
+ * A single generated MFA recovery/backup code, as persisted on a `RecoveryCodesSecret`. The plaintext code
+ * is never persisted - only its argon2 hash - so it can only ever be shown to the user once, at generation
+ * time (see `BaseSecretRoute.validateRecoveryCodesCreate()`).
+ */
+export interface RecoveryCodeEntry {
+    /** The argon2 hash of this code's plaintext value. */
+    hash: string;
+    /** ISO-8601 timestamp at which this code was consumed, if it has been. Unused codes omit this field. */
+    usedAt?: string;
+}
+
+/**
+ * The `data` shape of a `recovery-codes` type `Secret`: a fixed batch of single-use backup codes generated
+ * when the secret is created, for authenticating when a user has lost access to their other secondary (MFA)
+ * methods. See `MFAStrategy.verifyRecoveryCode()` for how a submitted code is checked against this list, and
+ * `BaseAuthMFARoute.consumeRecoveryCode()` for how a matched entry gets marked used.
+ */
+export interface RecoveryCodesSecret {
+    codes: RecoveryCodeEntry[];
 }

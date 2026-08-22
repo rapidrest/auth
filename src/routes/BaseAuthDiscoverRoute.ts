@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: MPL-2.0
 ///////////////////////////////////////////////////////////////////////////////
 import { ObjectDecorators } from "@rapidrest/core";
-import { RouteDecorators, DocDecorators, RepoUtils, ObjectFactory } from "@rapidrest/service-core";
+import { RouteDecorators, DocDecorators, HttpRequest, RepoUtils, ObjectFactory } from "@rapidrest/service-core";
 import { Alias, AliasType, Secret, SecretType, User } from "../models/types.js";
 import { obfuscateContact } from "../auth/shared.js";
 import { OTPContactType } from "../auth/types.js";
@@ -12,7 +12,7 @@ import { UserUtils } from "./UserUtils.js";
 
 const { Config, Init, Inject } = ObjectDecorators;
 const { Summary, Description, Returns } = DocDecorators;
-const { Get, Query } = RouteDecorators;
+const { Get, Query, Request } = RouteDecorators;
 
 /** A hint about one of the caller's OTP-eligible contacts — enough to jog their memory, not enough to sign in with. */
 export interface DiscoveredOtpContact {
@@ -114,12 +114,12 @@ export abstract class BaseAuthDiscoverRoute<U extends User, A extends Alias, S e
     )
     @Returns([Object])
     @Get()
-    public async discover(@Query("id") id?: string): Promise<DiscoverResult> {
+    public async discover(@Query("id") id: string | undefined, @Request req: HttpRequest): Promise<DiscoverResult> {
         if (!id) {
             return EMPTY_RESULT;
         }
 
-        await this.rateLimiter?.checkAndIncrement(id);
+        await this.rateLimiter?.checkAndIncrement(id, req);
 
         try {
             const user: U | undefined = await this.userUtils?.lookup(id);

@@ -111,7 +111,8 @@ export abstract class BaseAuthPasskeyRoute<U extends User, A extends Alias, S ex
         }
 
         const options: PasskeyStrategyOptions = new PasskeyStrategyOptions(this.passkeyConfig);
-        options.checkRateLimit = (identifier: string) => this.rateLimiter!.checkAndIncrement(identifier);
+        options.checkRateLimit = (identifier: string, req: HttpRequest) =>
+            this.rateLimiter!.checkAndIncrement(identifier, req);
         options.getCredentialById = this.getCredentialById.bind(this);
         options.getCredentials = this.getCredentials.bind(this);
         options.updateCredentialCounter = this.updateCredentialCounter.bind(this);

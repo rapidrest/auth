@@ -275,4 +275,55 @@ describe("BaseAccountRoute Tests", () => {
             await expect(route.delete("me", { uid: "user-1", roles: [] } as any)).resolves.toBeUndefined();
         });
     });
+
+    describe("revokeSessions", () => {
+        it("Throws AUTH_PERMISSION_FAILURE when a non-trusted caller targets another user's account.", async () => {
+            const route = new TestAccountRoute();
+            const user: any = { uid: "attacker-uid", roles: [] };
+
+            await expect(route.revokeSessions("victim-uid", user)).rejects.toThrow(/does not have permission/i);
+        });
+
+        it("Throws AUTH_PERMISSION_FAILURE when the target user does not exist.", async () => {
+            const route = new TestAccountRoute();
+            (route as any).userRepo = { findOne: vi.fn().mockResolvedValue(undefined) };
+            const user: any = { uid: "user-1", roles: [] };
+
+            await expect(route.revokeSessions("me", user)).rejects.toThrow(/does not have permission/i);
+        });
+
+        it("Sets sessionsRevokedAt to the current time on the caller's own account.", async () => {
+            const route = new TestAccountRoute();
+            const eUser = { uid: "user-1", version: 3 };
+            const findOneUser = vi.fn().mockResolvedValue(eUser);
+            const updateUser = vi.fn().mockResolvedValue(undefined);
+            (route as any).userRepo = { findOne: findOneUser, update: updateUser };
+            const user: any = { uid: "user-1", roles: [] };
+            const before = Date.now();
+
+            await route.revokeSessions("me", user);
+
+            expect(findOneUser).toHaveBeenCalledWith("user-1", { user });
+            expect(updateUser).toHaveBeenCalledTimes(1);
+            const [updateObj, existingObj, options] = updateUser.mock.calls[0];
+            expect(updateObj.uid).toBe("user-1");
+            expect(updateObj.version).toBe(3);
+            expect(updateObj.sessionsRevokedAt).toBeGreaterThanOrEqual(before);
+            expect(existingObj).toBe(eUser);
+            expect(options).toEqual({ user });
+        });
+
+        it("Allows a trusted (admin) caller to revoke another user's sessions.", async () => {
+            const route = new TestAccountRoute();
+            const eUser = { uid: "victim-uid", version: 1 };
+            const updateUser = vi.fn().mockResolvedValue(undefined);
+            (route as any).userRepo = { findOne: vi.fn().mockResolvedValue(eUser), update: updateUser };
+            const user: any = { uid: "admin-uid", roles: ["admin"] };
+
+            await route.revokeSessions("victim-uid", user);
+
+            expect(updateUser).toHaveBeenCalledTimes(1);
+            expect(updateUser.mock.calls[0][0].uid).toBe("victim-uid");
+        });
+    });
 });

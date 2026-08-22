@@ -15,8 +15,8 @@ import { TokenUtils } from "../auth/TokenUtils.js";
 import { RateLimiter } from "../auth/RateLimiter.js";
 
 const { Config, Init, Inject, Logger } = ObjectDecorators;
-const { Summary, Description } = DocDecorators;
-const { Auth, Delete, Get, Param } = RouteDecorators;
+const { Summary, Description, Returns } = DocDecorators;
+const { Auth, Delete, Get, Param, Post, RequiresElevation } = RouteDecorators;
 const AuthUser = RouteDecorators.User;
 
 /**
@@ -159,6 +159,45 @@ export abstract class BaseAccountRoute<U extends User, A extends Alias, P extend
             profile,
             secrets,
         };
+    }
+
+    /**
+     * Immediately revokes every outstanding refresh token for the account (self-service, or any account's if
+     * the caller holds a trusted role) — the standard "log out everywhere" action, e.g. after a suspected
+     * account compromise.
+     *
+     * This does NOT invalidate an already-issued *access* token, which remains valid until its own natural
+     * (short) expiry regardless of this call — true immediate access-token revocation would require a
+     * persistent revocation check on every single request, which the underlying JWT verification
+     * (`@rapidrest/service-core`'s `JWTStrategy`, an external package this library doesn't control) doesn't
+     * support; it does a stateless signature/expiry check only, with no per-request datastore lookup. What
+     * this *does* reliably stop going forward is `BaseAuthRefreshRoute` minting any new access token from a
+     * refresh token issued before this call — see the `iat` check there. This includes the caller's own
+     * current session: there is no "everywhere but here" variant, matching the equivalent behavior in most
+     * other systems that offer this action.
+     */
+    @Summary("Revoke All Sessions")
+    @Description(
+        "Immediately revokes every outstanding refresh token for the account (including the caller's own " +
+            "current session), forcing every device to sign in again to obtain a new one. Does not invalidate " +
+            "an already-issued access token, which remains valid until its own natural expiry.",
+    )
+    @Auth(["jwt"])
+    @Post(":id/revokeSessions")
+    @RequiresElevation(60)
+    public async revokeSessions(@Param("id") id: string, @AuthUser user: JWTUser): Promise<void> {
+        const targetId = this.resolveOwnedUid(id, user);
+
+        const eUser: U | undefined = await this.userRepo?.findOne(targetId, { user });
+        if (!eUser) {
+            throw new ApiError(ApiErrors.AUTH_PERMISSION_FAILURE, 403, ApiErrorMessages.AUTH_PERMISSION_FAILURE);
+        }
+
+        await this.userRepo?.update(
+            { uid: eUser.uid, version: eUser.version, sessionsRevokedAt: Date.now() } as any as U,
+            eUser,
+            { user },
+        );
     }
 
     /**

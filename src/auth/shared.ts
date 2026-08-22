@@ -3,7 +3,8 @@
 // SPDX-License-Identifier: MPL-2.0
 ////////////////////////////////////////////////////////////////////////////////
 import * as crypto from "crypto";
-import { HttpRequest } from "@rapidrest/service-core";
+import { ApiError } from "@rapidrest/core";
+import { ApiErrors, HttpRequest } from "@rapidrest/service-core";
 import {
     OTPContactType,
     PasskeyConfig,
@@ -226,7 +227,9 @@ export const obfuscateContact = function (contact: string, type: OTPContactType)
  */
 export const generateOTP = async function (req: HttpRequest, requestData?: any): Promise<string> {
     if (!req.session) {
-        throw new Error(
+        throw new ApiError(
+            ApiErrors.INTERNAL_ERROR,
+            500,
             "This function requires session support. Configure the `session` config " +
                 "block so the session middleware is registered.",
         );
@@ -253,7 +256,9 @@ export const generateOTP = async function (req: HttpRequest, requestData?: any):
  */
 export const verifyOTP = async function (req: HttpRequest, payload?: any): Promise<boolean> {
     if (!req.session) {
-        throw new Error(
+        throw new ApiError(
+            ApiErrors.INTERNAL_ERROR,
+            500,
             "This function requires session support. Configure the `session` config " +
                 "block so the session middleware is registered.",
         );
@@ -336,6 +341,32 @@ export const generatePassword = function (config: PasswordConfig): string {
 };
 
 ///////////////////////////////////////////////////////////////////////////////
+// RECOVERY CODES
+///////////////////////////////////////////////////////////////////////////////
+
+/** Crockford Base32 alphabet - excludes `I`/`L`/`O`/`U` to avoid visual ambiguity with `1`/`1`/`0`/`V`. */
+const RECOVERY_CODE_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+const RECOVERY_CODE_COUNT = 10;
+const RECOVERY_CODE_LENGTH = 10;
+
+/**
+ * Generates a fixed batch of plaintext MFA recovery/backup codes (see `RecoveryCodesSecret`). Each code is
+ * shown to the user exactly once, at creation time (see `BaseSecretRoute.validateRecoveryCodesCreate()`) -
+ * only their hashes are ever persisted.
+ */
+export const generateRecoveryCodes = function (): string[] {
+    const codes: string[] = [];
+    for (let i = 0; i < RECOVERY_CODE_COUNT; i++) {
+        let raw = "";
+        for (let j = 0; j < RECOVERY_CODE_LENGTH; j++) {
+            raw += RECOVERY_CODE_ALPHABET[crypto.randomInt(RECOVERY_CODE_ALPHABET.length)];
+        }
+        codes.push(`${raw.slice(0, 5)}-${raw.slice(5)}`);
+    }
+    return codes;
+};
+
+///////////////////////////////////////////////////////////////////////////////
 // PASSKEY
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -345,7 +376,9 @@ export const generatePasskeyChallenge = async function (
     allowCredentials?: any,
 ) {
     if (!req.session) {
-        throw new Error(
+        throw new ApiError(
+            ApiErrors.INTERNAL_ERROR,
+            500,
             "This function requires session support. Configure the `session` config " +
                 "block so the session middleware is registered.",
         );
@@ -391,7 +424,7 @@ export const verifyPasskeyChallenge = async function (
     const { verifyAuthenticationResponse } = await importSimpleWebAuthn();
 
     if (!Number.isFinite(credential.counter)) {
-        throw new Error("Stored passkey credential has an invalid counter.");
+        throw new ApiError(ApiErrors.INTERNAL_ERROR, 500, "Stored passkey credential has an invalid counter.");
     }
 
     return await verifyAuthenticationResponse({
@@ -427,7 +460,9 @@ export const generatePasskeyRegistrationOptions = async function (
     excludeCredentials?: { id: string; transports?: PasskeyTransport[] }[],
 ): Promise<any> {
     if (!req.session) {
-        throw new Error(
+        throw new ApiError(
+            ApiErrors.INTERNAL_ERROR,
+            500,
             "This function requires session support. Configure the `session` config " +
                 "block so the session middleware is registered.",
         );
@@ -492,7 +527,9 @@ export const verifyPasskeyRegistrationResponse = async function (
  */
 export const generateTOTP = async function (req: HttpRequest, requestData?: any): Promise<string> {
     if (!req.session) {
-        throw new Error(
+        throw new ApiError(
+            ApiErrors.INTERNAL_ERROR,
+            500,
             "This function requires session support. Configure the `session` config " +
                 "block so the session middleware is registered.",
         );
@@ -632,7 +669,9 @@ export const importArgon2 = async function (): Promise<any> {
     try {
         return await import("argon2");
     } catch (err: any) {
-        throw new Error(
+        throw new ApiError(
+            ApiErrors.INTERNAL_ERROR,
+            500,
             "This feature requires the optional peer dependency 'argon2'. Install it with: yarn add argon2",
         );
     }
@@ -666,7 +705,9 @@ export const importOTPLib = async function (): Promise<any> {
     try {
         return await import("otplib");
     } catch (err: any) {
-        throw new Error(
+        throw new ApiError(
+            ApiErrors.INTERNAL_ERROR,
+            500,
             "This feature requires the optional peer dependency 'otplib'. Install it with: yarn add otplib",
         );
     }
@@ -680,7 +721,9 @@ export const importSimpleWebAuthn = async function (): Promise<any> {
     try {
         return await import("@simplewebauthn/server");
     } catch (err: any) {
-        throw new Error(
+        throw new ApiError(
+            ApiErrors.INTERNAL_ERROR,
+            500,
             "This feature requires the optional peer dependency '@simplewebauthn/server'. Install it with: " +
                 "yarn add @simplewebauthn/server",
         );

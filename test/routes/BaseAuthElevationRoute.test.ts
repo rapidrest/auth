@@ -192,7 +192,7 @@ describe("BaseAuthElevationRoute Tests", () => {
 
             await expect(route.elevate({ id: "attacker-controlled-id", password: "x" }, jwtUser, req, makeRes())).rejects.toThrow();
 
-            expect(checkAndIncrement).toHaveBeenCalledWith("elevate:user-uid-1");
+            expect(checkAndIncrement).toHaveBeenCalledWith("elevate:user-uid-1", req);
         });
 
         it("Ignores a client-supplied `id` in the body, forcing the authenticated caller's own uid.", async () => {

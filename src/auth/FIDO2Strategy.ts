@@ -2,8 +2,8 @@
 // Copyright (C) 2026 Jean-Philippe Steinmetz
 // SPDX-License-Identifier: MPL-2.0
 ////////////////////////////////////////////////////////////////////////////////
-import type { JWTUser } from "@rapidrest/core";
-import { AuthResult, AuthStrategy, HttpRequest, HttpResponse } from "@rapidrest/service-core";
+import { ApiError, type JWTUser } from "@rapidrest/core";
+import { ApiErrors, AuthResult, AuthStrategy, HttpRequest, HttpResponse } from "@rapidrest/service-core";
 import { PasskeyConfig, PasskeyTransport, StoredPasskeyCredential } from "./types.js";
 import { generatePasskeyChallenge, isPasskeyResponse, verifyPasskeyChallenge } from "./shared.js";
 
@@ -108,7 +108,7 @@ export class FIDO2Strategy implements AuthStrategy {
     }
 
     public authenticateSync(req: HttpRequest, res: HttpResponse, required?: boolean): AuthResult | undefined {
-        throw new Error("Not supported. This auth strategy must be used asynchronously.");
+        throw new ApiError(ApiErrors.INTERNAL_ERROR, 500, "Not supported. This auth strategy must be used asynchronously.");
     }
 
     /**
@@ -121,7 +121,9 @@ export class FIDO2Strategy implements AuthStrategy {
      */
     protected async challenge(req: HttpRequest, res: HttpResponse): Promise<undefined> {
         if (!req.session) {
-            throw new Error(
+            throw new ApiError(
+                ApiErrors.INTERNAL_ERROR,
+                500,
                 "FIDO2Strategy requires session support. Configure the `session` config block so the " +
                     "session middleware is registered.",
             );
@@ -163,13 +165,15 @@ export class FIDO2Strategy implements AuthStrategy {
      */
     protected async verify(req: HttpRequest, required?: boolean): Promise<AuthResult | undefined> {
         if (!req.session) {
-            throw new Error(
+            throw new ApiError(
+                ApiErrors.INTERNAL_ERROR,
+                500,
                 "FIDO2Strategy requires session support. Configure the `session` config block so the " +
                     "session middleware is registered.",
             );
         }
         if (!req.session.challenge) {
-            throw new Error("No FIDO2 ceremony in progress for this session.");
+            throw new ApiError(ApiErrors.INVALID_REQUEST, 400, "No FIDO2 ceremony in progress for this session.");
         }
 
         // The challenge is single-use regardless of outcome — cleared as soon as it's read, before
@@ -183,7 +187,7 @@ export class FIDO2Strategy implements AuthStrategy {
         // any particular account/credential exists, so it's kept distinct from the generic failure
         // message below.
         if (!isPasskeyResponse(req.body)) {
-            throw new Error("Malformed FIDO2 authentication response.");
+            throw new ApiError(ApiErrors.INVALID_REQUEST, 400, "Malformed FIDO2 authentication response.");
         }
 
         if (this.options.checkRateLimit) {

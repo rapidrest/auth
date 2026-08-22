@@ -87,7 +87,7 @@ describe("BaseAuthDiscoverRoute Tests", () => {
             (route as any).userUtils = { lookup: vi.fn().mockResolvedValue({ uid: "user-1" }) };
             (route as any).aliasRepo = { find: vi.fn().mockResolvedValue([]) };
 
-            const result = await route.discover("user-1");
+            const result = await route.discover("user-1", {} as any);
 
             expect(result).toEqual(EMPTY_RESULT);
         });
@@ -97,14 +97,14 @@ describe("BaseAuthDiscoverRoute Tests", () => {
             (route as any).userUtils = { lookup: vi.fn().mockResolvedValue({ uid: "user-1" }) };
             (route as any).secretRepo = { find: vi.fn().mockResolvedValue([]) };
 
-            const result = await route.discover("user-1");
+            const result = await route.discover("user-1", {} as any);
 
             expect(result).toEqual(EMPTY_RESULT);
         });
 
         it("Returns the equalized empty result immediately when no id is given.", async () => {
             const route = new TestAuthDiscoverRoute();
-            const result = await route.discover(undefined);
+            const result = await route.discover(undefined, {} as any);
             expect(result).toEqual(EMPTY_RESULT);
         });
 
@@ -114,9 +114,9 @@ describe("BaseAuthDiscoverRoute Tests", () => {
             (route as any).rateLimiter = { checkAndIncrement };
             (route as any).userUtils = { lookup: vi.fn().mockResolvedValue(undefined) };
 
-            await route.discover("someone@example.com");
+            await route.discover("someone@example.com", {} as any);
 
-            expect(checkAndIncrement).toHaveBeenCalledWith("someone@example.com");
+            expect(checkAndIncrement).toHaveBeenCalledWith("someone@example.com", {});
         });
 
         it("Propagates a rate-limit rejection (429) rather than swallowing it into the equalized result.", async () => {
@@ -125,14 +125,14 @@ describe("BaseAuthDiscoverRoute Tests", () => {
                 checkAndIncrement: vi.fn().mockRejectedValue(new Error("Too many attempts.")),
             };
 
-            await expect(route.discover("someone@example.com")).rejects.toThrow(/Too many attempts/);
+            await expect(route.discover("someone@example.com", {} as any)).rejects.toThrow(/Too many attempts/);
         });
 
         it("Returns the equalized empty result when the identifier does not resolve to a user.", async () => {
             const route = new TestAuthDiscoverRoute();
             (route as any).userUtils = { lookup: vi.fn().mockResolvedValue(undefined) };
 
-            const result = await route.discover("nobody@example.com");
+            const result = await route.discover("nobody@example.com", {} as any);
 
             expect(result).toEqual(EMPTY_RESULT);
         });
@@ -143,7 +143,7 @@ describe("BaseAuthDiscoverRoute Tests", () => {
             (route as any).secretRepo = { find: vi.fn().mockRejectedValue(new Error("db exploded")) };
             (route as any).aliasRepo = { find: vi.fn().mockResolvedValue([]) };
 
-            const result = await route.discover("user-1");
+            const result = await route.discover("user-1", {} as any);
 
             expect(result).toEqual(EMPTY_RESULT);
         });
@@ -159,7 +159,7 @@ describe("BaseAuthDiscoverRoute Tests", () => {
             (route as any).secretRepo = { find };
             (route as any).aliasRepo = { find: vi.fn().mockResolvedValue([]) };
 
-            const result = await route.discover("user-1");
+            const result = await route.discover("user-1", {} as any);
 
             expect(result.password).toBe(true);
             expect(result.totp).toBe(true);
@@ -175,7 +175,7 @@ describe("BaseAuthDiscoverRoute Tests", () => {
             (route as any).secretRepo = { find: secretFind };
             (route as any).aliasRepo = { find: aliasFind };
 
-            await route.discover("someone@example.com");
+            await route.discover("someone@example.com", {} as any);
 
             expect(secretFind).toHaveBeenCalledWith(
                 { type: SecretType.PASSWORD, userUid: "user-1" },
@@ -195,7 +195,7 @@ describe("BaseAuthDiscoverRoute Tests", () => {
                 ]),
             };
 
-            const result = await route.discover("user-1");
+            const result = await route.discover("user-1", {} as any);
 
             expect(result.otp).toEqual([
                 { contact: "j***hn@example.com", type: AliasType.EMAIL },
@@ -216,7 +216,7 @@ describe("BaseAuthDiscoverRoute Tests", () => {
                 ]),
             };
 
-            const result = await route.discover("user-1");
+            const result = await route.discover("user-1", {} as any);
 
             expect(result.otp).toEqual([]);
         });

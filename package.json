@@ -26,17 +26,12 @@
         "@rapidrest/core": "5.x",
         "@rapidrest/service-core": "1.x",
         "@simplewebauthn/server": ">=13.0.0",
-        "@vitejs/plugin-react": ">=4.0.0",
         "argon2": "0.x",
         "jwks-rsa": "4.x",
-        "otplib": ">=13.0.0",
-        "tsx": ">=4.0.0"
+        "otplib": ">=13.0.0"
     },
     "peerDependenciesMeta": {
         "@simplewebauthn/server": {
-            "optional": true
-        },
-        "@vitejs/plugin-react": {
             "optional": true
         },
         "argon2": {
@@ -46,9 +41,6 @@
             "optional": true
         },
         "otplib": {
-            "optional": true
-        },
-        "tsx": {
             "optional": true
         }
     },

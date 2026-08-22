@@ -590,7 +590,7 @@ describe("BaseProfileRoute Tests", () => {
 
             await (route as any).sendContactsVerification(req, [], next);
 
-            expect(checkAndIncrement).toHaveBeenCalledWith("new@example.com");
+            expect(checkAndIncrement).toHaveBeenCalledWith("new@example.com", req);
             expect(sendEmail).toHaveBeenCalledWith(
                 "verify-contact-otp",
                 { totp: expect.any(String) },
@@ -909,7 +909,7 @@ describe("BaseProfileRoute Tests", () => {
                 } as any),
             ).rejects.toThrow(/invalid or expired/i);
 
-            expect(checkAndIncrement).toHaveBeenCalledWith("new@example.com");
+            expect(checkAndIncrement).toHaveBeenCalledWith("new@example.com", req);
         });
 
         it("Propagates the rate limiter's error and does not attempt verification.", async () => {

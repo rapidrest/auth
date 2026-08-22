@@ -14,7 +14,14 @@ import {
 } from "@rapidrest/service-core";
 import { Alias, AliasType, AuthResult, Secret, SecretType, User } from "../models/types.js";
 import { MFAMethod, MFAMethodType, MFAStrategy, MFAStrategyOptions } from "../auth/MFAStrategy.js";
-import { OTPContact, OTPContactType, PasskeyConfig, StoredPasskeyCredential, TOTPSecret } from "../auth/types.js";
+import {
+    OTPContact,
+    OTPContactType,
+    PasskeyConfig,
+    RecoveryCodesSecret,
+    StoredPasskeyCredential,
+    TOTPSecret,
+} from "../auth/types.js";
 import { RateLimiter } from "../auth/RateLimiter.js";
 import { importArgon2, verifyDummyPassword } from "../auth/shared.js";
 import { TokenUtils } from "../auth/TokenUtils.js";
@@ -123,7 +130,9 @@ export abstract class BaseAuthMFARoute<U extends User, S extends Secret, A exten
         }
 
         const options: MFAStrategyOptions = new MFAStrategyOptions();
-        options.checkRateLimit = (identifier: string) => this.rateLimiter!.checkAndIncrement(identifier);
+        options.checkRateLimit = (identifier: string, req: HttpRequest) =>
+            this.rateLimiter!.checkAndIncrement(identifier, req);
+        options.consumeRecoveryCode = this.consumeRecoveryCode.bind(this);
         options.fidoConfig = this.fido2Config;
         options.getCredentialById = this.getCredentialById.bind(this);
         options.getMethod = this.getMethod.bind(this);
@@ -193,7 +202,18 @@ export abstract class BaseAuthMFARoute<U extends User, S extends Secret, A exten
         return undefined;
     }
 
-    protected convertSecretToMethod(secret: S): MFAMethod | undefined {
+    /**
+     * Converts a `Secret` into the `MFAMethod` shape `MFAStrategy` understands.
+     * @param secret The secret to convert.
+     * @param redact Set to `true` when the result will be sent to the (not-yet-authenticated-for-phase-3)
+     * client, e.g. via `getMethods()`'s `res.json({uid, methods})` in phase 1 — this replaces
+     * `RECOVERY_CODES`' `data` (which would otherwise be its raw array of code hashes) with just a
+     * `remaining` count. Left `false` for internal lookups (`getMethod()`) that need the real `data` to
+     * actually verify a submission against. FIDO2/TOTP `data` is passed through unredacted either way — a
+     * FIDO2 credential's public key and a TOTP secret aren't attacker-usable read out of context the way a
+     * recovery code's hash array structurally is, and the client already possesses/generated both.
+     */
+    protected convertSecretToMethod(secret: S, redact?: boolean): MFAMethod | undefined {
         switch (secret.type) {
             case SecretType.FIDO2:
                 return {
@@ -207,6 +227,21 @@ export abstract class BaseAuthMFARoute<U extends User, S extends Secret, A exten
                     data: secret.data,
                     type: MFAMethodType.TOTP,
                 };
+            case SecretType.RECOVERY_CODES:
+                {
+                    const recoveryData = secret.data as RecoveryCodesSecret;
+                    const remaining = recoveryData.codes.filter((c) => !c.usedAt).length;
+                    // Exhausted - drop it from the available methods entirely rather than offering a
+                    // selection that can never actually succeed.
+                    if (remaining === 0) {
+                        return undefined;
+                    }
+                    return {
+                        id: secret.uid,
+                        data: redact ? { remaining } : recoveryData,
+                        type: MFAMethodType.RECOVERY_CODE,
+                    };
+                }
         }
 
         return undefined;
@@ -291,7 +326,9 @@ export abstract class BaseAuthMFARoute<U extends User, S extends Secret, A exten
         // will be added, only those that are valid for MFA.
         const secrets: S[] = await this.secretRepo.find({ userUid: uid }, { ignoreACL: true });
         for (const secret of secrets) {
-            const method: MFAMethod | undefined = this.convertSecretToMethod(secret);
+            // `redact: true` - this list is sent directly to the (only password-verified, not yet fully
+            // authenticated) client so it can pick a method; see convertSecretToMethod()'s doc comment.
+            const method: MFAMethod | undefined = this.convertSecretToMethod(secret, true);
             if (method) {
                 results.push(method);
             }
@@ -411,6 +448,33 @@ export abstract class BaseAuthMFARoute<U extends User, S extends Secret, A exten
         const secret: S | undefined = await this.secretRepo.findOne(uid, { ignoreACL: true });
         if (secret) {
             (secret.data as TOTPSecret).lastTimeStep = timeStep;
+            await this.secretRepo.update(
+                {
+                    uid: secret.uid,
+                    version: secret.version,
+                    data: secret.data,
+                } as S,
+                secret,
+                { ignoreACL: true, recordEvent: false },
+            );
+        }
+    }
+
+    /**
+     * Persists that the recovery code at `codeIndex` within the identified `recovery-codes` secret has been
+     * consumed, so it can never be verified again. Called once, only after `MFAStrategy.verifyRecoveryCode()`
+     * has already matched the submitted code against that entry's hash.
+     * @param uid The unique id of the `recovery-codes` secret the matched entry belongs to.
+     * @param codeIndex The index, within that secret's `codes` array, of the entry that was matched.
+     */
+    protected async consumeRecoveryCode(uid: string, codeIndex: number): Promise<void> {
+        if (!this.secretRepo) {
+            throw new Error("secretRepo is not set.");
+        }
+
+        const secret: S | undefined = await this.secretRepo.findOne(uid, { ignoreACL: true });
+        if (secret) {
+            (secret.data as RecoveryCodesSecret).codes[codeIndex].usedAt = new Date().toISOString();
             await this.secretRepo.update(
                 {
                     uid: secret.uid,

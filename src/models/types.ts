@@ -120,6 +120,7 @@ export enum SecretType {
     FIDO2 = "fido2",
     PASSKEY = "passkey",
     PASSWORD = "password",
+    RECOVERY_CODES = "recovery-codes",
     TOTP = "totp",
 }
 
@@ -132,6 +133,7 @@ export enum SecretType {
  * * `openid`
  * * `password`
  * * `passkey`
+ * * `recovery-codes`
  * * `totp`
  *
  * @author Jean-Philippe Steinmetz
@@ -170,4 +172,13 @@ export interface User extends BaseEntity, JWTUser {
      * Default value is set by `@Config("auth:require_mfa")`.
      */
     requireMFA?: boolean;
+
+    /**
+     * The epoch-millisecond timestamp (see `Date.now()`) at which every refresh token issued for this account
+     * before that moment was revoked (see `BaseAccountRoute.revokeSessions()`/`BaseAuthRefreshRoute`). A
+     * refresh token whose `iat` claim predates this is rejected. Does not affect already-issued *access*
+     * tokens, which remain valid until their own natural (short) expiry regardless — see
+     * `revokeSessions()`'s doc comment for why that's an inherent limitation, not an oversight.
+     */
+    sessionsRevokedAt?: number;
 }

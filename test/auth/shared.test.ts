@@ -336,7 +336,12 @@ describe("OTP helpers", () => {
     describe("generateOTP", () => {
         it("Throws if req.session is missing.", async () => {
             const req = makeReq({ session: undefined });
-            await expect(generateOTP(req)).rejects.toThrow(/session support/);
+            // Regression: a deployment misconfiguration, not a client-caused auth failure - must surface
+            // as a distinguishable 500, not get flattened into a generic 401.
+            await expect(generateOTP(req)).rejects.toMatchObject({
+                status: 500,
+                message: expect.stringMatching(/session support/),
+            });
         });
 
         it("Derives requestData from the request itself when not provided.", async () => {

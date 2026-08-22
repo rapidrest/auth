@@ -174,6 +174,34 @@ describe("BaseAuthRefreshRoute Tests", () => {
             expect(userRepo.findOne).toHaveBeenCalledWith("user-1", { ignoreACL: true });
         });
 
+        // Regression: `BaseAccountRoute.revokeSessions()` ("log out everywhere") sets `sessionsRevokedAt` -
+        // a refresh token issued before that call must be rejected even though it's otherwise a validly
+        // signed, session-bound, unexpired token.
+        it("Throws 401 for an otherwise-valid refresh token issued before the account's sessionsRevokedAt.", async () => {
+            const { route, userRepo, tokenUtils } = await setupRoute();
+            const session: any = { userUid: "user-1" };
+            const refresh = await tokenUtils.createRefreshToken({ uid: "user-1" } as any, { session } as any);
+            // `iat` is second-precision, so this must be at least a full second past the token's issue time
+            // to reliably land after it once truncated.
+            userRepo.findOne.mockResolvedValue({ uid: "user-1", sessionsRevokedAt: Date.now() + 1000 });
+            const req = makeReq({ body: { token: refresh }, session });
+
+            await expect(route.authenticate(req, makeRes())).rejects.toThrow(/invalid or missing authentication/i);
+        });
+
+        it("Succeeds for a refresh token issued after the account's sessionsRevokedAt (a legitimate re-login).", async () => {
+            const { route, userRepo, tokenUtils } = await setupRoute();
+            const session: any = { userUid: "user-1" };
+            const user = { uid: "user-1", roles: [], sessionsRevokedAt: Date.now() - 60000 };
+            const refresh = await tokenUtils.createRefreshToken(user, { session } as any);
+            userRepo.findOne.mockResolvedValue(user);
+            const req = makeReq({ body: { token: refresh }, session });
+
+            const result = await route.authenticate(req, makeRes());
+
+            expect(result.user).toEqual(user);
+        });
+
         it("Throws 401 when the token is well-formed but doesn't match the session's userUid.", async () => {
             const { route, tokenUtils } = await setupRoute();
             const session: any = { userUid: "user-1" };

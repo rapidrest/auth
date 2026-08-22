@@ -220,6 +220,47 @@ describe("BaseAuthMFARoute Tests", () => {
 
             expect(result).toBeUndefined();
         });
+
+        const recoverySecret = {
+            uid: "secret-1",
+            type: SecretType.RECOVERY_CODES,
+            data: {
+                codes: [
+                    { hash: "hash-1", usedAt: "2026-01-01T00:00:00.000Z" },
+                    { hash: "hash-2" },
+                    { hash: "hash-3" },
+                ],
+            },
+        };
+
+        it("Converts a RECOVERY_CODES secret into a RECOVERY_CODE method with full data when unredacted.", () => {
+            const route = new TestAuthMFARoute();
+            const result = (route as any).convertSecretToMethod(recoverySecret);
+
+            expect(result).toEqual({ id: "secret-1", data: recoverySecret.data, type: MFAMethodType.RECOVERY_CODE });
+        });
+
+        // Regression: convertSecretToMethod()'s result for RECOVERY_CODES used to (like FIDO2/TOTP) pass
+        // `secret.data` straight through - but unlike those, `data` here is the raw array of code hashes,
+        // and getMethods() sends this list directly to the client in the phase-1 `{uid, methods}` response.
+        it("Redacts RECOVERY_CODES data to only a remaining count when redact is true.", () => {
+            const route = new TestAuthMFARoute();
+            const result = (route as any).convertSecretToMethod(recoverySecret, true);
+
+            expect(result).toEqual({ id: "secret-1", data: { remaining: 2 }, type: MFAMethodType.RECOVERY_CODE });
+        });
+
+        it("Excludes an exhausted RECOVERY_CODES secret (0 remaining) entirely, redacted or not.", () => {
+            const route = new TestAuthMFARoute();
+            const exhausted = {
+                uid: "secret-1",
+                type: SecretType.RECOVERY_CODES,
+                data: { codes: [{ hash: "hash-1", usedAt: "2026-01-01T00:00:00.000Z" }] },
+            };
+
+            expect((route as any).convertSecretToMethod(exhausted)).toBeUndefined();
+            expect((route as any).convertSecretToMethod(exhausted, true)).toBeUndefined();
+        });
     });
 
     describe("getCredentialById", () => {
@@ -439,6 +480,27 @@ describe("BaseAuthMFARoute Tests", () => {
             expect(result[0].data.contact).toBe((route as any).obfuscateAlias("user@example.com", AliasType.EMAIL));
         });
 
+        // Regression: this list is returned directly to the client (phase 1's `{uid, methods}` response) -
+        // the raw code hashes must never appear in it, only a remaining count.
+        it("Redacts RECOVERY_CODES data to a remaining count in the returned methods.", async () => {
+            const route = new TestAuthMFARoute();
+            (route as any).secretRepo = {
+                find: vi.fn().mockResolvedValue([
+                    {
+                        uid: "secret-1",
+                        type: SecretType.RECOVERY_CODES,
+                        data: { codes: [{ hash: "real-hash-1" }, { hash: "real-hash-2" }] },
+                    },
+                ]),
+            };
+            (route as any).aliasRepo = { find: vi.fn().mockResolvedValue([]) };
+            (route as any).userRepo = {};
+
+            const result = await (route as any).getMethods("user-1");
+
+            expect(result).toEqual([{ id: "secret-1", data: { remaining: 2 }, type: MFAMethodType.RECOVERY_CODE }]);
+        });
+
         // Regression: an unverified alias must never be offered as a 2FA method — see
         // convertAliasToMethod's regression test for the full exploit this closes.
         it("Excludes unverified aliases from the list of methods.", async () => {
@@ -645,6 +707,49 @@ describe("BaseAuthMFARoute Tests", () => {
             await (route as any).updateSecretTimeStep("secret-1", 42);
 
             expect(secret.data.lastTimeStep).toBe(42);
+            expect(update).toHaveBeenCalledWith(
+                { uid: "secret-1", version: 1, data: secret.data },
+                secret,
+                { ignoreACL: true, recordEvent: false },
+            );
+        });
+    });
+
+    describe("consumeRecoveryCode", () => {
+        it("Throws if secretRepo is not set.", async () => {
+            const route = new TestAuthMFARoute();
+            await expect((route as any).consumeRecoveryCode("secret-1", 0)).rejects.toThrow(
+                /secretRepo is not set/,
+            );
+        });
+
+        it("Does nothing if no matching secret is found.", async () => {
+            const route = new TestAuthMFARoute();
+            const findOne = vi.fn().mockResolvedValue(undefined);
+            const update = vi.fn();
+            (route as any).secretRepo = { findOne, update };
+
+            await (route as any).consumeRecoveryCode("secret-1", 0);
+
+            expect(update).not.toHaveBeenCalled();
+        });
+
+        it("Marks only the entry at codeIndex as used, leaving the others untouched.", async () => {
+            const route = new TestAuthMFARoute();
+            const secret = {
+                uid: "secret-1",
+                version: 1,
+                data: { codes: [{ hash: "hash-1" }, { hash: "hash-2" }, { hash: "hash-3" }] },
+            };
+            const findOne = vi.fn().mockResolvedValue(secret);
+            const update = vi.fn();
+            (route as any).secretRepo = { findOne, update };
+
+            await (route as any).consumeRecoveryCode("secret-1", 1);
+
+            expect(secret.data.codes[0].usedAt).toBeUndefined();
+            expect(typeof secret.data.codes[1].usedAt).toBe("string");
+            expect(secret.data.codes[2].usedAt).toBeUndefined();
             expect(update).toHaveBeenCalledWith(
                 { uid: "secret-1", version: 1, data: secret.data },
                 secret,

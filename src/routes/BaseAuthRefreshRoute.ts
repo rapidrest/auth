@@ -129,6 +129,14 @@ export abstract class BaseAuthRefreshRoute<U extends User> {
             throw new ApiError(ApiErrors.AUTH_FAILED, 401, ApiErrorMessages.AUTH_FAILED);
         }
 
+        // `BaseAccountRoute.revokeSessions()` ("log out everywhere") sets this to reject every refresh token
+        // issued before that call, even one that's otherwise validly signed and session-bound above - `iat`
+        // is in seconds per the JWT spec, `sessionsRevokedAt` in epoch milliseconds to match `Date.now()`
+        // usage elsewhere in this codebase (e.g. `TokenUtils.createAuthResult`).
+        if (user.sessionsRevokedAt && payload.iat * 1000 < user.sessionsRevokedAt) {
+            throw new ApiError(ApiErrors.AUTH_FAILED, 401, ApiErrorMessages.AUTH_FAILED);
+        }
+
         const result: AuthResult = await this.tokenUtils!.createAuthResult(user, this.defaultScopes, req, res);
         return result;
     }

@@ -5,8 +5,8 @@
 import axios, { AxiosResponse } from "axios";
 import * as crypto from "crypto";
 import * as jwt from "jsonwebtoken";
-import type { JWTUser } from "@rapidrest/core";
-import { AuthStrategy, HttpRequest, HttpResponse, AuthResult } from "@rapidrest/service-core";
+import { ApiError, type JWTUser } from "@rapidrest/core";
+import { ApiErrors, AuthStrategy, HttpRequest, HttpResponse, AuthResult } from "@rapidrest/service-core";
 
 export const Protocol = {
     OAUTH2: "oauth2",
@@ -185,10 +185,16 @@ export class OIDCStrategy implements AuthStrategy {
 
         if (clientMethod) {
             if (clientMethod !== "S256" && clientMethod !== "plain") {
-                throw new Error(`Invalid code_challenge_method '${clientMethod}'. Must be "S256" or "plain".`);
+                throw new ApiError(
+                    ApiErrors.INVALID_REQUEST,
+                    400,
+                    `Invalid code_challenge_method '${clientMethod}'. Must be "S256" or "plain".`,
+                );
             }
             if (required && clientMethod !== required) {
-                throw new Error(
+                throw new ApiError(
+                    ApiErrors.INVALID_REQUEST,
+                    400,
                     `This provider requires PKCE method '${required}', but '${clientMethod}' was requested.`,
                 );
             }
@@ -206,7 +212,9 @@ export class OIDCStrategy implements AuthStrategy {
      */
     protected buildAuthorizationURI(req: HttpRequest, redirectURI?: string): string {
         if (!req.session) {
-            throw new Error(
+            throw new ApiError(
+                ApiErrors.INTERNAL_ERROR,
+                500,
                 "OIDCStrategy requires session support. Configure the `session` config block so the " +
                     "session middleware is registered.",
             );
@@ -223,7 +231,9 @@ export class OIDCStrategy implements AuthStrategy {
             : [provider.redirectURI];
         const requestedRedirectURI = redirectURI ?? (req.query?.redirect_uri as string | undefined);
         if (requestedRedirectURI && !allowedRedirectURIs.includes(requestedRedirectURI)) {
-            throw new Error(
+            throw new ApiError(
+                ApiErrors.INVALID_REQUEST,
+                400,
                 `redirect_uri '${requestedRedirectURI}' is not in the list of allowed redirect URIs configured ` +
                     "for this provider.",
             );
@@ -247,7 +257,9 @@ export class OIDCStrategy implements AuthStrategy {
             const method = this.resolvePkceMethod(req.query.code_challenge_method as string | undefined);
             const clientVerifier = req.query.code_verifier as string | undefined;
             if (clientVerifier && !PKCE_VERIFIER_PATTERN.test(clientVerifier)) {
-                throw new Error(
+                throw new ApiError(
+                    ApiErrors.INVALID_REQUEST,
+                    400,
                     "code_verifier does not meet RFC 7636 requirements (43-128 chars, unreserved charset).",
                 );
             }
@@ -293,13 +305,19 @@ export class OIDCStrategy implements AuthStrategy {
         const error = req.query?.error ?? req.body?.error;
         if (error) {
             const description = req.query?.error_description ?? req.body?.error_description;
-            throw new Error(`OIDC provider returned an error: ${error}${description ? ` - ${description}` : ""}`);
+            throw new ApiError(
+                ApiErrors.AUTH_FAILED,
+                401,
+                `OIDC provider returned an error: ${error}${description ? ` - ${description}` : ""}`,
+            );
         }
 
         // Is this an authorization request or token exchange?
         if (req.body?.code || req.query?.code) {
             if (!req.session) {
-                throw new Error(
+                throw new ApiError(
+                    ApiErrors.INTERNAL_ERROR,
+                    500,
                     "OIDCStrategy requires session support. Configure the `session` config block so the " +
                         "session middleware is registered.",
                 );
@@ -357,7 +375,7 @@ export class OIDCStrategy implements AuthStrategy {
     }
 
     public authenticateSync(req: HttpRequest, res: HttpResponse, required?: boolean): AuthResult | undefined {
-        throw new Error("Not supported. This auth strategy must be used asynchronously.");
+        throw new ApiError(ApiErrors.INTERNAL_ERROR, 500, "Not supported. This auth strategy must be used asynchronously.");
     }
 
     /**
@@ -372,7 +390,7 @@ export class OIDCStrategy implements AuthStrategy {
         // The code may come from either request query for body
         const code: string = req.body?.code || req.query?.code;
         if (!code) {
-            throw new Error("Authorization code is missing!");
+            throw new ApiError(ApiErrors.INVALID_REQUEST, 400, "Authorization code is missing!");
         }
 
         const allowedRedirectURIs: string[] = Array.isArray(provider.redirectURI)
@@ -406,7 +424,7 @@ export class OIDCStrategy implements AuthStrategy {
         try {
             const result: AxiosResponse = await axios.post(provider.tokenURL, data, { headers });
             if (result && (result.status !== 200 || !result.data)) {
-                throw new Error("Failed to retrieve access token.");
+                throw new ApiError(ApiErrors.INTERNAL_ERROR, 500, "Failed to retrieve access token.");
             }
 
             const json: any = typeof result.data === "string" ? JSON.parse(result.data) : result.data;
@@ -445,7 +463,11 @@ export class OIDCStrategy implements AuthStrategy {
                         result[key] = eval(map[key]);
                     }
                 } catch (err) {
-                    throw new Error(`Failed on transforming ${key} using mapped value ${map[key]}`);
+                    throw new ApiError(
+                        ApiErrors.INTERNAL_ERROR,
+                        500,
+                        `Failed on transforming ${key} using mapped value ${map[key]}`,
+                    );
                 }
             }
 
@@ -483,7 +505,7 @@ export class OIDCStrategy implements AuthStrategy {
                 },
             });
             if (request && (request.status !== 200 || !request.data)) {
-                throw new Error("Failed to retrieve user profile.");
+                throw new ApiError(ApiErrors.INTERNAL_ERROR, 500, "Failed to retrieve user profile.");
             }
 
             const json: any = typeof request.data === "string" ? JSON.parse(request.data) : request.data;
@@ -504,7 +526,9 @@ export class OIDCStrategy implements AuthStrategy {
         try {
             return await import(pkg);
         } catch (err: any) {
-            throw new Error(
+            throw new ApiError(
+                ApiErrors.INTERNAL_ERROR,
+                500,
                 `OIDC provider '${this.options.provider.name}' uses OpenID with an id_token, which requires ` +
                     `the optional peer dependency '${pkg}' for signature verification. Install it with: yarn add ${pkg}`,
             );
@@ -538,7 +562,9 @@ export class OIDCStrategy implements AuthStrategy {
     private async verifyIdToken(idToken: string, req: HttpRequest): Promise<any> {
         const provider = this.options.provider;
         if (!provider.jwksURI || !provider.issuer) {
-            throw new Error(
+            throw new ApiError(
+                ApiErrors.INTERNAL_ERROR,
+                500,
                 `OIDC provider '${provider.name}' has protocol 'openid' but is missing required ` +
                     "'jwksURI'/'issuer' configuration for ID token verification.",
             );

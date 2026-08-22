@@ -2,8 +2,8 @@
 // Copyright (C) 2026 Jean-Philippe Steinmetz
 // SPDX-License-Identifier: MPL-2.0
 ////////////////////////////////////////////////////////////////////////////////
-import type { JWTUser } from "@rapidrest/core";
-import { AuthStrategy, HttpRequest, HttpResponse, AuthResult } from "@rapidrest/service-core";
+import { ApiError, type JWTUser } from "@rapidrest/core";
+import { ApiErrors, AuthStrategy, HttpRequest, HttpResponse, AuthResult } from "@rapidrest/service-core";
 import { generateOTP, getRequestData, obfuscateContact, verifyOTP } from "./shared.js";
 import { OTPContact } from "./types.js";
 
@@ -138,7 +138,7 @@ export class OTPStrategy implements AuthStrategy {
     }
 
     public authenticateSync(req: HttpRequest, res: HttpResponse, required?: boolean): AuthResult | undefined {
-        throw new Error("Not supported. This auth strategy must be used asynchronously.");
+        throw new ApiError(ApiErrors.INTERNAL_ERROR, 500, "Not supported. This auth strategy must be used asynchronously.");
     }
 
     protected async discovery(req: HttpRequest, res: HttpResponse): Promise<any> {
@@ -156,7 +156,9 @@ export class OTPStrategy implements AuthStrategy {
 
     protected async challenge(payload: any, req: HttpRequest, res: HttpResponse): Promise<any> {
         if (!req.session) {
-            throw new Error(
+            throw new ApiError(
+                ApiErrors.INTERNAL_ERROR,
+                500,
                 "OTPStrategy requires session support. Configure the `session` config " +
                     "block so the session middleware is registered.",
             );

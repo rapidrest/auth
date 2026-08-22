@@ -3,12 +3,29 @@
 // SPDX-License-Identifier: MPL-2.0
 ////////////////////////////////////////////////////////////////////////////////
 import { ApiError, MemoryStore, ObjectDecorators } from "@rapidrest/core";
-import { ApiErrors, ConnectionManager } from "@rapidrest/service-core";
+import { ApiErrors, ConnectionManager, HttpRequest, NetUtils } from "@rapidrest/service-core";
 import type { RedisClientType } from "redis";
 
 const { Config, Inject } = ObjectDecorators;
 
 const CACHE_KEY_PREFIX = "auth:ratelimit";
+
+/**
+ * Configuration options for the source-IP counter layered alongside the primary, identifier-keyed one. An
+ * identifier (username/email/etc.) alone can't catch an attacker who rotates identifiers against a single
+ * source, and is itself something an attacker and a victim can share (e.g. a common username) - keying a
+ * second, independent counter on the caller's IP address closes that gap without weakening the existing
+ * per-identifier throttle. Deliberately more permissive by default than the per-identifier limit, since a
+ * single IP can legitimately represent many users behind NAT/a corporate proxy.
+ */
+export interface IPRateLimiterConfig {
+    /** Set to `false` to disable the per-IP counter. Default is `true`. */
+    enabled?: boolean;
+    /** The maximum number of attempts allowed from a single IP within `windowSeconds`. Default is `100`. */
+    maxAttempts?: number;
+    /** The length of the window, in seconds, that `maxAttempts` applies to. Default is `300` (5 minutes). */
+    windowSeconds?: number;
+}
 
 /**
  * Configuration options for `RateLimiter`.
@@ -20,6 +37,8 @@ export interface RateLimiterConfig {
     maxAttempts?: number;
     /** The length of the sliding window, in seconds, that `maxAttempts` applies to. Default is `300` (5 minutes). */
     windowSeconds?: number;
+    /** Configuration for the additional, independent per-source-IP counter. */
+    ip?: IPRateLimiterConfig;
 }
 
 /**
@@ -51,19 +70,46 @@ export class RateLimiter {
     /**
      * Records an attempt for the given identifier and throws once it has exceeded the configured
      * `maxAttempts` within `windowSeconds`. A no-op when rate limiting is disabled via config.
+     *
+     * When `req` is supplied, an independent, more permissive counter keyed on the caller's source IP is
+     * also checked and incremented (see `IPRateLimiterConfig`) - this catches an attacker who rotates
+     * identifiers against a single source, which the identifier-keyed counter alone cannot.
      * @param identifier A value that scopes the counter to a particular caller/target (e.g. a claimed username
      * or email). Callers should be aware that an identifier alone can be shared by an attacker and a victim
      * (e.g. a username), so this limits attempts against that identifier globally rather than per-source.
+     * @param req The source HTTP request, used to derive the caller's IP for the additional per-IP counter.
+     * Omit to check only the identifier-keyed counter (e.g. when no request is available).
      */
-    public async checkAndIncrement(identifier: string): Promise<void> {
+    public async checkAndIncrement(identifier: string, req?: HttpRequest): Promise<void> {
         if (this.config.enabled === false) {
             return;
         }
 
-        const maxAttempts: number = this.config.maxAttempts ?? 5;
-        const windowSeconds: number = this.config.windowSeconds ?? 300;
-        const key = `${CACHE_KEY_PREFIX}:${identifier.toLowerCase()}`;
+        await this.enforceLimit(
+            `${CACHE_KEY_PREFIX}:${identifier.toLowerCase()}`,
+            this.config.maxAttempts ?? 5,
+            this.config.windowSeconds ?? 300,
+        );
 
+        if (req && this.config.ip?.enabled !== false) {
+            const address: string | undefined = NetUtils.getIPAddress(req);
+            if (address) {
+                await this.enforceLimit(
+                    `${CACHE_KEY_PREFIX}:ip:${address}`,
+                    this.config.ip?.maxAttempts ?? 100,
+                    this.config.ip?.windowSeconds ?? 300,
+                );
+            }
+        }
+    }
+
+    /**
+     * Increments the counter for `key` and throws once it exceeds `maxAttempts` within `windowSeconds`.
+     * Shared by the identifier-keyed and IP-keyed counters in `checkAndIncrement()` - the two are otherwise
+     * entirely independent (different keys, different limits), this just avoids duplicating the
+     * increment-then-compare logic between them.
+     */
+    private async enforceLimit(key: string, maxAttempts: number, windowSeconds: number): Promise<void> {
         const count: number = this.cacheClient
             ? await this.incrementRedis(this.cacheClient, key, windowSeconds)
             : this.incrementMemory(key, windowSeconds);

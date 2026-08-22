@@ -157,6 +157,104 @@ describe("RateLimiter Tests", () => {
         });
     });
 
+    // Regression: `RateLimiter` used to key solely on the caller-supplied identifier, so an attacker who
+    // rotated identifiers against a single source was never throttled. This independent, more permissive
+    // counter (see `IPRateLimiterConfig`) catches that case without weakening the existing per-identifier
+    // throttle - the two are entirely separate keys/limits.
+    describe("per-IP throttling", () => {
+        function makeIpReq(ip: string): any {
+            return { socket: { remoteAddress: ip }, headers: {} };
+        }
+
+        it("Also enforces an independent per-IP limit when req is provided.", async () => {
+            const limiter = new RateLimiter();
+            (limiter as any).config = {
+                enabled: true,
+                maxAttempts: 100,
+                windowSeconds: 300,
+                ip: { enabled: true, maxAttempts: 2, windowSeconds: 300 },
+            };
+            const req = makeIpReq("1.2.3.4");
+
+            // Three distinct identifiers, well within the (100) per-identifier limit each, but all from the
+            // same source IP - the IP-keyed counter (limit 2) trips on the third regardless.
+            await limiter.checkAndIncrement("user-1", req);
+            await limiter.checkAndIncrement("user-2", req);
+            await expect(limiter.checkAndIncrement("user-3", req)).rejects.toThrow(/Too many attempts/);
+        });
+
+        it("Does not check the per-IP limit when no req is supplied.", async () => {
+            const limiter = new RateLimiter();
+            (limiter as any).config = {
+                enabled: true,
+                maxAttempts: 100,
+                windowSeconds: 300,
+                ip: { enabled: true, maxAttempts: 1, windowSeconds: 300 },
+            };
+
+            for (let i = 0; i < 5; i++) {
+                await expect(limiter.checkAndIncrement(`user-${i}`)).resolves.toBeUndefined();
+            }
+        });
+
+        it("Skips the per-IP check when explicitly disabled via config.", async () => {
+            const limiter = new RateLimiter();
+            (limiter as any).config = {
+                enabled: true,
+                maxAttempts: 100,
+                windowSeconds: 300,
+                ip: { enabled: false, maxAttempts: 1, windowSeconds: 300 },
+            };
+            const req = makeIpReq("1.2.3.4");
+
+            for (let i = 0; i < 5; i++) {
+                await expect(limiter.checkAndIncrement(`user-${i}`, req)).resolves.toBeUndefined();
+            }
+        });
+
+        it("Tracks separate source IPs independently.", async () => {
+            const limiter = new RateLimiter();
+            (limiter as any).config = {
+                enabled: true,
+                maxAttempts: 100,
+                windowSeconds: 300,
+                ip: { enabled: true, maxAttempts: 1, windowSeconds: 300 },
+            };
+
+            await limiter.checkAndIncrement("user-1", makeIpReq("1.2.3.4"));
+            await expect(limiter.checkAndIncrement("user-2", makeIpReq("1.2.3.4"))).rejects.toThrow(
+                /Too many attempts/,
+            );
+            await expect(limiter.checkAndIncrement("user-3", makeIpReq("5.6.7.8"))).resolves.toBeUndefined();
+        });
+
+        it("Falls back to default per-IP maxAttempts (100)/windowSeconds (300) when unconfigured.", async () => {
+            const limiter = new RateLimiter();
+            (limiter as any).config = { enabled: true, maxAttempts: 1000, windowSeconds: 300 };
+            const req = makeIpReq("1.2.3.4");
+
+            for (let i = 0; i < 100; i++) {
+                await expect(limiter.checkAndIncrement(`user-${i}`, req)).resolves.toBeUndefined();
+            }
+            await expect(limiter.checkAndIncrement("user-over-limit", req)).rejects.toThrow(/Too many attempts/);
+        });
+
+        it("Does not check the per-IP limit when the request's address can't be resolved.", async () => {
+            const limiter = new RateLimiter();
+            (limiter as any).config = {
+                enabled: true,
+                maxAttempts: 100,
+                windowSeconds: 300,
+                ip: { enabled: true, maxAttempts: 1, windowSeconds: 300 },
+            };
+            const req: any = { headers: {} }; // No `socket` - NetUtils.getIPAddress() can't resolve an address.
+
+            for (let i = 0; i < 5; i++) {
+                await expect(limiter.checkAndIncrement(`user-${i}`, req)).resolves.toBeUndefined();
+            }
+        });
+    });
+
     describe("Redis-backed (`cache` connection configured)", () => {
         it("Uses the Redis client's atomic INCREX instead of the in-memory fallback when a `cache` connection is present.", async () => {
             const client = makeFakeRedisClient();

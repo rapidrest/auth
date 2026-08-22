@@ -105,9 +105,10 @@ describe("OIDCStrategy Tests", () => {
             const strategy = new OIDCStrategy(options);
             const req = makeReq({ query: { error: "access_denied", error_description: "User declined" } });
 
-            await expect(strategy.authenticate(req, makeRes())).rejects.toThrow(
-                /OIDC provider returned an error: access_denied - User declined/,
-            );
+            await expect(strategy.authenticate(req, makeRes())).rejects.toMatchObject({
+                status: 401,
+                message: expect.stringMatching(/OIDC provider returned an error: access_denied - User declined/),
+            });
         });
 
         it("Throws when the provider reports an error via body, without a description.", async () => {
@@ -148,9 +149,10 @@ describe("OIDCStrategy Tests", () => {
             const strategy = new OIDCStrategy(options);
             const req = makeReq({ session: {}, query: { redirect_uri: "https://evil.example.com" } });
 
-            await expect(strategy.authenticate(req, makeRes())).rejects.toThrow(
-                /not in the list of allowed redirect URIs/,
-            );
+            await expect(strategy.authenticate(req, makeRes())).rejects.toMatchObject({
+                status: 400,
+                message: expect.stringMatching(/not in the list of allowed redirect URIs/),
+            });
         });
 
         it("Accepts a redirect_uri that matches one of multiple allowed values.", async () => {
@@ -423,10 +425,12 @@ describe("OIDCStrategy Tests", () => {
     });
 
     describe("authenticateSync", () => {
-        it("Throws 'Not supported'.", () => {
+        it("Throws 'Not supported' as a 500 (a wiring gap, not an auth failure).", () => {
             const options = new OIDCStrategyOptions("test", makeProvider());
             const strategy = new OIDCStrategy(options);
-            expect(() => strategy.authenticateSync(makeReq(), makeRes())).toThrow(/Not supported/);
+            expect(() => strategy.authenticateSync(makeReq(), makeRes())).toThrow(
+                expect.objectContaining({ status: 500, message: expect.stringMatching(/Not supported/) }),
+            );
         });
     });
 

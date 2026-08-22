@@ -203,7 +203,7 @@ export abstract class BaseAuthElevationRoute<U extends User, S extends Secret, A
             // Keyed on the already-authenticated caller's own uid, not anything client-supplied — unlike
             // login-time rate limiting, this key is fully trustworthy since the caller is already
             // authenticated, so there's no risk of an attacker bucketing an innocent uid.
-            await this.rateLimiter.checkAndIncrement(`elevate:${user.uid}`);
+            await this.rateLimiter.checkAndIncrement(`elevate:${user.uid}`, req);
         }
 
         // Never trust a client-supplied `id` here — every method below is scoped to the identity already
@@ -416,6 +416,10 @@ export abstract class BaseAuthElevationRoute<U extends User, S extends Secret, A
         return undefined;
     }
 
+    // Intentionally has no `SecretType.RECOVERY_CODES` case (unlike `BaseAuthMFARoute`'s counterpart of this
+    // method): recovery codes are a scarce, hard-to-replace break-glass mechanism for being locked out at
+    // login, not a routine step-up credential a caller mid-session should be prompted to spend. Falling
+    // through the switch to `undefined` already correctly excludes it from elevation without any code here.
     protected convertSecretToMethod(secret: S): MFAMethod | undefined {
         switch (secret.type) {
             case SecretType.FIDO2:

@@ -154,7 +154,12 @@ describe("OTPStrategy Tests", () => {
     describe("challenge (phase 2)", () => {
         it("Throws if req.session is missing.", async () => {
             const req = makeReq({ body: { id: "contact-1" }, session: undefined });
-            await expect(strategy.authenticate(req, makeRes())).rejects.toThrow(/session support/);
+            // Regression: a deployment misconfiguration, not a client-caused auth failure - must surface
+            // as a distinguishable 500, not get flattened into a generic 401.
+            await expect(strategy.authenticate(req, makeRes())).rejects.toMatchObject({
+                status: 500,
+                message: expect.stringMatching(/session support/),
+            });
         });
 
         it("Commits the exact same response as a real contact when the contact id is unknown, without sending a notification.", async () => {

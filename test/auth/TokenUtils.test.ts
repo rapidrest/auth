@@ -293,7 +293,7 @@ describe("TokenUtils Tests", () => {
 
             const [, accessValue] = res.appendHeader.mock.calls[0];
             const [, refreshValue] = res.appendHeader.mock.calls[1];
-            expect(accessValue).toBe(`access_token=${result.token}; Path=/api; SameSite=Lax; HttpOnly`);
+            expect(accessValue).toBe(`access_token=${result.token}; Path=/api; SameSite=Lax; HttpOnly; Secure`);
             expect(refreshValue).toBe(
                 `refresh_token=${result.refresh}; Path=/; SameSite=Lax; Max-Age=1209600; HttpOnly; Secure`,
             );
@@ -361,11 +361,15 @@ describe("TokenUtils Tests", () => {
 
             expect(res.setHeader).not.toHaveBeenCalled();
             expect(res.appendHeader).toHaveBeenCalledTimes(2);
-            expect(res.appendHeader).toHaveBeenNthCalledWith(1, "Set-Cookie", "jwt=; Path=/; SameSite=Lax; Max-Age=0; HttpOnly");
+            expect(res.appendHeader).toHaveBeenNthCalledWith(
+                1,
+                "Set-Cookie",
+                "jwt=; Path=/; SameSite=Lax; Max-Age=0; HttpOnly; Secure",
+            );
             expect(res.appendHeader).toHaveBeenNthCalledWith(
                 2,
                 "Set-Cookie",
-                "refresh=; Path=/; SameSite=Lax; Max-Age=0; HttpOnly",
+                "refresh=; Path=/; SameSite=Lax; Max-Age=0; HttpOnly; Secure",
             );
         });
 
@@ -382,8 +386,8 @@ describe("TokenUtils Tests", () => {
 
             const [, accessValue] = res.appendHeader.mock.calls[0];
             const [, refreshValue] = res.appendHeader.mock.calls[1];
-            expect(accessValue).toBe("access_token=; Path=/api; SameSite=Lax; Max-Age=0; HttpOnly");
-            expect(refreshValue).toBe("refresh_token=; Path=/api/refresh; SameSite=Lax; Max-Age=0; HttpOnly");
+            expect(accessValue).toBe("access_token=; Path=/api; SameSite=Lax; Max-Age=0; HttpOnly; Secure");
+            expect(refreshValue).toBe("refresh_token=; Path=/api/refresh; SameSite=Lax; Max-Age=0; HttpOnly; Secure");
         });
     });
 
@@ -393,7 +397,7 @@ describe("TokenUtils Tests", () => {
 
             const value = (tokenUtils as any).buildCookie("", { name: "jwt" });
 
-            expect(value).toBe("jwt=; Path=/; SameSite=Lax; Max-Age=0; HttpOnly");
+            expect(value).toBe("jwt=; Path=/; SameSite=Lax; Max-Age=0; HttpOnly; Secure");
         });
 
         it("Omits HttpOnly when explicitly disabled.", () => {
@@ -401,7 +405,15 @@ describe("TokenUtils Tests", () => {
 
             const value = (tokenUtils as any).buildCookie("token-value", { name: "jwt", httpOnly: false });
 
-            expect(value).toBe("jwt=token-value; Path=/; SameSite=Lax");
+            expect(value).toBe("jwt=token-value; Path=/; SameSite=Lax; Secure");
+        });
+
+        it("Omits Secure when explicitly disabled (e.g. local/non-HTTPS development).", () => {
+            const tokenUtils = makeTokenUtils();
+
+            const value = (tokenUtils as any).buildCookie("token-value", { name: "jwt", secure: false });
+
+            expect(value).toBe("jwt=token-value; Path=/; SameSite=Lax; HttpOnly");
         });
 
         it("Falls back to the 'jwt' cookie name when none is configured.", () => {
@@ -409,7 +421,7 @@ describe("TokenUtils Tests", () => {
 
             const value = (tokenUtils as any).buildCookie("token-value", {});
 
-            expect(value).toBe("jwt=token-value; Path=/; SameSite=Lax; HttpOnly");
+            expect(value).toBe("jwt=token-value; Path=/; SameSite=Lax; HttpOnly; Secure");
         });
     });
 });

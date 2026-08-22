@@ -293,9 +293,12 @@ describe("MFAStrategy Tests", () => {
             });
             (options.getMethod as any).mockResolvedValue({ id: "method-1", type: MFAMethodType.FIDO2, data: {} });
 
-            await expect(strategy.authenticate(req, makeRes())).rejects.toThrow(
-                /No configuration exists for MFA method: FIDO2/,
-            );
+            // Regression: offering FIDO2 as a method but never wiring fidoConfig is a deployment
+            // misconfiguration, not a client-caused auth failure - it must surface as a 500.
+            await expect(strategy.authenticate(req, makeRes())).rejects.toMatchObject({
+                status: 500,
+                message: expect.stringMatching(/No configuration exists for MFA method: FIDO2/),
+            });
         });
 
         it("Generates a FIDO2 challenge scoped to the selected credential, writes it to the response, and records the method id.", async () => {
@@ -336,6 +339,29 @@ describe("MFAStrategy Tests", () => {
             expect(result).toBeUndefined();
             expect(options.notifyContact).not.toHaveBeenCalled();
             expect((req.session as any).mfaMethodId).toBe("method-1");
+            expect((req.session as any).mfaMethodType).toBe(MFAMethodType.TOTP);
+            expect(res.status).toHaveBeenCalledWith(200);
+            expect(res.json).toHaveBeenCalledWith({});
+        });
+
+        it("Acknowledges a RECOVERY_CODE method selection without sending a notification, and records the method id/type.", async () => {
+            const req = makeReq({
+                body: { id: "user-uid-1", methodId: "method-1" },
+                session: { userUid: "user-uid-1" },
+            });
+            (options.getMethod as any).mockResolvedValue({
+                id: "method-1",
+                type: MFAMethodType.RECOVERY_CODE,
+                data: { remaining: 7 },
+            });
+            const res = makeRes();
+
+            const result = await strategy.authenticate(req, res);
+
+            expect(result).toBeUndefined();
+            expect(options.notifyContact).not.toHaveBeenCalled();
+            expect((req.session as any).mfaMethodId).toBe("method-1");
+            expect((req.session as any).mfaMethodType).toBe(MFAMethodType.RECOVERY_CODE);
             expect(res.status).toHaveBeenCalledWith(200);
             expect(res.json).toHaveBeenCalledWith({});
         });
@@ -347,7 +373,13 @@ describe("MFAStrategy Tests", () => {
             });
             (options.getMethod as any).mockResolvedValue({ id: "method-1", type: "unknown", data: {} });
 
-            await expect(strategy.authenticate(req, makeRes())).rejects.toThrow(/Unsupported MFA method: unknown/);
+            // Regression: the method type comes from the server's own prior recorded selection (not a
+            // client guess), so this is a server-side wiring gap, not an auth failure - it must surface
+            // as a 500.
+            await expect(strategy.authenticate(req, makeRes())).rejects.toMatchObject({
+                status: 500,
+                message: expect.stringMatching(/Unsupported MFA method: unknown/),
+            });
         });
 
         // Regression: the OTP case used to leave a previously-recorded `mfaMethodId` (set by an earlier
@@ -505,9 +537,14 @@ describe("MFAStrategy Tests", () => {
             (options.verify as any).mockResolvedValue(jwtUser);
             (options.getMethods as any).mockResolvedValue([]);
 
-            await expect(strategy.authenticate(req, makeRes())).rejects.toThrow(
-                /No secondary authentication methods available/,
-            );
+            // Regression: only reachable after the password already verified correctly, so it can't help
+            // an anonymous attacker enumerate accounts - a legitimate client should see this distinctly
+            // (401) rather than it being flattened into the same generic auth-failure code as everything
+            // else on this path.
+            await expect(strategy.authenticate(req, makeRes())).rejects.toMatchObject({
+                status: 401,
+                message: expect.stringMatching(/No secondary authentication methods available/),
+            });
         });
 
         it("Invokes checkRateLimit with the claimed identifier before verify().", async () => {
@@ -701,7 +738,7 @@ describe("MFAStrategy Tests", () => {
         function makeTotpSessionReq(body: any): HttpRequest {
             return makeReq({
                 body,
-                session: { userUid: "user-uid-1", mfaMethodId: "secret-1" },
+                session: { userUid: "user-uid-1", mfaMethodId: "secret-1", mfaMethodType: MFAMethodType.TOTP },
             });
         }
 
@@ -719,6 +756,7 @@ describe("MFAStrategy Tests", () => {
             expect(result?.user).toEqual(jwtUser);
             expect((req.session as any).userUid).toBeUndefined();
             expect((req.session as any).mfaMethodId).toBeUndefined();
+            expect((req.session as any).mfaMethodType).toBeUndefined();
         });
 
         it("Invokes checkRateLimit with the claimed payload id.", async () => {
@@ -786,6 +824,146 @@ describe("MFAStrategy Tests", () => {
 
             expect((req.session as any).userUid).toBeUndefined();
             expect((req.session as any).mfaMethodId).toBeUndefined();
+            expect((req.session as any).mfaMethodType).toBeUndefined();
+        });
+    });
+
+    describe("verifyRecoveryCode (phase 3)", () => {
+        async function hashCode(code: string): Promise<string> {
+            const argon = await import("argon2");
+            return argon.hash(code);
+        }
+
+        function makeRecoverySessionReq(body: any): HttpRequest {
+            return makeReq({
+                body,
+                session: { userUid: "user-uid-1", mfaMethodId: "secret-1", mfaMethodType: MFAMethodType.RECOVERY_CODE },
+            });
+        }
+
+        it("Routes an OTP-shaped payload to verifyRecoveryCode instead of verifyOTP/verifyTOTP when a RECOVERY_CODE method was selected.", async () => {
+            const req = makeRecoverySessionReq({ id: "user-uid-1", token: "ABCDE-12345" });
+            (options.getMethod as any).mockResolvedValue({
+                id: "secret-1",
+                type: MFAMethodType.RECOVERY_CODE,
+                data: { codes: [{ hash: await hashCode("ABCDE-12345") }] },
+            });
+            (options.getUser as any).mockResolvedValue(jwtUser);
+
+            const result = await strategy.authenticate(req, makeRes());
+
+            expect(options.getMethod).toHaveBeenCalledWith("secret-1", "user-uid-1");
+            expect(options.getUser).toHaveBeenCalledWith("user-uid-1");
+            expect(result?.user).toEqual(jwtUser);
+            expect((req.session as any).userUid).toBeUndefined();
+            expect((req.session as any).mfaMethodId).toBeUndefined();
+            expect((req.session as any).mfaMethodType).toBeUndefined();
+        });
+
+        it("Invokes checkRateLimit with the claimed payload id.", async () => {
+            const req = makeRecoverySessionReq({ id: "user-uid-1", token: "ABCDE-12345" });
+            (options.getMethod as any).mockResolvedValue({
+                id: "secret-1",
+                type: MFAMethodType.RECOVERY_CODE,
+                data: { codes: [{ hash: await hashCode("ABCDE-12345") }] },
+            });
+            (options.getUser as any).mockResolvedValue(jwtUser);
+            options.checkRateLimit = vi.fn().mockResolvedValue(undefined);
+
+            await strategy.authenticate(req, makeRes());
+
+            expect(options.checkRateLimit).toHaveBeenCalledWith("user-uid-1", req);
+        });
+
+        it("Consumes the matched code by its index on success.", async () => {
+            const req = makeRecoverySessionReq({ id: "user-uid-1", token: "SECOND-CODE" });
+            (options.getMethod as any).mockResolvedValue({
+                id: "secret-1",
+                type: MFAMethodType.RECOVERY_CODE,
+                data: {
+                    codes: [{ hash: await hashCode("FIRST-CODE") }, { hash: await hashCode("SECOND-CODE") }],
+                },
+            });
+            (options.getUser as any).mockResolvedValue(jwtUser);
+            options.consumeRecoveryCode = vi.fn().mockResolvedValue(undefined);
+
+            await strategy.authenticate(req, makeRes());
+
+            expect(options.consumeRecoveryCode).toHaveBeenCalledWith("secret-1", 1);
+        });
+
+        it("Skips already-used codes when matching, and does not resurrect a used one.", async () => {
+            const usedHash = await hashCode("USED-CODE");
+            const req = makeRecoverySessionReq({ id: "user-uid-1", token: "USED-CODE" });
+            (options.getMethod as any).mockResolvedValue({
+                id: "secret-1",
+                type: MFAMethodType.RECOVERY_CODE,
+                data: { codes: [{ hash: usedHash, usedAt: "2026-01-01T00:00:00.000Z" }] },
+            });
+
+            const result = await strategy.authenticate(req, makeRes(), false);
+
+            expect(result).toBeUndefined();
+            expect(options.getUser).not.toHaveBeenCalled();
+        });
+
+        it("Returns undefined without consuming any code when the submitted code matches nothing.", async () => {
+            const req = makeRecoverySessionReq({ id: "user-uid-1", token: "WRONG-CODE1" });
+            (options.getMethod as any).mockResolvedValue({
+                id: "secret-1",
+                type: MFAMethodType.RECOVERY_CODE,
+                data: { codes: [{ hash: await hashCode("ABCDE-12345") }] },
+            });
+            options.consumeRecoveryCode = vi.fn();
+
+            const result = await strategy.authenticate(req, makeRes(), false);
+
+            expect(result).toBeUndefined();
+            expect(options.getUser).not.toHaveBeenCalled();
+            expect(options.consumeRecoveryCode).not.toHaveBeenCalled();
+        });
+
+        it("Returns undefined when the claimed payload id does not match the session-bound identity.", async () => {
+            const req = makeRecoverySessionReq({ id: "someone-else", token: "ABCDE-12345" });
+
+            const result = await strategy.authenticate(req, makeRes(), false);
+
+            expect(result).toBeUndefined();
+            expect(options.getMethod).not.toHaveBeenCalled();
+        });
+
+        it("Returns undefined when the selected method is no longer a RECOVERY_CODE method.", async () => {
+            const req = makeRecoverySessionReq({ id: "user-uid-1", token: "ABCDE-12345" });
+            (options.getMethod as any).mockResolvedValue({ id: "secret-1", type: MFAMethodType.TOTP, data: {} });
+
+            const result = await strategy.authenticate(req, makeRes(), false);
+
+            expect(result).toBeUndefined();
+        });
+
+        it("Clears the session-bound identity and method even when verification fails.", async () => {
+            const req = makeRecoverySessionReq({ id: "user-uid-1", token: "WRONG-CODE1" });
+            (options.getMethod as any).mockResolvedValue(undefined);
+
+            await strategy.authenticate(req, makeRes(), false);
+
+            expect((req.session as any).userUid).toBeUndefined();
+            expect((req.session as any).mfaMethodId).toBeUndefined();
+            expect((req.session as any).mfaMethodType).toBeUndefined();
+        });
+
+        it("Does not throw when consumeRecoveryCode is not provided (optional hook).", async () => {
+            const req = makeRecoverySessionReq({ id: "user-uid-1", token: "ABCDE-12345" });
+            (options.getMethod as any).mockResolvedValue({
+                id: "secret-1",
+                type: MFAMethodType.RECOVERY_CODE,
+                data: { codes: [{ hash: await hashCode("ABCDE-12345") }] },
+            });
+            (options.getUser as any).mockResolvedValue(jwtUser);
+
+            const result = await strategy.authenticate(req, makeRes());
+
+            expect(result?.user).toEqual(jwtUser);
         });
     });
 
