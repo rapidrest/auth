@@ -670,9 +670,20 @@ export const verifyTOTP = async function (
             continue;
         }
 
+        // A candidate that can't be decrypted under the current key (e.g. a stale secret left behind by a
+        // key rotation that didn't re-encrypt every record) must not abort checking the caller's other
+        // candidates - skip it exactly like a malformed token above, rather than letting the throw escape
+        // and turn one bad secret into a hard failure for a user who has other, perfectly valid ones.
+        let decryptedSecret: string;
+        try {
+            decryptedSecret = decryptTOTPSecret(rawSecret, encryptionKey);
+        } catch (err) {
+            continue;
+        }
+
         const result = await otplib.verify({
             ...otpOptions,
-            secret: decryptTOTPSecret(rawSecret, encryptionKey),
+            secret: decryptedSecret,
             token,
             afterTimeStep: lastTimeStep,
         });

@@ -327,6 +327,32 @@ describe("BaseSecretRoute Tests", () => {
             expect(result.data.uri).toContain(`secret=${rawSecret}`);
         });
 
+        // Regression: sanitizeSecretForResponse() used to decrypt `obj.data.secret` in place, mutating the
+        // exact object doCreate() returned. That's the same reference RepoUtils.create() hands to an entity
+        // cache when the consuming app has one enabled for `Secret` - mutating it would leave a cached read
+        // holding the plaintext secret instead of the `enc:v1:...` ciphertext actually persisted. Decrypting
+        // into a copy instead means the object doCreate() returned must be left completely untouched.
+        it("Does not mutate the persisted (possibly cached) object when decrypting an encrypted TOTP secret for the response.", async () => {
+            const route = new TestSecretRoute();
+            (route as any).totpConfig = { ...(route as any).totpConfig, encryption_key: "a".repeat(64) };
+            const rawSecret = otplib.generateSecret();
+            const obj: any = { type: SecretType.TOTP, data: rawSecret };
+            await (route as any).validateTOTPCreate(obj);
+            const encryptedSecret = obj.data.secret;
+            const persisted = { type: SecretType.TOTP, userUid: "user-1", data: obj.data };
+            vi.spyOn(ModelRoute.prototype as any, "doCreate").mockResolvedValue(persisted);
+
+            const result: any = await route.create({} as any, {} as any);
+
+            // The response is correctly decrypted...
+            expect(result.data.secret).toBe(rawSecret);
+            // ...but the object doCreate() returned (what a cache would hold by reference) still has the
+            // original ciphertext, completely untouched, and is not even the same object as the response.
+            expect(persisted.data.secret).toBe(encryptedSecret);
+            expect(result).not.toBe(persisted);
+            expect(result.data).not.toBe(persisted.data);
+        });
+
         // Regression: the hashed `data` persisted for a recovery-codes secret must never be returned - only
         // the plaintext `validateRecoveryCodesCreate()` stashed on `req`, and only this once (it's never
         // persisted, so it can't be recovered on any later read).

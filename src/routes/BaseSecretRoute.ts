@@ -470,10 +470,13 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
         const result: T | Array<T> = await super.doCreate(obj, { req, user });
 
         // Selectively clean data from certain types of secrets. Some secret types require the data needs to be
-        // returned back to the client.
+        // returned back to the client. `sanitizeSecretForResponse()` may hand back a different object than it
+        // was given (see its own doc comment on why) rather than mutate in place, so what's actually sent to
+        // the client is its return value, not the original `result`/`objs` entries.
         const objs: Array<T> = Array.isArray(result) ? result : [result];
+        const sanitized: Array<T> = [];
         for (const obj of objs) {
-            await this.sanitizeSecretForResponse(obj, req);
+            sanitized.push(await this.sanitizeSecretForResponse(obj, req));
             if (this.isMFASecretType(obj.type)) {
                 EventUtils.record({
                     type: AuthEventType.MFA_ENROLLED,
@@ -484,7 +487,7 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
             }
         }
 
-        return result;
+        return Array.isArray(result) ? sanitized : sanitized[0];
     }
 
     /**
@@ -514,13 +517,18 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
             // to plaintext for the response, exactly like before encryption existed, since the caller's
             // authenticator app needs the real secret once, at setup time (for manual entry, and to embed
             // in the `otpauth://` provisioning URI computed fresh here for the response only).
-            const totpData = obj.data as TOTPSecret;
-            totpData.secret = decryptTOTPSecret(totpData.secret, this.totpConfig.encryption_key);
-            (totpData as TOTPSecret & { uri: string }).uri = await generateTOTPURI(
-                this.totpConfig,
-                obj.userUid,
-                totpData,
-            );
+            //
+            // Builds a new `data` object (and reassigns the local `obj` to a new top-level object) rather
+            // than mutating either in place: `obj` is the exact reference `RepoUtils.create()`/`update()`
+            // just handed to their entity cache when the consuming app has one enabled for `Secret` - a
+            // caller supplying its own class each save both `result` and the cache entry by pointer, not a
+            // copy. Mutating `obj`/`obj.data` here would leave that *cached* copy holding the plaintext
+            // secret instead of the `enc:v1:...` ciphertext actually written to the datastore, silently
+            // defeating encryption-at-rest for any subsequent cache-served read.
+            const decrypted: TOTPSecret & { uri?: string } = { ...(obj.data as TOTPSecret) };
+            decrypted.secret = decryptTOTPSecret(decrypted.secret, this.totpConfig.encryption_key);
+            decrypted.uri = await generateTOTPURI(this.totpConfig, obj.userUid, decrypted);
+            obj = { ...obj, data: decrypted };
         } else if (obj.type === SecretType.RECOVERY_CODES) {
             // The hashed `data` persisted by validateRecoveryCodesCreate() is never returned - only the
             // plaintext it stashed on `req`, and only this once; it isn't recoverable after this response.

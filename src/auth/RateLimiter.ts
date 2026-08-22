@@ -57,6 +57,9 @@ export class RateLimiter {
         windowSeconds: 300,
     };
 
+    @Config("trusted_proxies", [])
+    protected trustedProxies: string[] = [];
+
     @Inject(ConnectionManager)
     private connMgr?: ConnectionManager;
 
@@ -95,7 +98,11 @@ export class RateLimiter {
         );
 
         if (req && this.config.ip?.enabled !== false) {
-            const address: string | undefined = NetUtils.getIPAddress(req);
+            // `trustedProxies`-aware: without it, `getIPAddress()` never trusts forwarding headers and
+            // always falls back to `req.socket.remoteAddress` - behind any reverse proxy that's the
+            // proxy's own fixed address for every caller, collapsing every distinct client behind it onto
+            // this one shared counter instead of throttling each of them independently.
+            const address: string | undefined = NetUtils.getIPAddress(req, this.trustedProxies);
             if (address) {
                 await this.enforceLimit(
                     `${CACHE_KEY_PREFIX}:ip:${address}`,
@@ -126,7 +133,13 @@ export class RateLimiter {
             : this.incrementMemory(key, windowSeconds);
 
         if (count > maxAttempts) {
-            EventUtils.record({ type: AuthEventType.RATELIMIT_EXCEEDED, identifier, layer }).catch(() => undefined);
+            // Only the request that actually crosses the threshold records the event - `count` keeps
+            // incrementing on every subsequent (already-429'd) retry within the window, so without this
+            // check a caller who keeps hammering an already-limited endpoint would re-fire this event (and
+            // whatever outbound telemetry POST it triggers) once per retry for free.
+            if (count === maxAttempts + 1) {
+                EventUtils.record({ type: AuthEventType.RATELIMIT_EXCEEDED, identifier, layer }).catch(() => undefined);
+            }
             throw new ApiError(ApiErrors.AUTH_PERMISSION_FAILURE, 429, "Too many attempts. Please try again later.");
         }
     }

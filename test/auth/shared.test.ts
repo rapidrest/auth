@@ -639,11 +639,46 @@ describe("TOTP helpers", () => {
             expect(result?.valid).toBe(true);
         });
 
-        it("Throws when the secret is encrypted but no encryption key is provided.", async () => {
+        // Regression: a candidate that can't be decrypted under the current key used to let the throw
+        // escape verifyTOTP() entirely, aborting the check instead of just skipping that one candidate -
+        // see the two tests below for why that matters once a caller can have more than one TOTP secret.
+        it("Does not throw (treats as a non-match) when a single candidate is encrypted but no encryption key is provided.", async () => {
             const key = "a".repeat(64);
             const encrypted: TOTPSecret = { secret: encryptTOTPSecret(otplib.generateSecret(), key) };
 
-            await expect(verifyTOTP("123456", encrypted)).rejects.toThrow(/encryption_key/);
+            await expect(verifyTOTP("123456", encrypted)).resolves.toBeUndefined();
+        });
+
+        it("Falls through to a later candidate when an earlier one can't be decrypted under the current key.", async () => {
+            const key = "a".repeat(64);
+            const undecryptable: TOTPSecret = { secret: encryptTOTPSecret(otplib.generateSecret(), key) };
+            const goodSecret = otplib.generateSecret();
+            const good: TOTPSecret = { secret: goodSecret, uid: "good-secret-uid" };
+            const token = await otplib.generate({ secret: goodSecret });
+
+            // No `encryptionKey` passed, so `undecryptable` can't be decrypted (wrong/missing key) while
+            // `good` verifies fine as plaintext - the bad candidate must not block reaching the good one.
+            const result = await verifyTOTP(token, [undecryptable, good]);
+
+            expect(result?.valid).toBe(true);
+            expect(result?.uid).toBe("good-secret-uid");
+        });
+
+        it("Falls through to a later candidate when an earlier one was encrypted under a different key.", async () => {
+            const key = "a".repeat(64);
+            const staleKey = "b".repeat(64);
+            const undecryptable: TOTPSecret = { secret: encryptTOTPSecret(otplib.generateSecret(), staleKey) };
+            const goodSecret = otplib.generateSecret();
+            const good: TOTPSecret = { secret: encryptTOTPSecret(goodSecret, key), uid: "good-secret-uid" };
+            const token = await otplib.generate({ secret: goodSecret });
+
+            // `undecryptable` was encrypted under `staleKey` (e.g. a key rotation that didn't re-encrypt
+            // every record), so its auth-tag check fails under the currently-configured `key`, while
+            // `good` (encrypted under `key`) verifies correctly.
+            const result = await verifyTOTP(token, [undecryptable, good], key);
+
+            expect(result?.valid).toBe(true);
+            expect(result?.uid).toBe("good-secret-uid");
         });
     });
 

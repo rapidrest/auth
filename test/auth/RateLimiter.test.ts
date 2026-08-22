@@ -91,6 +91,23 @@ describe("RateLimiter Tests", () => {
 
             await expect(limiter.checkAndIncrement("user-1")).rejects.toThrow(/Too many attempts/);
         });
+
+        // Regression: `count` keeps incrementing on every over-limit retry, so without a check for the
+        // exact crossing point every subsequent (already-429'd) request would re-fire this event too - a
+        // free 1:1 amplification of whatever outbound telemetry call `EventUtils.record()` makes, driven
+        // entirely by attacker-controlled retry volume against an endpoint already known to be blocked.
+        it("Only records the event once, on the request that crosses the threshold - not on every retry after.", async () => {
+            const limiter = new RateLimiter();
+            (limiter as any).config = { enabled: true, maxAttempts: 1, windowSeconds: 300 };
+            const spy = vi.spyOn(EventUtils, "record").mockResolvedValue(undefined);
+
+            await limiter.checkAndIncrement("user-1");
+            await expect(limiter.checkAndIncrement("user-1")).rejects.toThrow(/Too many attempts/);
+            await expect(limiter.checkAndIncrement("user-1")).rejects.toThrow(/Too many attempts/);
+            await expect(limiter.checkAndIncrement("user-1")).rejects.toThrow(/Too many attempts/);
+
+            expect(spy).toHaveBeenCalledTimes(1);
+        });
     });
 
     describe("in-memory fallback (no `cache` connection configured)", () => {
@@ -305,6 +322,55 @@ describe("RateLimiter Tests", () => {
             for (let i = 0; i < 5; i++) {
                 await expect(limiter.checkAndIncrement(`user-${i}`, req)).resolves.toBeUndefined();
             }
+        });
+
+        // Regression: this per-IP counter used to call `NetUtils.getIPAddress(req)` with no `trustedProxies`
+        // argument at all - unlike every other IP-resolving call site in this codebase. Without it, forwarding
+        // headers are never trusted and the counter always keys on `req.socket.remoteAddress`, which behind
+        // any reverse proxy is the *proxy's own fixed address* for every distinct client - collapsing every
+        // caller behind that proxy onto one shared bucket instead of throttling each of them independently.
+        describe("trustedProxies", () => {
+            function makeProxiedReq(remoteAddress: string, forwardedFor: string): any {
+                return { socket: { remoteAddress }, headers: { "x-forwarded-for": forwardedFor } };
+            }
+
+            it("Ignores X-Forwarded-For (keys on the raw socket address) when trustedProxies is unset.", async () => {
+                const limiter = new RateLimiter();
+                (limiter as any).config = {
+                    enabled: true,
+                    maxAttempts: 100,
+                    windowSeconds: 300,
+                    ip: { enabled: true, maxAttempts: 1, windowSeconds: 300 },
+                };
+
+                // Two different claimed client IPs, but the same (untrusted) proxy socket address - without
+                // trustedProxies configured, both must be treated as the same caller for throttling purposes.
+                await limiter.checkAndIncrement("user-1", makeProxiedReq("10.0.0.1", "1.1.1.1"));
+                await expect(
+                    limiter.checkAndIncrement("user-2", makeProxiedReq("10.0.0.1", "2.2.2.2")),
+                ).rejects.toThrow(/Too many attempts/);
+            });
+
+            it("Keys on X-Forwarded-For once the direct socket address is a configured trusted proxy.", async () => {
+                const limiter = new RateLimiter();
+                (limiter as any).trustedProxies = ["10.0.0.1"];
+                (limiter as any).config = {
+                    enabled: true,
+                    maxAttempts: 100,
+                    windowSeconds: 300,
+                    ip: { enabled: true, maxAttempts: 1, windowSeconds: 300 },
+                };
+
+                // Same trusted proxy socket address, two distinct forwarded client IPs - each must now be
+                // throttled independently instead of sharing the proxy's own bucket.
+                await limiter.checkAndIncrement("user-1", makeProxiedReq("10.0.0.1", "1.1.1.1"));
+                await expect(
+                    limiter.checkAndIncrement("user-2", makeProxiedReq("10.0.0.1", "1.1.1.1")),
+                ).rejects.toThrow(/Too many attempts/);
+                await expect(
+                    limiter.checkAndIncrement("user-3", makeProxiedReq("10.0.0.1", "2.2.2.2")),
+                ).resolves.toBeUndefined();
+            });
         });
     });
 
