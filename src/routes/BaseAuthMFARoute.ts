@@ -20,6 +20,7 @@ import {
     PasskeyConfig,
     RecoveryCodesSecret,
     StoredPasskeyCredential,
+    TOTPConfig,
     TOTPSecret,
 } from "../auth/types.js";
 import { RateLimiter } from "../auth/RateLimiter.js";
@@ -85,6 +86,13 @@ export abstract class BaseAuthMFARoute<U extends User, S extends Secret, A exten
     @Inject(TokenUtils)
     protected tokenUtils?: TokenUtils;
 
+    /**
+     * Only `encryption_key` is read here — the rest of `TOTPConfig` (digits/period/algorithm/etc.) is
+     * captured onto each `TOTPSecret` at registration time by `BaseSecretRoute`, not re-read at login.
+     */
+    @Config("auth:totp")
+    protected totpConfig: TOTPConfig = { issuer: "rapidrest" };
+
     protected userRepo?: RepoUtils<U>;
 
     protected userUtils?: UserUtils<U, A>;
@@ -133,6 +141,7 @@ export abstract class BaseAuthMFARoute<U extends User, S extends Secret, A exten
         options.checkRateLimit = (identifier: string, req: HttpRequest) =>
             this.rateLimiter!.checkAndIncrement(identifier, req);
         options.consumeRecoveryCode = this.consumeRecoveryCode.bind(this);
+        options.encryptionKey = this.totpConfig.encryption_key;
         options.fidoConfig = this.fido2Config;
         options.getCredentialById = this.getCredentialById.bind(this);
         options.getMethod = this.getMethod.bind(this);
@@ -227,21 +236,20 @@ export abstract class BaseAuthMFARoute<U extends User, S extends Secret, A exten
                     data: secret.data,
                     type: MFAMethodType.TOTP,
                 };
-            case SecretType.RECOVERY_CODES:
-                {
-                    const recoveryData = secret.data as RecoveryCodesSecret;
-                    const remaining = recoveryData.codes.filter((c) => !c.usedAt).length;
-                    // Exhausted - drop it from the available methods entirely rather than offering a
-                    // selection that can never actually succeed.
-                    if (remaining === 0) {
-                        return undefined;
-                    }
-                    return {
-                        id: secret.uid,
-                        data: redact ? { remaining } : recoveryData,
-                        type: MFAMethodType.RECOVERY_CODE,
-                    };
+            case SecretType.RECOVERY_CODES: {
+                const recoveryData = secret.data as RecoveryCodesSecret;
+                const remaining = recoveryData.codes.filter((c) => !c.usedAt).length;
+                // Exhausted - drop it from the available methods entirely rather than offering a
+                // selection that can never actually succeed.
+                if (remaining === 0) {
+                    return undefined;
                 }
+                return {
+                    id: secret.uid,
+                    data: redact ? { remaining } : recoveryData,
+                    type: MFAMethodType.RECOVERY_CODE,
+                };
+            }
         }
 
         return undefined;

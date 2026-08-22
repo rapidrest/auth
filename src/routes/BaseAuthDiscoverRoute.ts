@@ -10,7 +10,7 @@ import { OTPContactType } from "../auth/types.js";
 import { RateLimiter } from "../auth/RateLimiter.js";
 import { UserUtils } from "./UserUtils.js";
 
-const { Config, Init, Inject } = ObjectDecorators;
+const { Init, Inject } = ObjectDecorators;
 const { Summary, Description, Returns } = DocDecorators;
 const { Get, Query, Request } = RouteDecorators;
 

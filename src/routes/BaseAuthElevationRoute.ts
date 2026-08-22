@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Jean-Philippe Steinmetz
 // SPDX-License-Identifier: MPL-2.0
 ///////////////////////////////////////////////////////////////////////////////
-import { ApiError, JWTUser, MessagingUtils, ObjectDecorators } from "@rapidrest/core";
+import { ApiError, EventUtils, JWTUser, MessagingUtils, ObjectDecorators } from "@rapidrest/core";
 import {
     ApiErrorMessages,
     ApiErrors,
@@ -12,10 +12,19 @@ import {
     RepoUtils,
     ObjectFactory,
     HttpRequest,
+    NetUtils,
 } from "@rapidrest/service-core";
 import { Alias, AliasType, AuthResult, Secret, SecretType, User } from "../models/types.js";
 import { MFAMethod, MFAMethodType } from "../auth/MFAStrategy.js";
-import { OTPContact, OTPContactType, PasskeyConfig, StoredPasskeyCredential, TOTPSecret } from "../auth/types.js";
+import {
+    OTPContact,
+    OTPContactType,
+    PasskeyConfig,
+    StoredPasskeyCredential,
+    TOTPConfig,
+    TOTPSecret,
+} from "../auth/types.js";
+import { AuthEventType } from "../auth/events.js";
 import { RateLimiter } from "../auth/RateLimiter.js";
 import {
     generateOTP,
@@ -100,8 +109,18 @@ export abstract class BaseAuthElevationRoute<U extends User, S extends Secret, A
     /** The name of the messaging template to use for sending notifications. */
     protected template: string = "login-otp";
 
+    /**
+     * Only `encryption_key` is read here — the rest of `TOTPConfig` (digits/period/algorithm/etc.) is
+     * captured onto each `TOTPSecret` at registration time by `BaseSecretRoute`, not re-read on elevation.
+     */
+    @Config("auth:totp")
+    protected totpConfig: TOTPConfig = { issuer: "rapidrest" };
+
     @Inject(TokenUtils)
     protected tokenUtils?: TokenUtils;
+
+    @Config("trusted_proxies", [])
+    protected trustedProxies: string[] = [];
 
     protected userRepo?: RepoUtils<U>;
 
@@ -215,14 +234,21 @@ export abstract class BaseAuthElevationRoute<U extends User, S extends Secret, A
         }
 
         let verifiedUser: JWTUser | undefined;
+        let method: string;
         if (isOTPResponse(payload)) {
-            verifiedUser = req.session.mfaMethodId
-                ? await this.verifyTOTPChallenge(payload, req)
-                : await this.verifyOTPChallenge(payload, req);
+            if (req.session.mfaMethodId) {
+                verifiedUser = await this.verifyTOTPChallenge(payload, req);
+                method = MFAMethodType.TOTP;
+            } else {
+                verifiedUser = await this.verifyOTPChallenge(payload, req);
+                method = MFAMethodType.OTP;
+            }
         } else if (isPasskeyResponse(payload)) {
             verifiedUser = await this.verifyFIDOChallenge(payload, req);
+            method = MFAMethodType.FIDO2;
         } else if (typeof payload.password === "string") {
             verifiedUser = await this.verifyPasswordOnly(user, payload.password);
+            method = "password";
         } else {
             throw new ApiError(ApiErrors.INVALID_REQUEST, 400, "Invalid elevation request.");
         }
@@ -230,6 +256,13 @@ export abstract class BaseAuthElevationRoute<U extends User, S extends Secret, A
         if (!verifiedUser) {
             throw new ApiError(ApiErrors.AUTH_FAILED, 401, ApiErrorMessages.AUTH_FAILED);
         }
+
+        EventUtils.record({
+            type: AuthEventType.ELEVATED,
+            userUid: verifiedUser.uid,
+            ip: NetUtils.getIPAddress(req, this.trustedProxies),
+            method,
+        }).catch(() => undefined);
 
         return await this.tokenUtils.createAuthResult(verifiedUser, this.defaultScopes, req, res, true);
     }
@@ -313,7 +346,7 @@ export abstract class BaseAuthElevationRoute<U extends User, S extends Secret, A
             return undefined;
         }
 
-        const result: any = await verifyTOTP(payload.token, method.data);
+        const result: any = await verifyTOTP(payload.token, method.data, this.totpConfig.encryption_key);
         if (!result || !result.valid) {
             return undefined;
         }

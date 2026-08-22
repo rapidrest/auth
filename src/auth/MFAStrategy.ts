@@ -55,6 +55,12 @@ export class MFAStrategyOptions {
      */
     public fidoConfig?: PasskeyConfig;
     /**
+     * The 64-character hex encryption key (`TOTPConfig.encryption_key`) to decrypt a stored TOTP secret
+     * with before verifying, if secrets are encrypted at rest. Omit if secrets are stored as plaintext
+     * (the default) - see `encryptTOTPSecret()`/`decryptTOTPSecret()` in `shared.ts`.
+     */
+    public encryptionKey?: string;
+    /**
      * Set to `true` to require that user's must provide secondary authentication to succeed, otherwise set to
      * `false`. Default is `true`.
      */
@@ -485,7 +491,7 @@ export class MFAStrategy implements AuthStrategy {
             return undefined;
         }
 
-        const result: any = await verifyTOTP(payload.token, method.data);
+        const result: any = await verifyTOTP(payload.token, method.data, this.options.encryptionKey);
         if (!result || !result.valid) {
             return undefined;
         }

@@ -23,6 +23,8 @@ import {
 import {
     DUMMY_ARGON2_HASH,
     DUMMY_TOTP_SECRET,
+    decryptTOTPSecret,
+    encryptTOTPSecret,
     generateOTP,
     generatePasskeyChallenge,
     generatePasskeyRegistrationOptions,
@@ -615,6 +617,34 @@ describe("TOTP helpers", () => {
             await expect(verifyTOTP("123456", secret)).resolves.toBeUndefined();
             await expect(verifyTOTP(token, secret)).resolves.toMatchObject({ valid: true });
         });
+
+        it("Decrypts an encrypted secret before verifying, given the matching encryption key.", async () => {
+            const key = "a".repeat(64);
+            const rawSecret = otplib.generateSecret();
+            const encrypted: TOTPSecret = { secret: encryptTOTPSecret(rawSecret, key) };
+            const token = await otplib.generate({ secret: rawSecret });
+
+            const result = await verifyTOTP(token, encrypted, key);
+
+            expect(result?.valid).toBe(true);
+        });
+
+        it("Still verifies a plaintext secret unchanged even when an encryption key is configured.", async () => {
+            const key = "a".repeat(64);
+            const secret: TOTPSecret = { secret: otplib.generateSecret() };
+            const token = await otplib.generate(secret);
+
+            const result = await verifyTOTP(token, secret, key);
+
+            expect(result?.valid).toBe(true);
+        });
+
+        it("Throws when the secret is encrypted but no encryption key is provided.", async () => {
+            const key = "a".repeat(64);
+            const encrypted: TOTPSecret = { secret: encryptTOTPSecret(otplib.generateSecret(), key) };
+
+            await expect(verifyTOTP("123456", encrypted)).rejects.toThrow(/encryption_key/);
+        });
     });
 
     describe("isValidTOTPSecret", () => {
@@ -687,6 +717,70 @@ describe("verifyDummyTOTP", () => {
 
     it("DUMMY_TOTP_SECRET is a real, valid Base32 TOTP secret (not a placeholder string).", async () => {
         expect(await isValidTOTPSecret(DUMMY_TOTP_SECRET.secret)).toBe(true);
+    });
+});
+
+describe("encryptTOTPSecret / decryptTOTPSecret", () => {
+    const KEY = "b".repeat(64);
+
+    describe("encryptTOTPSecret", () => {
+        it("Returns the secret unchanged (plaintext passthrough) when no key is given.", () => {
+            const secret = otplib.generateSecret();
+            expect(encryptTOTPSecret(secret)).toBe(secret);
+        });
+
+        it("Returns an `enc:v1:`-prefixed value distinct from the plaintext when a key is given.", () => {
+            const secret = otplib.generateSecret();
+            const encrypted = encryptTOTPSecret(secret, KEY);
+            expect(encrypted).toMatch(/^enc:v1:/);
+            expect(encrypted).not.toBe(secret);
+        });
+
+        it("Produces a different ciphertext each call (fresh random IV), even for the same secret/key.", () => {
+            const secret = otplib.generateSecret();
+            const a = encryptTOTPSecret(secret, KEY);
+            const b = encryptTOTPSecret(secret, KEY);
+            expect(a).not.toBe(b);
+        });
+
+        it("Throws an ApiError when the key is not a valid 64-character hex string.", () => {
+            const secret = otplib.generateSecret();
+            expect(() => encryptTOTPSecret(secret, "too-short")).toThrow(/64-character hex string/);
+        });
+    });
+
+    describe("decryptTOTPSecret", () => {
+        it("Returns the value unchanged when it lacks the `enc:v1:` prefix (legacy plaintext passthrough).", () => {
+            const secret = otplib.generateSecret();
+            expect(decryptTOTPSecret(secret, KEY)).toBe(secret);
+            // Even with no key configured at all - a never-encrypted deployment must keep working.
+            expect(decryptTOTPSecret(secret)).toBe(secret);
+        });
+
+        it("Round-trips: decrypting an encrypted secret with the same key recovers the original plaintext.", () => {
+            const secret = otplib.generateSecret();
+            const encrypted = encryptTOTPSecret(secret, KEY);
+            expect(decryptTOTPSecret(encrypted, KEY)).toBe(secret);
+        });
+
+        it("Throws an ApiError when the value is encrypted but no key is provided.", () => {
+            const secret = otplib.generateSecret();
+            const encrypted = encryptTOTPSecret(secret, KEY);
+            expect(() => decryptTOTPSecret(encrypted)).toThrow(/encryption_key/);
+        });
+
+        it("Throws an ApiError when the key is not a valid 64-character hex string.", () => {
+            const secret = otplib.generateSecret();
+            const encrypted = encryptTOTPSecret(secret, KEY);
+            expect(() => decryptTOTPSecret(encrypted, "too-short")).toThrow(/64-character hex string/);
+        });
+
+        it("Throws when decrypting with the wrong key (auth tag mismatch, not silently wrong plaintext).", () => {
+            const secret = otplib.generateSecret();
+            const encrypted = encryptTOTPSecret(secret, KEY);
+            const wrongKey = "c".repeat(64);
+            expect(() => decryptTOTPSecret(encrypted, wrongKey)).toThrow();
+        });
     });
 });
 

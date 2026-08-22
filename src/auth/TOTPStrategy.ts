@@ -26,6 +26,12 @@ export class TOTPStrategyOptions {
      */
     public allowQueryParam: boolean = false;
     /**
+     * The 64-character hex encryption key (`TOTPConfig.encryption_key`) to decrypt a stored secret with
+     * before verifying, if secrets are encrypted at rest. Omit if secrets are stored as plaintext (the
+     * default) - see `encryptTOTPSecret()`/`decryptTOTPSecret()` in `shared.ts`.
+     */
+    public encryptionKey?: string;
+    /**
      * Optional hook invoked with the claimed identifier before the TOTP token is verified. Implementations
      * should throw to reject the request once a caller-defined attempt threshold has been exceeded (see
      * `RateLimiter`). A no-op when not provided.
@@ -117,7 +123,7 @@ export class TOTPStrategy implements AuthStrategy {
             return undefined;
         }
 
-        const result: any = await verifyTOTP(payload.token, secrets);
+        const result: any = await verifyTOTP(payload.token, secrets, this.options.encryptionKey);
         if (result && result.valid) {
             if (result.uid && this.options.updateSecretTimeStep) {
                 await this.options.updateSecretTimeStep(result.uid, result.timeStep);

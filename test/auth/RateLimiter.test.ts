@@ -2,7 +2,8 @@
 // Copyright (C) 2026 Jean-Philippe Steinmetz
 // SPDX-License-Identifier: MPL-2.0
 ///////////////////////////////////////////////////////////////////////////////
-import { ApiError } from "@rapidrest/core";
+import { ApiError, EventUtils } from "@rapidrest/core";
+import { AuthEventType } from "../../src/auth/events.js";
 import { RateLimiter } from "../../src/auth/RateLimiter.js";
 
 /**
@@ -40,6 +41,58 @@ function makeConnMgrWithCache(client: unknown): any {
 }
 
 describe("RateLimiter Tests", () => {
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
+    describe("events", () => {
+        it("Records an auth.ratelimit.exceeded event for the identifier-keyed layer.", async () => {
+            const limiter = new RateLimiter();
+            (limiter as any).config = { enabled: true, maxAttempts: 1, windowSeconds: 300 };
+            const spy = vi.spyOn(EventUtils, "record").mockResolvedValue(undefined);
+
+            await limiter.checkAndIncrement("user-1");
+            await expect(limiter.checkAndIncrement("user-1")).rejects.toThrow(/Too many attempts/);
+
+            expect(spy).toHaveBeenCalledWith({
+                type: AuthEventType.RATELIMIT_EXCEEDED,
+                identifier: "user-1",
+                layer: "identifier",
+            });
+        });
+
+        it("Records an auth.ratelimit.exceeded event for the IP-keyed layer.", async () => {
+            const limiter = new RateLimiter();
+            (limiter as any).config = {
+                enabled: true,
+                maxAttempts: 100,
+                windowSeconds: 300,
+                ip: { enabled: true, maxAttempts: 1, windowSeconds: 300 },
+            };
+            const req: any = { socket: { remoteAddress: "1.2.3.4" }, headers: {} };
+            const spy = vi.spyOn(EventUtils, "record").mockResolvedValue(undefined);
+
+            await limiter.checkAndIncrement("user-1", req);
+            await expect(limiter.checkAndIncrement("user-2", req)).rejects.toThrow(/Too many attempts/);
+
+            expect(spy).toHaveBeenCalledWith({
+                type: AuthEventType.RATELIMIT_EXCEEDED,
+                identifier: "1.2.3.4",
+                layer: "ip",
+            });
+        });
+
+        it("Still throws the 429 even when EventUtils.record() itself rejects.", async () => {
+            const limiter = new RateLimiter();
+            (limiter as any).config = { enabled: true, maxAttempts: 1, windowSeconds: 300 };
+            vi.spyOn(EventUtils, "record").mockRejectedValue(new Error("telemetry down"));
+
+            await limiter.checkAndIncrement("user-1");
+
+            await expect(limiter.checkAndIncrement("user-1")).rejects.toThrow(/Too many attempts/);
+        });
+    });
+
     describe("in-memory fallback (no `cache` connection configured)", () => {
         it("Uses sensible defaults (enabled, maxAttempts: 5, windowSeconds: 300).", async () => {
             const limiter = new RateLimiter();

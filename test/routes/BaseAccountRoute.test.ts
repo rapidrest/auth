@@ -3,7 +3,9 @@
 // SPDX-License-Identifier: MPL-2.0
 ///////////////////////////////////////////////////////////////////////////////
 // Isolated unit tests for BaseAccountRoute — no HTTP server, no database.
+import { EventUtils } from "@rapidrest/core";
 import { RepoUtils } from "@rapidrest/service-core";
+import { AuthEventType } from "../../src/auth/events.js";
 import { BaseAccountRoute } from "../../src/routes/BaseAccountRoute.js";
 
 class TestAccountRoute extends BaseAccountRoute<any, any, any, any> {
@@ -11,6 +13,10 @@ class TestAccountRoute extends BaseAccountRoute<any, any, any, any> {
     protected profileClass: any = { name: "FakeProfile" };
     protected secretClass: any = { name: "FakeSecret" };
     protected userClass: any = { name: "FakeUser" };
+}
+
+function makeReq(overrides: any = {}): any {
+    return { headers: {}, socket: { remoteAddress: "1.2.3.4" }, ...overrides };
 }
 
 describe("BaseAccountRoute Tests", () => {
@@ -217,7 +223,7 @@ describe("BaseAccountRoute Tests", () => {
             const route = new TestAccountRoute();
             const user: any = { uid: "attacker-uid", roles: [] };
 
-            await expect(route.delete("victim-uid", user)).rejects.toThrow(/does not have permission/i);
+            await expect(route.delete("victim-uid", makeReq(), user)).rejects.toThrow(/does not have permission/i);
         });
 
         it("Throws AUTH_PERMISSION_FAILURE when the target user does not exist.", async () => {
@@ -225,7 +231,7 @@ describe("BaseAccountRoute Tests", () => {
             (route as any).userRepo = { findOne: vi.fn().mockResolvedValue(undefined) };
             const user: any = { uid: "user-1", roles: [] };
 
-            await expect(route.delete("me", user)).rejects.toThrow(/does not have permission/i);
+            await expect(route.delete("me", makeReq(), user)).rejects.toThrow(/does not have permission/i);
         });
 
         it("Deletes all associated account data (aliases, secrets, profile, user) for the caller's own account.", async () => {
@@ -242,7 +248,7 @@ describe("BaseAccountRoute Tests", () => {
             (route as any).profileRepo = { delete: deleteProfile };
             const user: any = { uid: "user-1", roles: [] };
 
-            await route.delete("me", user);
+            await route.delete("me", makeReq(), user);
 
             expect(truncateAliases).toHaveBeenCalledWith({ userUid: "user-1" }, { user });
             expect(truncateSecrets).toHaveBeenCalledWith({ userUid: "user-1" }, { user });
@@ -260,7 +266,7 @@ describe("BaseAccountRoute Tests", () => {
             (route as any).profileRepo = { delete: vi.fn().mockResolvedValue(undefined) };
             const user: any = { uid: "admin-uid", roles: ["admin"] };
 
-            await route.delete("victim-uid", user);
+            await route.delete("victim-uid", makeReq(), user);
 
             expect(deleteUser).toHaveBeenCalledWith("victim-uid", { user });
         });
@@ -272,7 +278,40 @@ describe("BaseAccountRoute Tests", () => {
                 delete: vi.fn().mockResolvedValue(undefined),
             };
 
-            await expect(route.delete("me", { uid: "user-1", roles: [] } as any)).resolves.toBeUndefined();
+            await expect(route.delete("me", makeReq(), { uid: "user-1", roles: [] } as any)).resolves.toBeUndefined();
+        });
+
+        it("Records an auth.account.deleted event with the deleting caller's uid and source IP.", async () => {
+            const route = new TestAccountRoute();
+            const eUser = { uid: "victim-uid" };
+            (route as any).userRepo = { findOne: vi.fn().mockResolvedValue(eUser), delete: vi.fn().mockResolvedValue(undefined) };
+            (route as any).aliasRepo = { truncate: vi.fn().mockResolvedValue(undefined) };
+            (route as any).secretRepo = { truncate: vi.fn().mockResolvedValue(undefined) };
+            (route as any).profileRepo = { delete: vi.fn().mockResolvedValue(undefined) };
+            const user: any = { uid: "admin-uid", roles: ["admin"] };
+            const spy = vi.spyOn(EventUtils, "record").mockResolvedValue(undefined);
+
+            await route.delete("victim-uid", makeReq(), user);
+
+            expect(spy).toHaveBeenCalledWith({
+                type: AuthEventType.ACCOUNT_DELETED,
+                ip: "1.2.3.4",
+                userUid: "victim-uid",
+                deletedBy: "admin-uid",
+            });
+        });
+
+        it("Does not throw when EventUtils.record() itself rejects.", async () => {
+            const route = new TestAccountRoute();
+            const eUser = { uid: "user-1" };
+            (route as any).userRepo = { findOne: vi.fn().mockResolvedValue(eUser), delete: vi.fn().mockResolvedValue(undefined) };
+            (route as any).aliasRepo = { truncate: vi.fn().mockResolvedValue(undefined) };
+            (route as any).secretRepo = { truncate: vi.fn().mockResolvedValue(undefined) };
+            (route as any).profileRepo = { delete: vi.fn().mockResolvedValue(undefined) };
+            const user: any = { uid: "user-1", roles: [] };
+            vi.spyOn(EventUtils, "record").mockRejectedValue(new Error("telemetry down"));
+
+            await expect(route.delete("me", makeReq(), user)).resolves.toBeUndefined();
         });
     });
 
@@ -281,7 +320,9 @@ describe("BaseAccountRoute Tests", () => {
             const route = new TestAccountRoute();
             const user: any = { uid: "attacker-uid", roles: [] };
 
-            await expect(route.revokeSessions("victim-uid", user)).rejects.toThrow(/does not have permission/i);
+            await expect(route.revokeSessions("victim-uid", makeReq(), user)).rejects.toThrow(
+                /does not have permission/i,
+            );
         });
 
         it("Throws AUTH_PERMISSION_FAILURE when the target user does not exist.", async () => {
@@ -289,7 +330,7 @@ describe("BaseAccountRoute Tests", () => {
             (route as any).userRepo = { findOne: vi.fn().mockResolvedValue(undefined) };
             const user: any = { uid: "user-1", roles: [] };
 
-            await expect(route.revokeSessions("me", user)).rejects.toThrow(/does not have permission/i);
+            await expect(route.revokeSessions("me", makeReq(), user)).rejects.toThrow(/does not have permission/i);
         });
 
         it("Sets sessionsRevokedAt to the current time on the caller's own account.", async () => {
@@ -301,7 +342,7 @@ describe("BaseAccountRoute Tests", () => {
             const user: any = { uid: "user-1", roles: [] };
             const before = Date.now();
 
-            await route.revokeSessions("me", user);
+            await route.revokeSessions("me", makeReq(), user);
 
             expect(findOneUser).toHaveBeenCalledWith("user-1", { user });
             expect(updateUser).toHaveBeenCalledTimes(1);
@@ -320,10 +361,37 @@ describe("BaseAccountRoute Tests", () => {
             (route as any).userRepo = { findOne: vi.fn().mockResolvedValue(eUser), update: updateUser };
             const user: any = { uid: "admin-uid", roles: ["admin"] };
 
-            await route.revokeSessions("victim-uid", user);
+            await route.revokeSessions("victim-uid", makeReq(), user);
 
             expect(updateUser).toHaveBeenCalledTimes(1);
             expect(updateUser.mock.calls[0][0].uid).toBe("victim-uid");
+        });
+
+        it("Records an auth.sessions.revoked event with the revoking caller's uid and source IP.", async () => {
+            const route = new TestAccountRoute();
+            const eUser = { uid: "victim-uid", version: 1 };
+            (route as any).userRepo = { findOne: vi.fn().mockResolvedValue(eUser), update: vi.fn().mockResolvedValue(undefined) };
+            const user: any = { uid: "admin-uid", roles: ["admin"] };
+            const spy = vi.spyOn(EventUtils, "record").mockResolvedValue(undefined);
+
+            await route.revokeSessions("victim-uid", makeReq(), user);
+
+            expect(spy).toHaveBeenCalledWith({
+                type: AuthEventType.SESSIONS_REVOKED,
+                ip: "1.2.3.4",
+                userUid: "victim-uid",
+                revokedBy: "admin-uid",
+            });
+        });
+
+        it("Does not throw when EventUtils.record() itself rejects.", async () => {
+            const route = new TestAccountRoute();
+            const eUser = { uid: "user-1", version: 3 };
+            (route as any).userRepo = { findOne: vi.fn().mockResolvedValue(eUser), update: vi.fn().mockResolvedValue(undefined) };
+            const user: any = { uid: "user-1", roles: [] };
+            vi.spyOn(EventUtils, "record").mockRejectedValue(new Error("telemetry down"));
+
+            await expect(route.revokeSessions("me", makeReq(), user)).resolves.toBeUndefined();
         });
     });
 });

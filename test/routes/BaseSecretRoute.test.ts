@@ -11,9 +11,12 @@ vi.mock("@simplewebauthn/server", () => ({
     verifyRegistrationResponse: vi.fn(),
 }));
 
+import { EventUtils } from "@rapidrest/core";
 import { ModelRoute } from "@rapidrest/service-core";
 import { generateRegistrationOptions, verifyRegistrationResponse } from "@simplewebauthn/server";
+import * as otplib from "otplib";
 import { BaseSecretRoute } from "../../src/routes/BaseSecretRoute.js";
+import { AuthEventType } from "../../src/auth/events.js";
 import { PasswordConfig } from "../../src/auth/types.js";
 import { SecretType } from "../../src/models/types.js";
 
@@ -90,6 +93,63 @@ describe("BaseSecretRoute Tests", () => {
             await route.delete("id-1", undefined, undefined, req);
 
             expect(spy).toHaveBeenCalledWith("id-1", { user: undefined, req, version: undefined, purge: false });
+        });
+
+        it("Records an auth.mfa.removed event when the deleted secret is a TOTP secret, including the caller's source IP.", async () => {
+            vi.spyOn(ModelRoute.prototype as any, "doDelete").mockResolvedValue(undefined);
+            const route = new TestSecretRoute();
+            const findOne = vi.fn().mockResolvedValue({ uid: "id-1", type: SecretType.TOTP, userUid: "user-1" });
+            (route as any).repoUtils = { findOne };
+            const spy = vi.spyOn(EventUtils, "record").mockResolvedValue(undefined);
+            const req: any = { socket: { remoteAddress: "1.2.3.4" } };
+
+            await route.delete("id-1", undefined, undefined, req, { uid: "user-1" } as any);
+
+            expect(spy).toHaveBeenCalledWith({
+                type: AuthEventType.MFA_REMOVED,
+                userUid: "user-1",
+                ip: "1.2.3.4",
+                secretType: SecretType.TOTP,
+            });
+        });
+
+        it("Does not record an auth.mfa.removed event when the deleted secret is a PASSWORD secret.", async () => {
+            vi.spyOn(ModelRoute.prototype as any, "doDelete").mockResolvedValue(undefined);
+            const route = new TestSecretRoute();
+            const findOne = vi.fn().mockResolvedValue({ uid: "id-1", type: SecretType.PASSWORD, userUid: "user-1" });
+            (route as any).repoUtils = { findOne };
+            const spy = vi.spyOn(EventUtils, "record").mockResolvedValue(undefined);
+            const req: any = {};
+
+            await route.delete("id-1", undefined, undefined, req, { uid: "user-1" } as any);
+
+            expect(spy).not.toHaveBeenCalled();
+        });
+
+        it("Does not record an event or throw when no matching secret is found (already deleted).", async () => {
+            vi.spyOn(ModelRoute.prototype as any, "doDelete").mockResolvedValue(undefined);
+            const route = new TestSecretRoute();
+            const findOne = vi.fn().mockResolvedValue(undefined);
+            (route as any).repoUtils = { findOne };
+            const spy = vi.spyOn(EventUtils, "record").mockResolvedValue(undefined);
+            const req: any = {};
+
+            await expect(route.delete("id-1", undefined, undefined, req, { uid: "user-1" } as any)).resolves.toBeUndefined();
+
+            expect(spy).not.toHaveBeenCalled();
+        });
+
+        it("Does not throw when EventUtils.record() itself rejects.", async () => {
+            vi.spyOn(ModelRoute.prototype as any, "doDelete").mockResolvedValue(undefined);
+            const route = new TestSecretRoute();
+            const findOne = vi.fn().mockResolvedValue({ uid: "id-1", type: SecretType.TOTP, userUid: "user-1" });
+            (route as any).repoUtils = { findOne };
+            vi.spyOn(EventUtils, "record").mockRejectedValue(new Error("telemetry down"));
+            const req: any = {};
+
+            await expect(
+                route.delete("id-1", undefined, undefined, req, { uid: "user-1" } as any),
+            ).resolves.toBeUndefined();
         });
     });
 
@@ -244,6 +304,29 @@ describe("BaseSecretRoute Tests", () => {
             expect(result.data).toBeUndefined();
         });
 
+        // End-to-end wiring check: validateTOTPCreate() encrypts the secret before it's ever persisted
+        // (simulated here by doCreate() handing back exactly what would have been written), and
+        // sanitizeSecretForResponse() must decrypt it back to the real secret for the client - the
+        // response must never surface the opaque `enc:v1:` ciphertext as if it were the real secret.
+        it("Round-trips an encrypted TOTP secret: encrypted at creation, decrypted back in the response.", async () => {
+            const route = new TestSecretRoute();
+            (route as any).totpConfig = { ...(route as any).totpConfig, encryption_key: "a".repeat(64) };
+            const rawSecret = otplib.generateSecret();
+            const obj: any = { type: SecretType.TOTP, data: rawSecret };
+            await (route as any).validateTOTPCreate(obj);
+            expect(obj.data.secret).toMatch(/^enc:v1:/);
+            vi.spyOn(ModelRoute.prototype as any, "doCreate").mockResolvedValue({
+                type: SecretType.TOTP,
+                userUid: "user-1",
+                data: obj.data,
+            });
+
+            const result: any = await route.create({} as any, {} as any);
+
+            expect(result.data.secret).toBe(rawSecret);
+            expect(result.data.uri).toContain(`secret=${rawSecret}`);
+        });
+
         // Regression: the hashed `data` persisted for a recovery-codes secret must never be returned - only
         // the plaintext `validateRecoveryCodesCreate()` stashed on `req`, and only this once (it's never
         // persisted, so it can't be recovered on any later read).
@@ -259,6 +342,52 @@ describe("BaseSecretRoute Tests", () => {
 
             expect(result.codes).toEqual(["ABCDE-12345", "FGHJK-67890"]);
             expect(result.data).toBeUndefined();
+        });
+
+        it("Records an auth.mfa.enrolled event for a TOTP secret, including the caller's source IP.", async () => {
+            vi.spyOn(ModelRoute.prototype as any, "doCreate").mockResolvedValue({
+                type: SecretType.TOTP,
+                userUid: "user-1",
+                data: { secret: "JBSWY3DPEHPK3PXP", digits: 6, period: 30, algorithm: "sha1" },
+            });
+            const route = new TestSecretRoute();
+            const spy = vi.spyOn(EventUtils, "record").mockResolvedValue(undefined);
+            const req: any = { socket: { remoteAddress: "1.2.3.4" } };
+
+            await route.create({} as any, req);
+
+            expect(spy).toHaveBeenCalledWith({
+                type: AuthEventType.MFA_ENROLLED,
+                userUid: "user-1",
+                ip: "1.2.3.4",
+                secretType: SecretType.TOTP,
+            });
+        });
+
+        it("Does not record an auth.mfa.enrolled event for a PASSWORD secret.", async () => {
+            vi.spyOn(ModelRoute.prototype as any, "doCreate").mockResolvedValue({
+                type: SecretType.PASSWORD,
+                userUid: "user-1",
+                data: "hash",
+            });
+            const route = new TestSecretRoute();
+            const spy = vi.spyOn(EventUtils, "record").mockResolvedValue(undefined);
+
+            await route.create({} as any, {} as any);
+
+            expect(spy).not.toHaveBeenCalled();
+        });
+
+        it("Does not throw when EventUtils.record() itself rejects.", async () => {
+            vi.spyOn(ModelRoute.prototype as any, "doCreate").mockResolvedValue({
+                type: SecretType.TOTP,
+                userUid: "user-1",
+                data: { secret: "JBSWY3DPEHPK3PXP", digits: 6, period: 30, algorithm: "sha1" },
+            });
+            const route = new TestSecretRoute();
+            vi.spyOn(EventUtils, "record").mockRejectedValue(new Error("telemetry down"));
+
+            await expect(route.create({} as any, {} as any)).resolves.toBeDefined();
         });
     });
 
@@ -613,6 +742,28 @@ describe("BaseSecretRoute Tests", () => {
             await (route as any).validateTOTPCreate(obj);
 
             expect(obj.data.epochTolerance).toEqual([1, 1]);
+        });
+
+        it("Stores the secret as plaintext when no encryption_key is configured (default).", async () => {
+            const route = new TestSecretRoute();
+            const rawSecret = otplib.generateSecret();
+            const obj: any = { type: SecretType.TOTP, data: rawSecret };
+
+            await (route as any).validateTOTPCreate(obj);
+
+            expect(obj.data.secret).toBe(rawSecret);
+        });
+
+        it("Encrypts the secret at rest when auth:totp:encryption_key is configured.", async () => {
+            const route = new TestSecretRoute();
+            (route as any).totpConfig = { ...(route as any).totpConfig, encryption_key: "a".repeat(64) };
+            const rawSecret = otplib.generateSecret();
+            const obj: any = { type: SecretType.TOTP, data: rawSecret };
+
+            await (route as any).validateTOTPCreate(obj);
+
+            expect(obj.data.secret).not.toBe(rawSecret);
+            expect(obj.data.secret).toMatch(/^enc:v1:/);
         });
     });
 

@@ -2,9 +2,10 @@
 // Copyright (C) 2026 Jean-Philippe Steinmetz
 // SPDX-License-Identifier: MPL-2.0
 ////////////////////////////////////////////////////////////////////////////////
-import { ApiError, MemoryStore, ObjectDecorators } from "@rapidrest/core";
+import { ApiError, EventUtils, MemoryStore, ObjectDecorators } from "@rapidrest/core";
 import { ApiErrors, ConnectionManager, HttpRequest, NetUtils } from "@rapidrest/service-core";
 import type { RedisClientType } from "redis";
+import { AuthEventType } from "./events.js";
 
 const { Config, Inject } = ObjectDecorators;
 
@@ -89,6 +90,8 @@ export class RateLimiter {
             `${CACHE_KEY_PREFIX}:${identifier.toLowerCase()}`,
             this.config.maxAttempts ?? 5,
             this.config.windowSeconds ?? 300,
+            identifier,
+            "identifier",
         );
 
         if (req && this.config.ip?.enabled !== false) {
@@ -98,6 +101,8 @@ export class RateLimiter {
                     `${CACHE_KEY_PREFIX}:ip:${address}`,
                     this.config.ip?.maxAttempts ?? 100,
                     this.config.ip?.windowSeconds ?? 300,
+                    address,
+                    "ip",
                 );
             }
         }
@@ -109,12 +114,19 @@ export class RateLimiter {
      * entirely independent (different keys, different limits), this just avoids duplicating the
      * increment-then-compare logic between them.
      */
-    private async enforceLimit(key: string, maxAttempts: number, windowSeconds: number): Promise<void> {
+    private async enforceLimit(
+        key: string,
+        maxAttempts: number,
+        windowSeconds: number,
+        identifier: string,
+        layer: "identifier" | "ip",
+    ): Promise<void> {
         const count: number = this.cacheClient
             ? await this.incrementRedis(this.cacheClient, key, windowSeconds)
             : this.incrementMemory(key, windowSeconds);
 
         if (count > maxAttempts) {
+            EventUtils.record({ type: AuthEventType.RATELIMIT_EXCEEDED, identifier, layer }).catch(() => undefined);
             throw new ApiError(ApiErrors.AUTH_PERMISSION_FAILURE, 429, "Too many attempts. Please try again later.");
         }
     }

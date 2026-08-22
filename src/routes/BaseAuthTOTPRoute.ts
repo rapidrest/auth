@@ -15,7 +15,7 @@ import {
 import { Alias, AuthResult, Secret, SecretType, User } from "../models/types.js";
 import { TOTPStrategy, TOTPStrategyOptions } from "../auth/TOTPStrategy.js";
 import { RateLimiter } from "../auth/RateLimiter.js";
-import { TOTPSecret } from "../auth/types.js";
+import { TOTPConfig, TOTPSecret } from "../auth/types.js";
 import { TokenUtils } from "../auth/TokenUtils.js";
 import { UserUtils } from "./UserUtils.js";
 
@@ -63,6 +63,13 @@ export abstract class BaseAuthTOTPRoute<U extends User, A extends Alias, S exten
     protected userUtils?: UserUtils<U, A>;
 
     /**
+     * Only `encryption_key` is read here — the rest of `TOTPConfig` (digits/period/algorithm/etc.) is
+     * captured onto each `TOTPSecret` at registration time by `BaseSecretRoute`, not re-read at login.
+     */
+    @Config("auth:totp")
+    protected totpConfig: TOTPConfig = { issuer: "rapidrest" };
+
+    /**
      * Called on server startup to initialize the route with any defaults.
      */
     @Init
@@ -91,6 +98,7 @@ export abstract class BaseAuthTOTPRoute<U extends User, A extends Alias, S exten
         const options: TOTPStrategyOptions = new TOTPStrategyOptions();
         options.checkRateLimit = (identifier: string, req: HttpRequest) =>
             this.rateLimiter!.checkAndIncrement(identifier, req);
+        options.encryptionKey = this.totpConfig.encryption_key;
         options.getSecrets = this.getSecrets.bind(this);
         options.getUser = this.getUser.bind(this);
         options.updateSecretTimeStep = this.updateSecretTimeStep.bind(this);

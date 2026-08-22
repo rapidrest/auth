@@ -143,6 +143,15 @@ export interface TOTPConfig {
      * tolerance, currentTime + tolerance]`. Default value is `[1, 0]`.
      */
     epochTolerance?: number | number[];
+    /**
+     * A 64-character hex string (32 bytes) used as the AES-256-GCM key to encrypt a `TOTPSecret.secret`
+     * before it's persisted. Unset (the default) leaves new/updated secrets stored as plaintext, exactly
+     * as before this option existed. Setting it only affects secrets created/updated from that point
+     * forward — an already-stored plaintext secret is detected automatically (it lacks the `enc:v1:`
+     * envelope prefix) and keeps verifying correctly with no migration step required. See
+     * `encryptTOTPSecret()`/`decryptTOTPSecret()` in `shared.ts`.
+     */
+    encryption_key?: string;
 }
 
 /**

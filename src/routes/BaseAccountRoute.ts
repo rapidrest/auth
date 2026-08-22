@@ -1,22 +1,25 @@
 ////////////////////////////////////////////////////////////////////////////////
 // Copyright (C) 2026 Jean-Philippe Steinmetz
 ////////////////////////////////////////////////////////////////////////////////
-import { ApiError, JWTUser, MessagingUtils, ObjectDecorators, UserUtils } from "@rapidrest/core";
+import { ApiError, EventUtils, JWTUser, MessagingUtils, ObjectDecorators, UserUtils } from "@rapidrest/core";
 import {
     ApiErrorMessages,
     ApiErrors,
     DocDecorators,
+    HttpRequest,
+    NetUtils,
     ObjectFactory,
     RepoUtils,
     RouteDecorators,
 } from "@rapidrest/service-core";
 import { Alias, Profile, Secret, User } from "../models/types.js";
+import { AuthEventType } from "../auth/events.js";
 import { TokenUtils } from "../auth/TokenUtils.js";
 import { RateLimiter } from "../auth/RateLimiter.js";
 
 const { Config, Init, Inject, Logger } = ObjectDecorators;
 const { Summary, Description, Returns } = DocDecorators;
-const { Auth, Delete, Get, Param, Post, RequiresElevation } = RouteDecorators;
+const { Auth, Delete, Get, Param, Post, Request, RequiresElevation } = RouteDecorators;
 const AuthUser = RouteDecorators.User;
 
 /**
@@ -58,6 +61,9 @@ export abstract class BaseAccountRoute<U extends User, A extends Alias, P extend
     protected profileRepo?: RepoUtils<P>;
     protected secretRepo?: RepoUtils<S>;
     protected userRepo?: RepoUtils<U>;
+
+    @Config("trusted_proxies", [])
+    protected trustedProxies: string[] = [];
 
     @Init
     protected async initialize(): Promise<void> {
@@ -109,7 +115,7 @@ export abstract class BaseAccountRoute<U extends User, A extends Alias, P extend
     @Returns([null])
     @Auth(["jwt"])
     @Delete(":id")
-    public async delete(@Param("id") id: string, @AuthUser user: JWTUser): Promise<any> {
+    public async delete(@Param("id") id: string, @Request req: HttpRequest, @AuthUser user: JWTUser): Promise<any> {
         const targetId = this.resolveOwnedUid(id, user);
 
         const eUser: U | undefined = await this.userRepo?.findOne(targetId, { user });
@@ -127,6 +133,13 @@ export abstract class BaseAccountRoute<U extends User, A extends Alias, P extend
         await this.secretRepo?.truncate({ userUid: eUser.uid }, { user });
         await this.profileRepo?.delete(eUser.uid, { user, ignoreACL: true });
         await this.userRepo?.delete(eUser.uid, { user });
+
+        EventUtils.record({
+            type: AuthEventType.ACCOUNT_DELETED,
+            ip: NetUtils.getIPAddress(req, this.trustedProxies),
+            userUid: eUser.uid,
+            deletedBy: user.uid,
+        }).catch(() => undefined);
     }
 
     @Summary("Get Account Data")
@@ -188,7 +201,11 @@ export abstract class BaseAccountRoute<U extends User, A extends Alias, P extend
     @Auth(["jwt"])
     @Post(":id/revokeSessions")
     @RequiresElevation(60)
-    public async revokeSessions(@Param("id") id: string, @AuthUser user: JWTUser): Promise<void> {
+    public async revokeSessions(
+        @Param("id") id: string,
+        @Request req: HttpRequest,
+        @AuthUser user: JWTUser,
+    ): Promise<void> {
         const targetId = this.resolveOwnedUid(id, user);
 
         const eUser: U | undefined = await this.userRepo?.findOne(targetId, { user });
@@ -201,6 +218,13 @@ export abstract class BaseAccountRoute<U extends User, A extends Alias, P extend
             eUser,
             { user },
         );
+
+        EventUtils.record({
+            type: AuthEventType.SESSIONS_REVOKED,
+            ip: NetUtils.getIPAddress(req, this.trustedProxies),
+            userUid: eUser.uid,
+            revokedBy: user.uid,
+        }).catch(() => undefined);
     }
 
     /**

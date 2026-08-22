@@ -2,11 +2,12 @@
 // Copyright (C) 2026 Jean-Philippe Steinmetz
 // SPDX-License-Identifier: MPL-2.0
 ///////////////////////////////////////////////////////////////////////////////
-import { JWTUser, JWTUtils, JWTUtilsConfig, ObjectDecorators } from "@rapidrest/core";
+import { EventUtils, JWTUser, JWTUtils, JWTUtilsConfig, ObjectDecorators } from "@rapidrest/core";
 import { HttpRequest, NetUtils, type HttpResponse } from "@rapidrest/service-core";
 import parseDuration from "parse-duration";
 import * as uuid from "uuid";
 import { AuthResult } from "../models/types.js";
+import { AuthEventType } from "./events.js";
 
 const { Config } = ObjectDecorators;
 
@@ -54,6 +55,9 @@ export class TokenUtils {
 
     @Config("auth")
     private jwtConfig?: any;
+
+    @Config("trusted_proxies", [])
+    protected trustedProxies: string[] = [];
 
     @Config("trusted_roles", ["admin"])
     protected trustedRoles: string[] = ["admin"];
@@ -201,10 +205,12 @@ export class TokenUtils {
             res.appendHeader("Set-Cookie", this.buildCookie(refresh, this.cookieConfig.refresh));
         }
 
+        const ip: string | undefined = req ? NetUtils.getIPAddress(req, this.trustedProxies) : undefined;
+
         // If sessions are available, store some useful information about the user
         if (req?.session) {
             const now = Date.now();
-            req.session.ip = NetUtils.getIPAddress(req);
+            req.session.ip = ip;
             req.session.lastAccess = now;
             if (elevated) {
                 req.session.lastElevated = now;
@@ -212,6 +218,15 @@ export class TokenUtils {
             req.session.lastLogin = req.session.lastLogin ?? now;
             req.session.userUid = user.uid;
         }
+
+        EventUtils.record({
+            type: AuthEventType.SESSION_CREATED,
+            userUid: user.uid,
+            ip,
+            path: req?.path,
+            elevated,
+            scopes,
+        }).catch(() => undefined);
 
         return {
             refresh,

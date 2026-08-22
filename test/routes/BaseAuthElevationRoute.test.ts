@@ -10,11 +10,12 @@ vi.mock("@simplewebauthn/server", () => ({
     verifyAuthenticationResponse: vi.fn(),
 }));
 
-import type { JWTUser } from "@rapidrest/core";
+import { EventUtils, type JWTUser } from "@rapidrest/core";
 import { RepoUtils, type HttpRequest, type HttpResponse } from "@rapidrest/service-core";
 import { generateAuthenticationOptions, verifyAuthenticationResponse } from "@simplewebauthn/server";
 import * as otplib from "otplib";
 import { MFAMethod, MFAMethodType } from "../../src/auth/MFAStrategy.js";
+import { AuthEventType } from "../../src/auth/events.js";
 import { BaseAuthElevationRoute } from "../../src/routes/BaseAuthElevationRoute.js";
 import { UserUtils } from "../../src/routes/UserUtils.js";
 import { AliasType, SecretType } from "../../src/models/types.js";
@@ -125,6 +126,10 @@ describe("BaseAuthElevationRoute Tests", () => {
     beforeEach(() => {
         mockGenerateAuthenticationOptions.mockReset();
         mockVerifyAuthenticationResponse.mockReset();
+    });
+
+    afterEach(() => {
+        vi.restoreAllMocks();
     });
 
     describe("initialize", () => {
@@ -301,6 +306,34 @@ describe("BaseAuthElevationRoute Tests", () => {
 
             expect(createAuthResult).toHaveBeenCalledWith(jwtUser, ["profile"], req, res, true);
             expect(result).toEqual({ token: "tok", refresh: "ref", user: jwtUser });
+        });
+
+        it("Records an auth.elevated event with the method that satisfied the step-up and the caller's source IP.", async () => {
+            const route = new TestAuthElevationRoute();
+            (route as any).tokenUtils = { createAuthResult: vi.fn().mockResolvedValue({}) };
+            vi.spyOn(route as any, "verifyPasswordOnly").mockResolvedValue(jwtUser);
+            const req = makeReq({ body: { password: "correct" }, socket: { remoteAddress: "1.2.3.4" } });
+            const spy = vi.spyOn(EventUtils, "record").mockResolvedValue(undefined);
+
+            await route.elevate({ password: "correct" }, jwtUser, req, makeRes());
+
+            expect(spy).toHaveBeenCalledWith({
+                type: AuthEventType.ELEVATED,
+                userUid: jwtUser.uid,
+                ip: "1.2.3.4",
+                method: "password",
+            });
+        });
+
+        it("Still resolves the AuthResult even when EventUtils.record() itself rejects.", async () => {
+            const route = new TestAuthElevationRoute();
+            const createAuthResult = vi.fn().mockResolvedValue({ token: "tok" });
+            (route as any).tokenUtils = { createAuthResult };
+            vi.spyOn(route as any, "verifyPasswordOnly").mockResolvedValue(jwtUser);
+            const req = makeReq({ body: { password: "correct" } });
+            vi.spyOn(EventUtils, "record").mockRejectedValue(new Error("telemetry down"));
+
+            await expect(route.elevate({ password: "correct" }, jwtUser, req, makeRes())).resolves.toBeDefined();
         });
     });
 

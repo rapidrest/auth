@@ -5,10 +5,12 @@
 // Isolated unit tests for BaseRegistrationRoute — no HTTP server, no database. otplib is real (it's
 // already exercised this way throughout the auth test suites), so `start()`/`verify()` are tested
 // against genuine OTP tokens rather than mocked ones.
+import { EventUtils } from "@rapidrest/core";
 import { RepoUtils } from "@rapidrest/service-core";
 import { BaseRegistrationRoute } from "../../src/routes/BaseRegistrationRoute.js";
 import { AliasType } from "../../src/models/types.js";
 import { generateOTP } from "../../src/auth/shared.js";
+import { AuthEventType } from "../../src/auth/events.js";
 import { TokenUtils } from "../../src/auth/TokenUtils.js";
 
 function makeRes(): any {
@@ -668,6 +670,44 @@ describe("BaseRegistrationRoute Tests", () => {
             await expect((route as any).verify({ email: "user@example.com", token }, req)).rejects.toThrow(
                 /verification code is invalid or has expired/,
             );
+        });
+
+        it("Records an auth.registration.completed event on success, including the caller's source IP.", async () => {
+            const req = makeReq({ socket: { remoteAddress: "1.2.3.4" } });
+            const token = await generateOTP(req, { id: "user@example.com" });
+
+            const route = new TestRegistrationRoute();
+            const user = { uid: "new-user-uid", roles: [], scopes: [] };
+            (route as any).aliasRepo = { find: vi.fn().mockResolvedValue([]), create: vi.fn().mockResolvedValue(undefined) };
+            (route as any).userRepo = { create: vi.fn().mockResolvedValue(user) };
+            const tokenUtils = new TokenUtils();
+            (tokenUtils as any).jwtConfig = { secret: "test-secret", refresh: { expiresIn: "14 days" } };
+            (route as any).tokenUtils = tokenUtils;
+            const spy = vi.spyOn(EventUtils, "record").mockResolvedValue(undefined);
+
+            await (route as any).verify({ email: "user@example.com", token }, req);
+
+            expect(spy).toHaveBeenCalledWith({
+                type: AuthEventType.REGISTRATION_COMPLETED,
+                userUid: "new-user-uid",
+                ip: "1.2.3.4",
+            });
+        });
+
+        it("Does not throw when EventUtils.record() itself rejects.", async () => {
+            const req = makeReq();
+            const token = await generateOTP(req, { id: "user@example.com" });
+
+            const route = new TestRegistrationRoute();
+            const user = { uid: "new-user-uid", roles: [], scopes: [] };
+            (route as any).aliasRepo = { find: vi.fn().mockResolvedValue([]), create: vi.fn().mockResolvedValue(undefined) };
+            (route as any).userRepo = { create: vi.fn().mockResolvedValue(user) };
+            const tokenUtils = new TokenUtils();
+            (tokenUtils as any).jwtConfig = { secret: "test-secret", refresh: { expiresIn: "14 days" } };
+            (route as any).tokenUtils = tokenUtils;
+            vi.spyOn(EventUtils, "record").mockRejectedValue(new Error("telemetry down"));
+
+            await expect((route as any).verify({ email: "user@example.com", token }, req)).resolves.toBeDefined();
         });
     });
 });

@@ -9,13 +9,16 @@ import {
     HttpRequest,
     HttpResponse,
     ModelRoute,
+    NetUtils,
     RepoUtils,
     RouteDecorators,
     UpdateObject,
 } from "@rapidrest/service-core";
 import { Secret, SecretType } from "../models/types.js";
-import { ApiError, JWTUser, ObjectDecorators, UserUtils } from "@rapidrest/core";
+import { ApiError, EventUtils, JWTUser, ObjectDecorators, UserUtils } from "@rapidrest/core";
 import {
+    decryptTOTPSecret,
+    encryptTOTPSecret,
     generatePasskeyRegistrationOptions,
     generateRecoveryCodes,
     generateTOTPURI,
@@ -25,6 +28,7 @@ import {
     isValidTOTPSecret,
     verifyPasskeyRegistrationResponse,
 } from "../auth/shared.js";
+import { AuthEventType } from "../auth/events.js";
 import {
     PasskeyConfig,
     PasswordConfig,
@@ -93,6 +97,9 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
      */
     @Config("auth:password", new PasswordConfig())
     protected passwordConfig: PasswordConfig = new PasswordConfig();
+
+    @Config("trusted_proxies", [])
+    protected trustedProxies: string[] = [];
 
     @Config("trusted_roles", ["admin"])
     protected trustedRoles: string[] = ["admin"];
@@ -334,7 +341,7 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
         }
 
         const totpSecret: TOTPSecret = {
-            secret,
+            secret: encryptTOTPSecret(secret, this.totpConfig.encryption_key),
             digits: this.totpConfig.digits,
             period: this.totpConfig.period,
             algorithm: this.totpConfig.algorithm,
@@ -467,9 +474,27 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
         const objs: Array<T> = Array.isArray(result) ? result : [result];
         for (const obj of objs) {
             await this.sanitizeSecretForResponse(obj, req);
+            if (this.isMFASecretType(obj.type)) {
+                EventUtils.record({
+                    type: AuthEventType.MFA_ENROLLED,
+                    userUid: obj.userUid,
+                    ip: NetUtils.getIPAddress(req, this.trustedProxies),
+                    secretType: obj.type,
+                }).catch(() => undefined);
+            }
         }
 
         return result;
+    }
+
+    /**
+     * Whether `type` is one of the secondary-auth-capable secret types (as opposed to a plain `password`) -
+     * used to scope `auth.mfa.enrolled`/`auth.mfa.removed` event emission to actual MFA enrollment changes.
+     */
+    private isMFASecretType(type: SecretType): boolean {
+        return (
+            [SecretType.FIDO2, SecretType.PASSKEY, SecretType.TOTP, SecretType.RECOVERY_CODES] as SecretType[]
+        ).includes(type);
     }
 
     /**
@@ -485,12 +510,16 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
         if ([SecretType.FIDO2, SecretType.PASSKEY, SecretType.PASSWORD].includes(obj.type)) {
             delete obj.data;
         } else if (obj.type === SecretType.TOTP && obj.data) {
-            // The `otpauth://` provisioning URI is derived from the persisted secret rather than
-            // stored itself, so it's computed fresh here for the response only.
-            (obj.data as TOTPSecret & { uri: string }).uri = await generateTOTPURI(
+            // The persisted `secret` may be encrypted at rest (see `encryptTOTPSecret()`) - decrypt it back
+            // to plaintext for the response, exactly like before encryption existed, since the caller's
+            // authenticator app needs the real secret once, at setup time (for manual entry, and to embed
+            // in the `otpauth://` provisioning URI computed fresh here for the response only).
+            const totpData = obj.data as TOTPSecret;
+            totpData.secret = decryptTOTPSecret(totpData.secret, this.totpConfig.encryption_key);
+            (totpData as TOTPSecret & { uri: string }).uri = await generateTOTPURI(
                 this.totpConfig,
                 obj.userUid,
-                obj.data as TOTPSecret,
+                totpData,
             );
         } else if (obj.type === SecretType.RECOVERY_CODES) {
             // The hashed `data` persisted by validateRecoveryCodesCreate() is never returned - only the
@@ -514,7 +543,20 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
         @Request req: HttpRequest,
         @User user: JWTUser,
     ): Promise<void> {
-        return super.doDelete(id, { user, req, version, purge: purge === "true" });
+        // Looked up before deletion since only the id is otherwise available - the deleted secret's type is
+        // needed to decide whether this qualifies as an `auth.mfa.removed` event.
+        const existing: T | undefined = await this.repoUtils?.findOne(id, { user });
+
+        await super.doDelete(id, { user, req, version, purge: purge === "true" });
+
+        if (existing && this.isMFASecretType(existing.type)) {
+            EventUtils.record({
+                type: AuthEventType.MFA_REMOVED,
+                userUid: existing.userUid,
+                ip: NetUtils.getIPAddress(req, this.trustedProxies),
+                secretType: existing.type,
+            }).catch(() => undefined);
+        }
     }
 
     @Auth(["jwt"])

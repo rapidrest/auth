@@ -2,18 +2,20 @@
 // Copyright (C) 2026 Jean-Philippe Steinmetz
 // SPDX-License-Identifier: MPL-2.0
 ////////////////////////////////////////////////////////////////////////////////
-import { ApiError, MessagingUtils, ObjectDecorators, ValidationUtils } from "@rapidrest/core";
+import { ApiError, EventUtils, MessagingUtils, ObjectDecorators, ValidationUtils } from "@rapidrest/core";
 import {
     ApiErrors,
     DocDecorators,
     HttpRequest,
     HttpResponse,
+    NetUtils,
     ObjectFactory,
     RepoUtils,
     RouteDecorators,
 } from "@rapidrest/service-core";
 import { Alias, AliasType, AuthResult, User } from "../models/types.js";
 import { generateOTP, verifyOTP } from "../auth/shared.js";
+import { AuthEventType } from "../auth/events.js";
 import { TokenUtils } from "../auth/TokenUtils.js";
 import { RateLimiter } from "../auth/RateLimiter.js";
 
@@ -63,11 +65,14 @@ export abstract class BaseRegistrationRoute<U extends User, A extends Alias> {
     @Inject(MessagingUtils)
     protected messagingUtils?: MessagingUtils;
 
+    @Inject(RateLimiter)
+    protected rateLimiter?: RateLimiter;
+
     @Inject(TokenUtils)
     protected tokenUtils?: TokenUtils;
 
-    @Inject(RateLimiter)
-    protected rateLimiter?: RateLimiter;
+    @Config("trusted_proxies", [])
+    protected trustedProxies: string[] = [];
 
     protected aliasRepo?: RepoUtils<A>;
     protected userRepo?: RepoUtils<U>;
@@ -266,6 +271,12 @@ export abstract class BaseRegistrationRoute<U extends User, A extends Alias> {
             ignoreACL: true,
             user: newUser,
         });
+
+        EventUtils.record({
+            type: AuthEventType.REGISTRATION_COMPLETED,
+            userUid: user.uid,
+            ip: NetUtils.getIPAddress(req, this.trustedProxies),
+        }).catch(() => undefined);
 
         // New accounts always get an elevated token in order to ensure that they can safely create
         // secrets (e.g. MFA setup) needed to maintain account access.

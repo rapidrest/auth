@@ -519,6 +519,89 @@ export const verifyPasskeyRegistrationResponse = async function (
 // TOTP
 ///////////////////////////////////////////////////////////////////////////////
 
+const TOTP_ENCRYPTION_PREFIX = "enc:v1:";
+const TOTP_ENCRYPTION_ALGORITHM = "aes-256-gcm";
+const TOTP_ENCRYPTION_IV_LENGTH = 12;
+const TOTP_ENCRYPTION_AUTH_TAG_LENGTH = 16;
+
+/**
+ * Decodes `key` (a 64-character hex string per `TOTPConfig.encryption_key`) into the 32-byte buffer
+ * `aes-256-gcm` requires, throwing a deployment-misconfiguration error rather than silently encrypting/
+ * decrypting with the wrong key length.
+ */
+function parseTOTPEncryptionKey(key: string): Buffer {
+    const buf = Buffer.from(key, "hex");
+    if (buf.length !== 32) {
+        throw new ApiError(
+            ApiErrors.INTERNAL_ERROR,
+            500,
+            "`auth:totp:encryption_key` must be a 64-character hex string (32 bytes) for AES-256-GCM.",
+        );
+    }
+    return buf;
+}
+
+/**
+ * Encrypts a TOTP shared secret for storage, using AES-256-GCM with a fresh random IV per call. Stores the
+ * result as `"enc:v1:" + base64(iv[12] + authTag[16] + ciphertext)`. A no-op (returns `secret` unchanged)
+ * when `key` is unset, so leaving `auth:totp:encryption_key` unconfigured is exactly today's plaintext
+ * behavior.
+ *
+ * @param secret The plaintext TOTP shared secret to encrypt.
+ * @param key The 64-character hex encryption key (`TOTPConfig.encryption_key`). Omit to store as plaintext.
+ */
+export const encryptTOTPSecret = function (secret: string, key?: string): string {
+    if (!key) {
+        return secret;
+    }
+
+    const keyBuf = parseTOTPEncryptionKey(key);
+    const iv = crypto.randomBytes(TOTP_ENCRYPTION_IV_LENGTH);
+    const cipher = crypto.createCipheriv(TOTP_ENCRYPTION_ALGORITHM, keyBuf, iv);
+    const ciphertext = Buffer.concat([cipher.update(secret, "utf8"), cipher.final()]);
+    const authTag = cipher.getAuthTag();
+
+    return TOTP_ENCRYPTION_PREFIX + Buffer.concat([iv, authTag, ciphertext]).toString("base64");
+};
+
+/**
+ * Decrypts a TOTP shared secret previously encrypted by `encryptTOTPSecret()`. Anything lacking the
+ * `enc:v1:` envelope prefix is treated as legacy (or never-encrypted) plaintext and returned unchanged -
+ * this is what lets `auth:totp:encryption_key` be enabled without a forced migration of already-stored
+ * secrets.
+ *
+ * @param secret The persisted `TOTPSecret.secret` value, encrypted or plaintext.
+ * @param key The 64-character hex encryption key (`TOTPConfig.encryption_key`) that encrypted it.
+ * @throws `ApiError` (500) if `secret` is encrypted but `key` is unset, or `key` is malformed.
+ */
+export const decryptTOTPSecret = function (secret: string, key?: string): string {
+    if (!secret.startsWith(TOTP_ENCRYPTION_PREFIX)) {
+        return secret;
+    }
+    if (!key) {
+        throw new ApiError(
+            ApiErrors.INTERNAL_ERROR,
+            500,
+            "This TOTP secret is encrypted but no `auth:totp:encryption_key` is configured.",
+        );
+    }
+
+    const keyBuf = parseTOTPEncryptionKey(key);
+    const raw = Buffer.from(secret.slice(TOTP_ENCRYPTION_PREFIX.length), "base64");
+    const iv = raw.subarray(0, TOTP_ENCRYPTION_IV_LENGTH);
+    const authTag = raw.subarray(
+        TOTP_ENCRYPTION_IV_LENGTH,
+        TOTP_ENCRYPTION_IV_LENGTH + TOTP_ENCRYPTION_AUTH_TAG_LENGTH,
+    );
+    const ciphertext = raw.subarray(TOTP_ENCRYPTION_IV_LENGTH + TOTP_ENCRYPTION_AUTH_TAG_LENGTH);
+
+    const decipher = crypto.createDecipheriv(TOTP_ENCRYPTION_ALGORITHM, keyBuf, iv);
+    decipher.setAuthTag(authTag);
+    const plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+
+    return plaintext.toString("utf8");
+};
+
 /**
  * Generates and returns a new OTP token for authentication. This function stores relevant data for
  * validation of the OTP token in the request's session.
@@ -560,17 +643,24 @@ export const generateTOTP = async function (req: HttpRequest, requestData?: any)
  *
  * @param token The OTP token to validate.
  * @param secret The stored TOTP secret(s) to validate the token against.
+ * @param encryptionKey The 64-character hex encryption key (`TOTPConfig.encryption_key`) to decrypt each
+ * candidate's `secret` with before verifying, if it was encrypted at rest. Omit if secrets are stored as
+ * plaintext (the default).
  * @returns The otplib verification result (plus the matched secret's `uid`, if any) if successful,
  * otherwise `undefined`.
  */
-export const verifyTOTP = async function (token: string, secret: TOTPSecret | TOTPSecret[]): Promise<any> {
+export const verifyTOTP = async function (
+    token: string,
+    secret: TOTPSecret | TOTPSecret[],
+    encryptionKey?: string,
+): Promise<any> {
     const otplib = await importOTPLib();
 
     // Check against all provided TOTP secrets. If at least one of the TOTP
     // secrets is valid then we return success.
     const secrets: TOTPSecret[] = Array.isArray(secret) ? secret : [secret];
     for (const secret of secrets) {
-        const { uid, lastTimeStep, ...otpOptions } = secret;
+        const { uid, lastTimeStep, secret: rawSecret, ...otpOptions } = secret;
 
         // otplib throws (rather than returning `{valid: false}`) for a token that isn't exactly the
         // expected number of digits — a malformed/empty client-supplied token must fail cleanly like
@@ -582,6 +672,7 @@ export const verifyTOTP = async function (token: string, secret: TOTPSecret | TO
 
         const result = await otplib.verify({
             ...otpOptions,
+            secret: decryptTOTPSecret(rawSecret, encryptionKey),
             token,
             afterTimeStep: lastTimeStep,
         });

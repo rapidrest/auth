@@ -2,7 +2,8 @@
 // Copyright (C) 2026 Jean-Philippe Steinmetz
 // SPDX-License-Identifier: MPL-2.0
 ///////////////////////////////////////////////////////////////////////////////
-import { JWTUtils } from "@rapidrest/core";
+import { EventUtils, JWTUtils } from "@rapidrest/core";
+import { AuthEventType } from "../../src/auth/events.js";
 import { TokenUtils } from "../../src/auth/TokenUtils.js";
 
 const jwtConfig = { secret: "test-secret", refresh: { expiresIn: "14 days" } };
@@ -323,6 +324,41 @@ describe("TokenUtils Tests", () => {
 
         it("Does not throw when no request is provided.", async () => {
             const tokenUtils = makeTokenUtils();
+
+            await expect(tokenUtils.createAuthResult(user, [])).resolves.toBeDefined();
+        });
+
+        it("Records an auth.session.created event, including the caller's source IP and request path.", async () => {
+            const tokenUtils = makeTokenUtils();
+            const req = makeReq({ path: "/auth/login" });
+            const spy = vi.spyOn(EventUtils, "record").mockResolvedValue(undefined);
+
+            await tokenUtils.createAuthResult(user, ["read"], req, undefined, true);
+
+            expect(spy).toHaveBeenCalledWith({
+                type: AuthEventType.SESSION_CREATED,
+                userUid: user.uid,
+                ip: "127.0.0.1",
+                path: "/auth/login",
+                elevated: true,
+                scopes: ["read"],
+            });
+        });
+
+        it("Records the event with undefined ip/path when no request is provided.", async () => {
+            const tokenUtils = makeTokenUtils();
+            const spy = vi.spyOn(EventUtils, "record").mockResolvedValue(undefined);
+
+            await tokenUtils.createAuthResult(user, ["read"]);
+
+            expect(spy).toHaveBeenCalledWith(
+                expect.objectContaining({ type: AuthEventType.SESSION_CREATED, ip: undefined, path: undefined }),
+            );
+        });
+
+        it("Does not reject when EventUtils.record() itself rejects.", async () => {
+            const tokenUtils = makeTokenUtils();
+            vi.spyOn(EventUtils, "record").mockRejectedValue(new Error("telemetry down"));
 
             await expect(tokenUtils.createAuthResult(user, [])).resolves.toBeDefined();
         });
