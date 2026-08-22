@@ -18,7 +18,7 @@ import { TokenUtils } from "../auth/TokenUtils.js";
 import { RateLimiter } from "../auth/RateLimiter.js";
 
 const { Config, Init, Inject, Logger } = ObjectDecorators;
-const { Summary, Description } = DocDecorators;
+const { Summary, Description, Returns } = DocDecorators;
 const { Post, Request, Response } = RouteDecorators;
 
 interface StartBody {
@@ -98,6 +98,7 @@ export abstract class BaseRegistrationRoute<U extends User, A extends Alias> {
      */
     @Summary("Begin account registration")
     @Description("Sends a one-time verification code to the provided e-mail address or phone number.")
+    @Returns([Object])
     @Post("/start")
     public async start(body: StartBody, @Request req: HttpRequest): Promise<Record<string, never>> {
         if (!this.aliasRepo) {
@@ -183,6 +184,7 @@ export abstract class BaseRegistrationRoute<U extends User, A extends Alias> {
      */
     @Summary("Verify registration e-mail code")
     @Description("Verifies the one-time code sent to the claimed e-mail address so that registration can be completed.")
+    @Returns([AuthResult])
     @Post("/verify")
     public async verify(body: VerifyBody, @Request req: HttpRequest, @Response res: HttpResponse): Promise<AuthResult> {
         if (!this.aliasRepo) {

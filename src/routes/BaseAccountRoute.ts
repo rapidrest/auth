@@ -106,6 +106,7 @@ export abstract class BaseAccountRoute<U extends User, A extends Alias, P extend
 
     @Summary("Delete Account Data")
     @Description("Deletes all account data associated with the user, or any user's if the caller holds a trusted role.")
+    @Returns([null])
     @Auth(["jwt"])
     @Delete(":id")
     public async delete(@Param("id") id: string, @AuthUser user: JWTUser): Promise<any> {
@@ -130,6 +131,7 @@ export abstract class BaseAccountRoute<U extends User, A extends Alias, P extend
 
     @Summary("Get Account Data")
     @Description("Returns all account data associated with the user, or any user's if the caller holds a trusted role.")
+    @Returns([Object])
     @Auth(["jwt"])
     @Get(":id")
     public async get(@Param("id") id: string, @AuthUser user: JWTUser): Promise<any> {
@@ -182,6 +184,7 @@ export abstract class BaseAccountRoute<U extends User, A extends Alias, P extend
             "current session), forcing every device to sign in again to obtain a new one. Does not invalidate " +
             "an already-issued access token, which remains valid until its own natural expiry.",
     )
+    @Returns([null])
     @Auth(["jwt"])
     @Post(":id/revokeSessions")
     @RequiresElevation(60)

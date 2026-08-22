@@ -36,6 +36,12 @@ export abstract class BaseProfileRoute<T extends Profile> extends CRUDRoute<T> {
     @Inject(RateLimiter)
     protected rateLimiter?: RateLimiter;
 
+    @Summary("Create Profile(s)")
+    @Description(
+        "Creates a new Profile for the caller, or for any user if the caller holds a trusted role. Any " +
+            "newly-added, unverified contact automatically receives a verification code.",
+    )
+    @Returns([Object])
     public async create(obj: T | T[], @Request req: HttpRequest, @User user?: JWTUser): Promise<T | T[]> {
         const result = await super.create(obj, req, user);
         const results: T[] = Array.isArray(result) ? result : [result];
@@ -62,6 +68,7 @@ export abstract class BaseProfileRoute<T extends Profile> extends CRUDRoute<T> {
      */
     @Summary("Delete Profile by ID")
     @Description("Deletes a single Profile that the caller owns, or any Profile if the caller holds a trusted role.")
+    @Returns([null])
     public async delete(
         @Param("id") id: string,
         @Query("version") version: string | undefined,
@@ -90,6 +97,7 @@ export abstract class BaseProfileRoute<T extends Profile> extends CRUDRoute<T> {
      */
     @Summary("Find Profiles")
     @Description("Returns the caller's own Profile, or all Profiles if the caller holds a trusted role.")
+    @Returns([[Array, Object]])
     public async find(@Param() params: any, @Query() query: any, @User user?: JWTUser): Promise<T[]> {
         if (!this.repoUtils) {
             throw new ApiError(ApiErrors.INTERNAL_ERROR, 500, ApiErrorMessages.INTERNAL_ERROR);
@@ -122,6 +130,7 @@ export abstract class BaseProfileRoute<T extends Profile> extends CRUDRoute<T> {
      */
     @Summary("Find Profile by ID")
     @Description("Returns a single Profile that the caller owns, or any Profile if the caller holds a trusted role.")
+    @Returns([Object])
     public async findById(@Param("id") id: string, @Query() query: any, @User user?: JWTUser): Promise<T | null> {
         if (!this.repoUtils) {
             throw new ApiError(ApiErrors.INTERNAL_ERROR, 500, ApiErrorMessages.INTERNAL_ERROR);
@@ -148,6 +157,7 @@ export abstract class BaseProfileRoute<T extends Profile> extends CRUDRoute<T> {
      */
     @Summary("Request Verification Code")
     @Description("Requests a verification code be sent to the contact with the given value.")
+    @Returns([null])
     @Auth(["jwt"])
     @Get(":id/contacts/sendCode")
     public async requestVerificationCode(
@@ -256,6 +266,7 @@ export abstract class BaseProfileRoute<T extends Profile> extends CRUDRoute<T> {
      */
     @Summary("Update Profile by ID")
     @Description("Updates a single Profile that the caller owns, or any Profile if the caller holds a trusted role.")
+    @Returns([Object])
     public async update(
         @Param("id") id: string,
         obj: UpdateObject<T>,

@@ -194,6 +194,7 @@ export abstract class BaseAliasRoute<T extends Alias> extends CRUDRoute<T> {
      */
     @Summary("Request Verification Code")
     @Description("Requests a verification code be sent to the alias with the given id.")
+    @Returns([null])
     @Auth(["jwt"])
     @Get(":id/sendCode")
     public async requestVerificationCode(
