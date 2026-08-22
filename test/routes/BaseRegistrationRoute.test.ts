@@ -554,6 +554,51 @@ describe("BaseRegistrationRoute Tests", () => {
             expect(userCreate).not.toHaveBeenCalled();
         });
 
+        // Regression: this bypasses `BaseAliasRoute.validateCreate()` (it calls the repo directly), so it must
+        // repeat that method's own displacement of stale *unverified* alias claims for the same value here -
+        // see the dedicated squatting-displacement integration tests in test/routes/sql and test/routes/mongo.
+        it("Deletes a stale unverified e-mail alias claim for the same address before creating the real one.", async () => {
+            const req = makeReq();
+            const token = await generateOTP(req, { id: "user@example.com" });
+
+            const route = new TestRegistrationRoute();
+            const aliasDelete = vi.fn().mockResolvedValue(undefined);
+            (route as any).aliasRepo = {
+                find: vi.fn().mockResolvedValue([{ uid: "squatter-alias", verified: false }]),
+                delete: aliasDelete,
+                create: vi.fn().mockResolvedValue(undefined),
+            };
+            (route as any).userRepo = { create: vi.fn().mockResolvedValue({ uid: "user-1", roles: [], scopes: [] }) };
+            const tokenUtils = new TokenUtils();
+            (tokenUtils as any).jwtConfig = { secret: "test-secret", refresh: { expiresIn: "14 days" } };
+            (route as any).tokenUtils = tokenUtils;
+
+            await (route as any).verify({ email: "user@example.com", token }, req);
+
+            expect(aliasDelete).toHaveBeenCalledWith("squatter-alias", { ignoreACL: true });
+        });
+
+        it("Deletes a stale unverified phone alias claim for the same number before creating the real one.", async () => {
+            const req = makeReq();
+            const token = await generateOTP(req, { id: "+15551234567" });
+
+            const route = new TestRegistrationRoute();
+            const aliasDelete = vi.fn().mockResolvedValue(undefined);
+            (route as any).aliasRepo = {
+                find: vi.fn().mockResolvedValue([{ uid: "squatter-alias", verified: false }]),
+                delete: aliasDelete,
+                create: vi.fn().mockResolvedValue(undefined),
+            };
+            (route as any).userRepo = { create: vi.fn().mockResolvedValue({ uid: "user-1", roles: [], scopes: [] }) };
+            const tokenUtils = new TokenUtils();
+            (tokenUtils as any).jwtConfig = { secret: "test-secret", refresh: { expiresIn: "14 days" } };
+            (route as any).tokenUtils = tokenUtils;
+
+            await (route as any).verify({ phone: "+15551234567", token }, req);
+
+            expect(aliasDelete).toHaveBeenCalledWith("squatter-alias", { ignoreACL: true });
+        });
+
         it("Sets a `Set-Cookie` header when cookie issuance is enabled.", async () => {
             const req = makeReq();
             const token = await generateOTP(req, { id: "user@example.com" });

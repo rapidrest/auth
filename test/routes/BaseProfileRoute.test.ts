@@ -92,6 +92,39 @@ describe("BaseProfileRoute Tests", () => {
 
             expect(obj.uid).toBe("victim-uid");
         });
+
+        // Regression: a contact's `verified` flag must only ever flip via `verifyContact()`'s real OTP check,
+        // never via a client-supplied value on create - see the same reasoning in `validateUpdate()` below.
+        // There's no pre-existing record to reconcile against on create, so every contact simply starts
+        // unverified regardless of what the caller sent.
+        it("Forces every contact's `verified` flag to false on create, regardless of what the caller sent.", async () => {
+            vi.spyOn(CRUDRoute.prototype as any, "validateCreate").mockResolvedValue(undefined);
+            const route = new TestProfileRoute();
+            const obj: any = {
+                givenName: "John",
+                contacts: [
+                    { contact: "victim@example.com", type: ContactType.EMAIL, verified: true },
+                    { contact: "+15551234567", type: ContactType.PHONE, verified: false },
+                ],
+            };
+
+            await (route as any).validateCreate(obj, { uid: "user-1" });
+
+            expect(obj.contacts).toEqual([
+                { contact: "victim@example.com", type: ContactType.EMAIL, verified: false },
+                { contact: "+15551234567", type: ContactType.PHONE, verified: false },
+            ]);
+        });
+
+        it("Leaves obj.contacts untouched when the caller didn't send any.", async () => {
+            vi.spyOn(CRUDRoute.prototype as any, "validateCreate").mockResolvedValue(undefined);
+            const route = new TestProfileRoute();
+            const obj: any = { givenName: "John" };
+
+            await (route as any).validateCreate(obj, { uid: "user-1" });
+
+            expect(obj.contacts).toBeUndefined();
+        });
     });
 
     describe("validateUpdate", () => {
