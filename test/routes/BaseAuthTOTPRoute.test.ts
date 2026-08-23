@@ -143,6 +143,24 @@ describe("BaseAuthTOTPRoute Tests", () => {
                 { ignoreACL: true, recordEvent: false },
             );
         });
+
+        // Regression: two concurrent requests holding the same valid code both pass verification (against
+        // their own, now-stale reads) before either one reaches this method - without re-checking against a
+        // fresh read here, the second to arrive would silently overwrite with the same timeStep and let a
+        // second session authenticate on an already-used code.
+        it("Throws and does not persist when lastTimeStep has already been advanced to at least this timeStep (replay/race).", async () => {
+            const route = new TestAuthTOTPRoute();
+            const secret = { uid: "secret-1", version: 2, data: { secret: "AAAA", lastTimeStep: 42 } };
+            const findOne = vi.fn().mockResolvedValue(secret);
+            const update = vi.fn();
+            (route as any).secretRepo = { findOne, update };
+
+            await expect((route as any).updateSecretTimeStep("secret-1", 42)).rejects.toThrow(
+                /already been used/,
+            );
+
+            expect(update).not.toHaveBeenCalled();
+        });
     });
 
     describe("getUser", () => {

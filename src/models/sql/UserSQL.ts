@@ -50,6 +50,14 @@ export class UserSQL extends BaseEntity implements User {
     @Description("The list of permission scopes the user has.")
     public scopes: string[] = [];
 
+    @Column({ nullable: true })
+    @Description(
+        "The epoch millisecond timestamp at which every refresh token issued before it was revoked " +
+            "(see `BaseAccountRoute.revokeSessions()`), if ever.",
+    )
+    @Nullable
+    public sessionsRevokedAt?: number;
+
     @Column()
     @Description("Indicates if the user's contact information (e.g. email, phone number) has been verified.")
     public verified: boolean = false;
@@ -61,6 +69,7 @@ export class UserSQL extends BaseEntity implements User {
             this.requireMFA = "requireMFA" in other ? other.requireMFA : this.requireMFA;
             this.roles = other.roles !== undefined ? other.roles : this.roles;
             this.scopes = other.scopes !== undefined ? other.scopes : this.scopes;
+            this.sessionsRevokedAt = other.sessionsRevokedAt !== undefined ? other.sessionsRevokedAt : this.sessionsRevokedAt;
             this.verified = other.verified !== undefined ? other.verified : this.verified;
         }
     }

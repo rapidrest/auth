@@ -92,6 +92,7 @@ function setupDefaultAccounts(
     (job as any).userRepo = overrides.userRepo ?? {
         findOne: vi.fn(),
         create: vi.fn().mockResolvedValue({ uid: "user-1", roles: ["admin"] }),
+        update: vi.fn().mockImplementation((obj: any) => Promise.resolve(obj)),
     };
     return job;
 }
@@ -279,17 +280,50 @@ describe("DefaultAccounts Tests", () => {
                     }
                     return Promise.resolve([]);
                 });
-                const userFindOne = vi.fn().mockResolvedValue({ uid: "existing-1", roles: ["admin"] });
+                const existingUser = { uid: "existing-1", roles: ["admin"] };
+                const userFindOne = vi.fn().mockResolvedValue(existingUser);
                 const userCreate = vi.fn();
+                const userUpdate = vi.fn().mockResolvedValue(existingUser);
                 const job = setupDefaultAccounts(accounts, {
                     aliasRepo: { find: aliasFind, create: vi.fn().mockResolvedValue(undefined) },
-                    userRepo: { findOne: userFindOne, create: userCreate },
+                    userRepo: { findOne: userFindOne, create: userCreate, update: userUpdate },
                 });
 
                 await job.start();
 
                 expect(userFindOne).toHaveBeenCalledWith("existing-1", { ignoreACL: true });
                 expect(userCreate).not.toHaveBeenCalled();
+            });
+
+            // Regression: roles/verified used to only ever be applied on brand-new account creation - a
+            // config change to `default_accounts[].roles` for an already-provisioned account silently never
+            // took effect on subsequent restarts, contradicting this method's own "avoid lockout scenarios"
+            // documented intent.
+            it("Re-syncs roles and verified for an already-provisioned account on every run, not just on creation.", async () => {
+                const accounts: DefaultAccountConfig[] = [
+                    { name: "admin", password: VALID_PASSWORD, roles: ["admin", "superuser"] },
+                ];
+                const aliasFind = vi.fn().mockImplementation((query: any) => {
+                    if ("alias" in query) {
+                        return Promise.resolve([{ userUid: "existing-1" }]);
+                    }
+                    return Promise.resolve([]);
+                });
+                const existingUser = { uid: "existing-1", version: 3, roles: ["admin"], verified: false };
+                const userFindOne = vi.fn().mockResolvedValue(existingUser);
+                const userUpdate = vi.fn().mockResolvedValue({ ...existingUser, roles: ["admin", "superuser"], verified: true });
+                const job = setupDefaultAccounts(accounts, {
+                    aliasRepo: { find: aliasFind, create: vi.fn().mockResolvedValue(undefined) },
+                    userRepo: { findOne: userFindOne, create: vi.fn(), update: userUpdate },
+                });
+
+                await job.start();
+
+                expect(userUpdate).toHaveBeenCalledWith(
+                    { uid: "existing-1", version: 3, roles: ["admin", "superuser"], verified: true },
+                    existingUser,
+                    { user: existingUser },
+                );
             });
 
             it("Creates a new user when an alias exists but its referenced user does not.", async () => {

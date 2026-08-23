@@ -132,14 +132,17 @@ describe("OTPStrategy Tests", () => {
             expect(options.checkRateLimit).toHaveBeenCalledWith("user-uid-1", req);
         });
 
-        it("Does not invoke checkRateLimit when no id query param is given.", async () => {
+        // Regression: this used to skip rate limiting entirely when `id` was omitted, so a caller could
+        // dodge the throttle simply by never sending the query parameter, even though `getContacts(undefined)`
+        // still runs. A fixed bucket key is used instead so an omitted `id` is still throttled.
+        it("Still invokes checkRateLimit (on a fixed bucket) when no id query param is given.", async () => {
             (options.getContacts as any).mockResolvedValue([]);
             options.checkRateLimit = vi.fn();
             const req = makeReq({ body: {}, query: {} });
 
             await strategy.authenticate(req, makeRes(), false);
 
-            expect(options.checkRateLimit).not.toHaveBeenCalled();
+            expect(options.checkRateLimit).toHaveBeenCalledWith(expect.any(String), req);
         });
 
         it("Aborts before listing contacts when checkRateLimit throws.", async () => {

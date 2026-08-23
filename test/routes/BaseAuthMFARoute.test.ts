@@ -713,6 +713,24 @@ describe("BaseAuthMFARoute Tests", () => {
                 { ignoreACL: true, recordEvent: false },
             );
         });
+
+        // Regression: two concurrent phase-3 requests holding the same valid code both pass verification
+        // (against their own, now-stale reads) before either one reaches this method - without re-checking
+        // against a fresh read here, the second to arrive would silently overwrite with the same timeStep
+        // and let a second session authenticate on an already-used code.
+        it("Throws and does not persist when lastTimeStep has already been advanced to at least this timeStep (replay/race).", async () => {
+            const route = new TestAuthMFARoute();
+            const secret = { uid: "secret-1", version: 2, data: { secret: "abc", lastTimeStep: 42 } };
+            const findOne = vi.fn().mockResolvedValue(secret);
+            const update = vi.fn();
+            (route as any).secretRepo = { findOne, update };
+
+            await expect((route as any).updateSecretTimeStep("secret-1", 42)).rejects.toThrow(
+                /already been used/,
+            );
+
+            expect(update).not.toHaveBeenCalled();
+        });
     });
 
     describe("consumeRecoveryCode", () => {
@@ -755,6 +773,27 @@ describe("BaseAuthMFARoute Tests", () => {
                 secret,
                 { ignoreACL: true, recordEvent: false },
             );
+        });
+
+        // Regression: two concurrent requests submitting the same still-unused recovery code both pass
+        // `MFAStrategy.verifyRecoveryCode()`'s in-memory hash check (against their own, now-stale reads)
+        // before either one reaches this method - without re-checking a fresh read here, the second to
+        // arrive would silently re-mark the same entry and let a second session authenticate on a code
+        // that's already been spent.
+        it("Throws and does not persist when the entry has already been consumed (replay/race).", async () => {
+            const route = new TestAuthMFARoute();
+            const secret = {
+                uid: "secret-1",
+                version: 2,
+                data: { codes: [{ hash: "hash-1", usedAt: "2026-01-01T00:00:00.000Z" }] },
+            };
+            const findOne = vi.fn().mockResolvedValue(secret);
+            const update = vi.fn();
+            (route as any).secretRepo = { findOne, update };
+
+            await expect((route as any).consumeRecoveryCode("secret-1", 0)).rejects.toThrow(/already been used/);
+
+            expect(update).not.toHaveBeenCalled();
         });
     });
 

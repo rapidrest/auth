@@ -2,8 +2,9 @@
 // Copyright (C) 2026 Jean-Philippe Steinmetz
 // SPDX-License-Identifier: MPL-2.0
 ///////////////////////////////////////////////////////////////////////////////
-import { JWTUser, MessagingUtils, ObjectDecorators } from "@rapidrest/core";
+import { ApiError, JWTUser, MessagingUtils, ObjectDecorators } from "@rapidrest/core";
 import {
+    ApiErrors,
     RouteDecorators,
     DocDecorators,
     HttpResponse,
@@ -163,6 +164,14 @@ export abstract class BaseAuthTOTPRoute<U extends User, A extends Alias, S exten
     /**
      * Persists the given time step as the last one successfully used for the identified TOTP
      * secret, so a captured/replayed token can't be reused within its validity window.
+     *
+     * Closes a TOCTOU race between two concurrent requests both holding the same valid code: each
+     * independently reads the secret and verifies the submitted token *before* either one reaches this
+     * method, so verification alone can't tell them apart. Re-checking `lastTimeStep` against a fresh
+     * read here - combined with `RepoUtils.update()`'s existing optimistic-locking `version` check, which
+     * still protects the case where both readers see the same pre-update state - means at most one of the
+     * two ever succeeds in claiming this time step; the loser throws instead of silently letting a second
+     * session authenticate on an already-used code.
      * @param uid The unique id of the stored secret that was verified.
      * @param timeStep The RFC 6238 time step at which the token was verified.
      */
@@ -173,7 +182,11 @@ export abstract class BaseAuthTOTPRoute<U extends User, A extends Alias, S exten
 
         const secret: S | undefined = await this.secretRepo.findOne(uid, { ignoreACL: true });
         if (secret) {
-            (secret.data as TOTPSecret).lastTimeStep = timeStep;
+            const totpData = secret.data as TOTPSecret;
+            if (totpData.lastTimeStep !== undefined && totpData.lastTimeStep >= timeStep) {
+                throw new ApiError(ApiErrors.AUTH_FAILED, 401, "This code has already been used.");
+            }
+            totpData.lastTimeStep = timeStep;
             await this.secretRepo.update(
                 {
                     uid: secret.uid,

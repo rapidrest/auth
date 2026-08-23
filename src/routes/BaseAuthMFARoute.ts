@@ -2,8 +2,9 @@
 // Copyright (C) 2026 Jean-Philippe Steinmetz
 // SPDX-License-Identifier: MPL-2.0
 ///////////////////////////////////////////////////////////////////////////////
-import { JWTUser, MessagingUtils, ObjectDecorators } from "@rapidrest/core";
+import { ApiError, JWTUser, MessagingUtils, ObjectDecorators } from "@rapidrest/core";
 import {
+    ApiErrors,
     RouteDecorators,
     DocDecorators,
     HttpResponse,
@@ -445,6 +446,14 @@ export abstract class BaseAuthMFARoute<U extends User, S extends Secret, A exten
     /**
      * Persists the given time step as the last one successfully used for the identified TOTP
      * secret, so a captured/replayed token can't be reused within its validity window.
+     *
+     * Closes a TOCTOU race between two concurrent phase-3 requests both holding the same valid code: each
+     * independently verifies the submitted token *before* either one reaches this method, so verification
+     * alone can't tell them apart. Re-checking `lastTimeStep` against a fresh read here - combined with
+     * `RepoUtils.update()`'s existing optimistic-locking `version` check, which still protects the case
+     * where both readers see the same pre-update state - means at most one of the two ever succeeds in
+     * claiming this time step; the loser throws instead of silently letting a second session authenticate
+     * on an already-used code.
      * @param uid The unique id of the stored secret that was verified.
      * @param timeStep The RFC 6238 time step at which the token was verified.
      */
@@ -455,7 +464,11 @@ export abstract class BaseAuthMFARoute<U extends User, S extends Secret, A exten
 
         const secret: S | undefined = await this.secretRepo.findOne(uid, { ignoreACL: true });
         if (secret) {
-            (secret.data as TOTPSecret).lastTimeStep = timeStep;
+            const totpData = secret.data as TOTPSecret;
+            if (totpData.lastTimeStep !== undefined && totpData.lastTimeStep >= timeStep) {
+                throw new ApiError(ApiErrors.AUTH_FAILED, 401, "This code has already been used.");
+            }
+            totpData.lastTimeStep = timeStep;
             await this.secretRepo.update(
                 {
                     uid: secret.uid,
@@ -472,6 +485,13 @@ export abstract class BaseAuthMFARoute<U extends User, S extends Secret, A exten
      * Persists that the recovery code at `codeIndex` within the identified `recovery-codes` secret has been
      * consumed, so it can never be verified again. Called once, only after `MFAStrategy.verifyRecoveryCode()`
      * has already matched the submitted code against that entry's hash.
+     *
+     * Closes the same TOCTOU race described on `updateSecretTimeStep()` above: two concurrent requests
+     * submitting the identical still-unused recovery code both pass `verifyRecoveryCode()`'s in-memory hash
+     * check before either reaches here. Re-checking `usedAt` against a fresh read - combined with the
+     * existing optimistic-locking `version` check on the write - means only the first to actually persist
+     * the consumption wins; the loser throws rather than silently authenticating a second session on a code
+     * that's already been spent.
      * @param uid The unique id of the `recovery-codes` secret the matched entry belongs to.
      * @param codeIndex The index, within that secret's `codes` array, of the entry that was matched.
      */
@@ -482,7 +502,11 @@ export abstract class BaseAuthMFARoute<U extends User, S extends Secret, A exten
 
         const secret: S | undefined = await this.secretRepo.findOne(uid, { ignoreACL: true });
         if (secret) {
-            (secret.data as RecoveryCodesSecret).codes[codeIndex].usedAt = new Date().toISOString();
+            const entry = (secret.data as RecoveryCodesSecret).codes[codeIndex];
+            if (entry.usedAt) {
+                throw new ApiError(ApiErrors.AUTH_FAILED, 401, "This recovery code has already been used.");
+            }
+            entry.usedAt = new Date().toISOString();
             await this.secretRepo.update(
                 {
                     uid: secret.uid,

@@ -143,8 +143,11 @@ export class OTPStrategy implements AuthStrategy {
 
     protected async discovery(req: HttpRequest, res: HttpResponse): Promise<any> {
         const id: string | undefined = (req.query?.id as string) ?? undefined;
-        if (id && this.options.checkRateLimit) {
-            await this.options.checkRateLimit(id, req);
+        // A request with no `id` still calls through to `getContacts(undefined)` below and must be
+        // throttled too - keying on a fixed bucket when `id` is absent, rather than skipping the check
+        // entirely, so a caller can't dodge rate limiting simply by omitting the query parameter.
+        if (this.options.checkRateLimit) {
+            await this.options.checkRateLimit(id ?? "__discovery_no_id__", req);
         }
 
         let contacts: OTPContact[] = (await this.options.getContacts(id)) ?? [];

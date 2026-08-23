@@ -661,6 +661,14 @@ export abstract class BaseAuthElevationRoute<U extends User, S extends Secret, A
     /**
      * Persists the given time step as the last one successfully used for the identified TOTP
      * secret, so a captured/replayed token can't be reused within its validity window.
+     *
+     * Closes a TOCTOU race between two concurrent elevation requests both holding the same valid code:
+     * each independently verifies the submitted token *before* either one reaches this method, so
+     * verification alone can't tell them apart. Re-checking `lastTimeStep` against a fresh read here -
+     * combined with `RepoUtils.update()`'s existing optimistic-locking `version` check, which still
+     * protects the case where both readers see the same pre-update state - means at most one of the two
+     * ever succeeds in claiming this time step; the loser throws instead of silently letting a second
+     * session elevate on an already-used code.
      * @param uid The unique id of the stored secret that was verified.
      * @param timeStep The RFC 6238 time step at which the token was verified.
      */
@@ -671,7 +679,11 @@ export abstract class BaseAuthElevationRoute<U extends User, S extends Secret, A
 
         const secret: S | undefined = await this.secretRepo.findOne(uid, { ignoreACL: true });
         if (secret) {
-            (secret.data as TOTPSecret).lastTimeStep = timeStep;
+            const totpData = secret.data as TOTPSecret;
+            if (totpData.lastTimeStep !== undefined && totpData.lastTimeStep >= timeStep) {
+                throw new ApiError(ApiErrors.AUTH_FAILED, 401, "This code has already been used.");
+            }
+            totpData.lastTimeStep = timeStep;
             await this.secretRepo.update(
                 {
                     uid: secret.uid,

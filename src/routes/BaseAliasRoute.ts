@@ -106,22 +106,42 @@ export abstract class BaseAliasRoute<T extends Alias> extends CRUDRoute<T> {
             }
         }
 
-        if (obj.type === AliasType.NAME) {
-            // A `name` alias is a free-form, self-verified identifier. We reject anything that could pass as an
-            // e-mail address or phone number. The uniqueness constraint on `alias` spans all types, so without
-            // this an attacker could squat a victim's future e-mail/phone as a `name` alias before the victim
-            // ever registers it, blocking their registration and colliding with the `email`/`phone` alias
-            // record `BaseRegistrationRoute` later tries to create for them.
-            if (typeof obj.alias === "string") {
-                this.checkName(obj.alias);
-            }
+        // `verified` is never taken from the client - every branch below computes it explicitly, and any
+        // `type` this switch doesn't recognize is rejected outright rather than falling through with
+        // whatever `verified` value the client sent left untouched. This matters most for `oauth`: it's a
+        // real `AliasType` (used internally by `BaseAuthOIDCRoute`, which creates it directly via
+        // `aliasRepo.create({ignoreACL: true})` to link a provider-verified identity - bypassing this
+        // route/method entirely), so without an explicit rejection here a client could `POST` a
+        // self-declared `{type: "oauth", verified: true}` alias through the public endpoint and squat any
+        // identifier - permanently, since only *unverified* stale claims get displaced by the uniqueness
+        // check above.
+        switch (obj.type) {
+            case AliasType.NAME:
+                // A `name` alias is a free-form, self-verified identifier. We reject anything that could pass as
+                // an e-mail address or phone number. The uniqueness constraint on `alias` spans all types, so
+                // without this an attacker could squat a victim's future e-mail/phone as a `name` alias before
+                // the victim ever registers it, blocking their registration and colliding with the
+                // `email`/`phone` alias record `BaseRegistrationRoute` later tries to create for them.
+                if (typeof obj.alias === "string") {
+                    this.checkName(obj.alias);
+                }
 
-            // Names are always considered verified
-            obj.verified = true;
-        } else if (obj.type === AliasType.EMAIL || obj.type === AliasType.PHONE) {
-            // An alias is always considered unverified unless it already exists as verified in the user's Profile
-            // contacts list.
-            obj.verified = await this.isVerifiedContact(user, obj.alias!, obj.type);
+                // Names are always considered verified
+                obj.verified = true;
+                break;
+            case AliasType.EMAIL:
+            case AliasType.PHONE:
+                // An alias is always considered unverified unless it already exists as verified in the
+                // *target* account's Profile contacts list - `obj.userUid` (defaulted to the caller's own
+                // uid above, or the target of a trusted-role-provisioned alias), not necessarily the caller.
+                obj.verified = await this.isVerifiedContact(user, obj.userUid, obj.alias!, obj.type);
+                break;
+            default:
+                throw new ApiError(
+                    ApiErrors.INVALID_REQUEST,
+                    400,
+                    `Aliases of type '${obj.type}' cannot be created through this endpoint.`,
+                );
         }
     }
 
@@ -168,6 +188,7 @@ export abstract class BaseAliasRoute<T extends Alias> extends CRUDRoute<T> {
 
     private async isVerifiedContact(
         user: JWTUser,
+        targetUid: string,
         alias: string,
         type: AliasType.EMAIL | AliasType.PHONE,
     ): Promise<boolean> {
@@ -176,12 +197,14 @@ export abstract class BaseAliasRoute<T extends Alias> extends CRUDRoute<T> {
         }
 
         // skipCache: true is required here as this is a security-relevant read (does the
-        // caller's Profile actually have this contact verified?). `user` must also be passed here, not just
-        // `ignoreACL`/`skipCache` because RepoUtils.findOne() strips any @RequiresScope-gated property
-        // (Profile.contacts requires the `profile:contacts` scope) whenever no `user` is given. Without this,
-        // `contacts` silently comes back undefined and every claim looks unproven regardless of the caller's
-        // actual Profile state.
-        const profile = await this.profileRepo.findOne(user.uid, { skipCache: true, ignoreACL: true, user });
+        // *target* account's Profile actually have this contact verified?). Deliberately `targetUid`, not
+        // `user.uid` - a trusted-role caller may be provisioning this alias for a different account, and
+        // this must check that account's own proven contacts, not the admin's. `user` must also be passed
+        // here, not just `ignoreACL`/`skipCache` because RepoUtils.findOne() strips any @RequiresScope-gated
+        // property (Profile.contacts requires the `profile:contacts` scope) whenever no `user` is given.
+        // Without this, `contacts` silently comes back undefined and every claim looks unproven regardless
+        // of the target account's actual Profile state.
+        const profile = await this.profileRepo.findOne(targetUid, { skipCache: true, ignoreACL: true, user });
         const contactType = type === AliasType.EMAIL ? ContactType.EMAIL : ContactType.PHONE;
         return !!profile?.contacts?.some((c) => c.contact === alias && c.type === contactType && c.verified);
     }

@@ -57,7 +57,7 @@ describe("BaseAliasRoute Tests", () => {
         it("Delegates to CRUDRoute.validateCreate() for schema validation.", async () => {
             const spy = vi.spyOn(CRUDRoute.prototype as any, "validateCreate").mockResolvedValue(undefined);
             const route = new TestAliasRoute();
-            const obj: any = { alias: "user@example.com" };
+            const obj: any = { type: AliasType.EMAIL, alias: "user@example.com" };
             const user: any = { uid: "user-1" };
 
             await (route as any).validateCreate(obj, user);
@@ -68,7 +68,7 @@ describe("BaseAliasRoute Tests", () => {
         it("Defaults obj.userUid to the authenticated caller's uid when unset.", async () => {
             vi.spyOn(CRUDRoute.prototype as any, "validateCreate").mockResolvedValue(undefined);
             const route = new TestAliasRoute();
-            const obj: any = { alias: "user@example.com" };
+            const obj: any = { type: AliasType.EMAIL, alias: "user@example.com" };
 
             await (route as any).validateCreate(obj, { uid: "user-1" });
 
@@ -78,7 +78,7 @@ describe("BaseAliasRoute Tests", () => {
         it("Allows a caller to explicitly create an alias for their own uid.", async () => {
             vi.spyOn(CRUDRoute.prototype as any, "validateCreate").mockResolvedValue(undefined);
             const route = new TestAliasRoute();
-            const obj: any = { alias: "user@example.com", userUid: "user-1" };
+            const obj: any = { type: AliasType.EMAIL, alias: "user@example.com", userUid: "user-1" };
 
             await expect((route as any).validateCreate(obj, { uid: "user-1" })).resolves.toBeUndefined();
         });
@@ -96,11 +96,45 @@ describe("BaseAliasRoute Tests", () => {
         it("Allows a trusted (admin) caller to create an alias for another user's uid.", async () => {
             vi.spyOn(CRUDRoute.prototype as any, "validateCreate").mockResolvedValue(undefined);
             const route = new TestAliasRoute();
-            const obj: any = { alias: "victim@example.com", userUid: "victim-uid" };
+            const obj: any = { type: AliasType.EMAIL, alias: "victim@example.com", userUid: "victim-uid" };
 
             await (route as any).validateCreate(obj, { uid: "admin-uid", roles: ["admin"] });
 
             expect(obj.userUid).toBe("victim-uid");
+        });
+
+        // Regression: isVerifiedContact() used to always check the *caller's* own Profile, even when a
+        // trusted admin was provisioning an alias for a different account - so an admin-created alias for
+        // another user was checked against the wrong person's proven contacts entirely.
+        it("Checks the target account's own Profile (not the admin caller's) when a trusted role creates an alias for someone else.", async () => {
+            vi.spyOn(CRUDRoute.prototype as any, "validateCreate").mockResolvedValue(undefined);
+            const route = new TestAliasRoute();
+            const findOne = vi.fn().mockResolvedValue({
+                contacts: [{ contact: "victim@example.com", type: ContactType.EMAIL, verified: true }],
+            });
+            (route as any).profileRepo = { findOne };
+            const obj: any = { type: AliasType.EMAIL, alias: "victim@example.com", userUid: "victim-uid" };
+
+            await (route as any).validateCreate(obj, { uid: "admin-uid", roles: ["admin"] });
+
+            expect(findOne).toHaveBeenCalledWith("victim-uid", expect.objectContaining({ skipCache: true }));
+            expect(obj.verified).toBe(true);
+        });
+
+        // Regression: a client-supplied `type` this switch doesn't recognize (or omits entirely) used to
+        // fall through with whatever `verified` value the client sent left completely untouched. `oauth` is
+        // a real `AliasType` - used internally by `BaseAuthOIDCRoute` via a direct `aliasRepo.create()` call
+        // that bypasses this method entirely - so without this rejection a client could `POST` a
+        // self-declared `{type: "oauth", verified: true}` alias through the public endpoint and permanently
+        // squat any identifier (only *unverified* stale claims get displaced by the uniqueness check above).
+        it("Rejects a type the switch doesn't recognize, including the internal-only 'oauth' type, rather than leaving a client-supplied `verified` untouched.", async () => {
+            const route = new TestAliasRoute();
+            const obj: any = { type: AliasType.OAUTH, alias: "victim@example.com", verified: true };
+
+            await expect((route as any).validateCreate(obj, { uid: "user-1" })).rejects.toThrow(
+                /cannot be created through this endpoint/,
+            );
+            expect(obj.verified).toBe(true); // never touched - the request is rejected instead
         });
 
         it("Does enforce ownership when there is no authenticated user (unauthenticated create).", async () => {

@@ -160,6 +160,16 @@ export abstract class DefaultAccounts<
                         ],
                     },
                 });
+            } else {
+                // Re-sync roles/verified for an already-provisioned account on every restart, matching the
+                // profile/alias/secret sync below - without this, a config change to
+                // `default_accounts[].roles` silently never took effect for an account created on a
+                // previous run, contradicting this method's own "avoid lockout scenarios" contract.
+                user = await this.userRepo!.update(
+                    { uid: user.uid, version: user.version, roles: account.roles, verified: true } as any,
+                    user,
+                    { user },
+                );
             }
 
             // Now synchronize the rest of the account details. This ensures that any aliases/secrets

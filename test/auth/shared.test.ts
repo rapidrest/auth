@@ -156,6 +156,32 @@ describe("getRequestData", () => {
         expect(payload).toEqual({ id: "user1", token: "123456" });
     });
 
+    // Regression: a naive `part.split("=")`/no-decode form-data parser silently truncated any value
+    // containing its own '=' (e.g. base64 padding) at the first occurrence, left '+' as a literal plus
+    // instead of the space it represents in form-encoding, and never percent-decoded at all - so the
+    // *wrong* (mangled/truncated) value is what actually got rate-limited/verified against.
+    it("URL-decodes form-data keys/values, preserving '=' inside a value (only the first '=' is a delimiter).", () => {
+        const req = makeReq({ body: "id=user%201&password=a%3Db%2Bc" });
+        const { payload } = getRequestData(req);
+        expect(payload).toEqual({ id: "user 1", password: "a=b+c" });
+    });
+
+    it("Decodes '+' as a space in form-data values.", () => {
+        const req = makeReq({ body: "id=hello+world&token=123456" });
+        const { payload } = getRequestData(req);
+        expect(payload).toEqual({ id: "hello world", token: "123456" });
+    });
+
+    it("Falls back to the raw value (rather than throwing) for a malformed percent-escape in form-data.", () => {
+        const req = makeReq({ body: "id=100%25off&token=123456" });
+        const { payload: decoded } = getRequestData(req);
+        expect(decoded).toEqual({ id: "100%off", token: "123456" });
+
+        const req2 = makeReq({ body: "id=broken%escape&token=123456" });
+        expect(() => getRequestData(req2)).not.toThrow();
+        expect(getRequestData(req2).payload).toEqual({ id: "broken%escape", token: "123456" });
+    });
+
     it("Falls back to colon parsing when the non-JSON string body has no '&'.", () => {
         const req = makeReq({ body: "user1:pass1" });
         const { payload } = getRequestData(req);

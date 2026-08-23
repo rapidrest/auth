@@ -74,6 +74,20 @@ export const getBasicData = function (
 };
 
 /**
+ * Decodes a single `application/x-www-form-urlencoded` key or value: `+` is form-encoding's space, and
+ * `%XX` sequences are percent-encoded bytes. Falls back to the raw value on a malformed escape sequence
+ * rather than throwing, so a client can't turn a parse edge case in `getRequestData()` into an unhandled
+ * error.
+ */
+function decodeFormValue(value: string): string {
+    try {
+        return decodeURIComponent(value.replace(/\+/g, " "));
+    } catch (err) {
+        return value;
+    }
+}
+
+/**
  * Attempts to decode the request for authentication request data. The auth request data may be in a header, a query
  * parameter or the request body itself. It may either be JSON encoded or form-data encoded. We want to return a
  * regular object.
@@ -143,8 +157,17 @@ export const getRequestData = function (
         if (data.includes("&")) {
             const formParts: string[] = data.split("&");
             for (const part of formParts) {
-                const parts: string[] = part.split("=");
-                obj[parts[0]] = parts[1] ?? undefined;
+                // Split on the *first* '=' only - a value containing its own '=' (e.g. base64-padded)
+                // would otherwise be silently truncated by a naive `part.split("=")`. `+` is form-encoding's
+                // space, and `%XX` sequences must be percent-decoded - without this, a value containing
+                // '&'/'='/'+'/non-ASCII characters (e.g. a password) is silently mangled or truncated rather
+                // than reconstructed, and the wrong (truncated) value is what actually gets rate-limited/
+                // verified. Falls back to the raw value on a malformed escape rather than throwing, so a
+                // client can't turn a parse edge case into an unhandled 500.
+                const eqIndex = part.indexOf("=");
+                const rawKey = eqIndex >= 0 ? part.slice(0, eqIndex) : part;
+                const rawValue = eqIndex >= 0 ? part.slice(eqIndex + 1) : undefined;
+                obj[decodeFormValue(rawKey)] = rawValue !== undefined ? decodeFormValue(rawValue) : undefined;
             }
         } else if (data.includes(":")) {
             // This is dirty making assumptions like the following. Should really do
