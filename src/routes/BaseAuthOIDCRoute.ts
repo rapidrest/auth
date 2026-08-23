@@ -25,7 +25,21 @@ const { Auth, Get, Post, Request, Response } = RouteDecorators;
 const AuthUser = RouteDecorators.User;
 
 /**
+ * IMPORTANT!! A subclass using a non-default `strategyName` (see its own doc comment — required for a
+ * multi-provider setup) MUST override this method with a matching `@Auth([...])`, delegating
+ * to `super.login(...)` for the actual token issuance, e.g.:
+ * ```ts
+ * protected strategyName = "google";
  *
+ * @Auth(["google"])
+ * public override async login(@User user: JWTUser, @Request req: HttpRequest, @Response res: HttpResponse) {
+ *     return super.login(user, req, res);
+ * }
+ * ```
+ * `@Auth([...])`'s strategy list is read from decorator metadata attached to the *declaring*
+ * class at load time, not re-evaluated per instance — a subclass that doesn't redeclare
+ * `login()` inherits this base implementation's `@Auth(["oauth"])` regardless of its own
+ * `strategyName`.
  *
  * @author Jean-Philippe Steinmetz
  */
@@ -54,6 +68,17 @@ export abstract class BaseAuthOIDCRoute<U extends User, A extends Alias, P exten
     protected profileRepo?: RepoUtils<P>;
 
     protected abstract providerConfig: OIDCProvider;
+
+    /**
+     * The name this route's strategy registers under in `AuthMiddleware`, and the name `login()`'s
+     * `@Auth([...])` must match. Defaults to `"oauth"` for backward compatibility with a
+     * single-provider setup. An app wiring up more than one `BaseAuthOIDCRoute` subclass (e.g. one
+     * per third-party provider) MUST give each a distinct `strategyName` and override `login()`
+     * with a matching `@Auth([...])` — otherwise every subclass registers under the same shared
+     * name and the last one loaded silently wins for all of them. See `login()`'s own doc comment
+     * for the override pattern.
+     */
+    protected strategyName: string = "oauth";
 
     @Inject(TokenUtils)
     protected tokenUtils?: TokenUtils;
@@ -102,7 +127,7 @@ export abstract class BaseAuthOIDCRoute<U extends User, A extends Alias, P exten
             });
         }
 
-        const options: OIDCStrategyOptions = new OIDCStrategyOptions("oauth", this.providerConfig);
+        const options: OIDCStrategyOptions = new OIDCStrategyOptions(this.strategyName, this.providerConfig);
         options.getUser = async (token: string, profile: OIDCProfile): Promise<JWTUser | undefined> => {
             if (!this.aliasRepo) {
                 throw new Error("aliasRepo is not set.");

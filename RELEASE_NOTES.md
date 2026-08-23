@@ -1,5 +1,17 @@
 # Release Notes
 
+## Unreleased
+
+* Fixed `BaseAuthOIDCRoute` hardcoding its registered strategy name to the literal `"oauth"` (both
+  at `initialize()`-time registration and in `login()`'s `@Auth(["oauth"])`), which made it
+  impossible to wire up more than one OIDC/OAuth provider in the same application — every
+  `BaseAuthOIDCRoute` subclass registered under the same shared name in `AuthMiddleware`, so the
+  last one loaded silently won for all of them. Added an overridable `strategyName` field
+  (defaults to `"oauth"`, so existing single-provider usage is unaffected) — a subclass wiring up
+  an additional provider now sets its own `strategyName` and overrides `login()` with a matching
+  `@Auth([...])`, delegating to `super.login(...)`. See `BaseAuthOIDCRoute`'s own doc comments for
+  the override pattern.
+
 ## v1.0.0
 
 ### Authentication Strategies:

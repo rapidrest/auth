@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: MPL-2.0
 ///////////////////////////////////////////////////////////////////////////////
 // Isolated unit tests for BaseAuthOIDCRoute — no HTTP server, no database.
-import { RepoUtils } from "@rapidrest/service-core";
+import { RepoUtils, RouteDecorators } from "@rapidrest/service-core";
 import { OIDCProfile, OIDCProvider, OIDCStrategy, OIDCStrategyOptions } from "../../src/auth/OIDCStrategy.js";
 import { BaseAuthOIDCRoute } from "../../src/routes/BaseAuthOIDCRoute.js";
 import { UserUtils } from "../../src/routes/UserUtils.js";
@@ -32,6 +32,37 @@ class TestAuthOIDCRoute extends BaseAuthOIDCRoute<any, any, any> {
     protected profileClass: any = FakeProfileClass;
     protected userClass: any = FakeUserClass;
     protected providerConfig: OIDCProvider = providerConfig;
+}
+
+// Simulates a multi-provider setup (e.g. one route per third-party OIDC provider): each subclass
+// overrides both `strategyName` and `login()` (with a matching `@Auth([...])`) per the pattern
+// documented on `BaseAuthOIDCRoute.strategyName`/`login()`.
+const { Auth: AuthDecorator } = RouteDecorators;
+
+class GoogleAuthOIDCRoute extends BaseAuthOIDCRoute<any, any, any> {
+    protected aliasClass: any = FakeAliasClass;
+    protected profileClass: any = FakeProfileClass;
+    protected userClass: any = FakeUserClass;
+    protected providerConfig: OIDCProvider = { ...providerConfig, name: "oidc_google" };
+    protected strategyName = "oidc_google";
+
+    @AuthDecorator(["oidc_google"])
+    public override async login(user: any, req: any, res: any) {
+        return super.login(user, req, res);
+    }
+}
+
+class AppleAuthOIDCRoute extends BaseAuthOIDCRoute<any, any, any> {
+    protected aliasClass: any = FakeAliasClass;
+    protected profileClass: any = FakeProfileClass;
+    protected userClass: any = FakeUserClass;
+    protected providerConfig: OIDCProvider = { ...providerConfig, name: "oidc_apple" };
+    protected strategyName = "oidc_apple";
+
+    @AuthDecorator(["oidc_apple"])
+    public override async login(user: any, req: any, res: any) {
+        return super.login(user, req, res);
+    }
 }
 
 function makeMockObjectFactory(aliasRepo: any, profileRepo: any, userRepo: any, userUtils: any) {
@@ -102,6 +133,65 @@ describe("BaseAuthOIDCRoute Tests", () => {
         await (route as any).initialize();
 
         expect(register).toHaveBeenCalledWith("oauth", expect.any(OIDCStrategy));
+    });
+
+    describe("multi-provider strategyName", () => {
+        it("Registers a strategy under a subclass's overridden strategyName instead of the default.", async () => {
+            const register = vi.fn();
+            const route = new GoogleAuthOIDCRoute();
+            (route as any).authMiddleware = { register };
+            const { objectFactory } = makeMockObjectFactory({}, {}, {}, {});
+            (route as any)._objectFactory = objectFactory;
+
+            await (route as any).initialize();
+
+            expect(register).toHaveBeenCalledWith("oidc_google", expect.any(OIDCStrategy));
+            expect(register).not.toHaveBeenCalledWith("oauth", expect.anything());
+        });
+
+        it("Registers two independently-configured route instances under distinct names without either overwriting the other.", async () => {
+            const strategies = new Map<string, unknown>();
+            const authMiddleware = { register: (name: string, strategy: unknown) => strategies.set(name, strategy) };
+
+            const googleRoute = new GoogleAuthOIDCRoute();
+            (googleRoute as any).authMiddleware = authMiddleware;
+            (googleRoute as any)._objectFactory = makeMockObjectFactory({}, {}, {}, {}).objectFactory;
+            await (googleRoute as any).initialize();
+
+            const appleRoute = new AppleAuthOIDCRoute();
+            (appleRoute as any).authMiddleware = authMiddleware;
+            (appleRoute as any)._objectFactory = makeMockObjectFactory({}, {}, {}, {}).objectFactory;
+            await (appleRoute as any).initialize();
+
+            expect(strategies.size).toBe(2);
+            expect(strategies.has("oidc_google")).toBe(true);
+            expect(strategies.has("oidc_apple")).toBe(true);
+            expect(strategies.get("oidc_google")).not.toBe(strategies.get("oidc_apple"));
+        });
+
+        it("A subclass overriding login() with a matching @Auth([...]) shadows the base class's metadata without mutating it.", () => {
+            const googleAuthStrategies = Reflect.getMetadata(
+                "rrst:route",
+                GoogleAuthOIDCRoute.prototype,
+                "login",
+            )?.authStrategies;
+            const appleAuthStrategies = Reflect.getMetadata(
+                "rrst:route",
+                AppleAuthOIDCRoute.prototype,
+                "login",
+            )?.authStrategies;
+            const baseAuthStrategies = Reflect.getMetadata(
+                "rrst:route",
+                BaseAuthOIDCRoute.prototype,
+                "login",
+            )?.authStrategies;
+
+            expect(googleAuthStrategies).toEqual(["oidc_google"]);
+            expect(appleAuthStrategies).toEqual(["oidc_apple"]);
+            // The base class's own metadata must be untouched by either subclass's override —
+            // confirms this is prototype-chain shadowing, not a shared mutable object.
+            expect(baseAuthStrategies).toEqual(["oauth"]);
+        });
     });
 
     describe("options.getUser closure", () => {
