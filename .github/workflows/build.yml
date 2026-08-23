@@ -1,13 +1,13 @@
-name: CI
+name: Build
 
 on:
-    push:
+  push:
 
 jobs:
   build:
     runs-on: ubuntu-latest
     container:
-      image: node:lts-bookworm-slim
+      image: node:lts-trixie-slim
     steps:
       - uses: actions/checkout@v6
 
@@ -37,7 +37,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     container:
-      image: node:lts-bookworm-slim
+      image: node:lts-trixie-slim
     needs: build
     steps:
       - uses: actions/checkout@v6
@@ -60,7 +60,7 @@ jobs:
         run: yarn install --frozen-lockfile
 
       - name: Run tests
-        run: yarn vitest run --coverage
+        run: yarn test
 
       - name: Upload JUnit report
         if: always()
@@ -78,7 +78,7 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     container:
-      image: node:lts-bookworm-slim
+      image: node:lts-trixie-slim
     needs: build
     continue-on-error: true
     steps:
