@@ -1,6 +1,6 @@
 # Release Notes
 
-## Unreleased
+## v1.1.0
 
 * Fixed `BaseAuthOIDCRoute` hardcoding its registered strategy name to the literal `"oauth"` (both
   at `initialize()`-time registration and in `login()`'s `@Auth(["oauth"])`), which made it
