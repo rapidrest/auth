@@ -1,6 +1,6 @@
 # Release Notes
 
-## Unreleased
+## v1.3.0
 
 * `OIDCStrategy` now supports passing in a `no_redirect=true` query flag to return the authorization URL as a JSON
   payload instead of a `302 REDIRECT`.

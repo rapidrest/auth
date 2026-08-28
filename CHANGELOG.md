@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.3.0 (2026-08-28)
+
+* `OIDCStrategy` now supports passing in a `no_redirect=true` query flag to return the authorization URL as a JSON payload instead of a `302 REDIRECT`. (b844e1b)
+
 ## v1.2.0 (2026-08-27)
 
 -   - BaseAuthOIDCRoute now instantiates OIDCStrategy using the strategy name instead of `default`. This fixes a bug when supporting multiple OIDC providers. \* Added new `/authorize` endpoint to `BaseAuthOIDCRoute` for building and returning the OAuth authorization URL. (f3e1946)
