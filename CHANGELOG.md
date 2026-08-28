@@ -1,99 +1,56 @@
 # Changelog
 
-## v1.3.0 (2026-08-28)
+All notable changes to this project will be documented in this file.
 
-* `OIDCStrategy` now supports passing in a `no_redirect=true` query flag to return the authorization URL as a JSON payload instead of a `302 REDIRECT`. (b844e1b)
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## v1.2.0 (2026-08-27)
+## [Unreleased]
 
--   - BaseAuthOIDCRoute now instantiates OIDCStrategy using the strategy name instead of `default`. This fixes a bug when supporting multiple OIDC providers. \* Added new `/authorize` endpoint to `BaseAuthOIDCRoute` for building and returning the OAuth authorization URL. (f3e1946)
+### Removed
+- Removed the custom `/authorize` endpoint from `BaseAuthOIDCRoute`, superseded by the `no_redirect=true` flag on `login()`
 
-## v1.1.1 (2026-08-27)
+## [1.3.0] - 2026-08-28
 
-- Fixing broken jsonwebtoken imports (7d6f375)
+### Added
+- `OIDCStrategy` now supports passing in a `no_redirect=true` query flag to return the authorization URL as a JSON payload instead of a `302` redirect
 
-## v1.1.0 (2026-08-27)
+## [1.2.0] - 2026-08-27
 
-- Updating release notes (c518e7d)
-- Fix BaseAuthOIDCRoute strategy-name collision blocking multi-provider setups (2bce9ac)
+### Fixed
+- Fixed `BaseAuthOIDCRoute` instantiating `OIDCStrategy` using the literal `default` name instead of the configured strategy name, which broke support for multiple OIDC providers
 
-## v1.0.0 (2026-08-22)
+### Added
+- Added new `/authorize` endpoint to `BaseAuthOIDCRoute` for building and returning the OAuth authorization URL
 
-- Updating claude notes (47f339b)
-- Updating CI workflows (e470d25)
-- Updating readme/release notes (8e57b85)
-- Removign unused imports (76b1b92)
-- Fixing issue with AliasRoute allowing creation of `oauth` types which can allow a user to squat an unverified email/phone/name User.sessionsRevokedAt is now persisted Fixed TOCTOU race condition with TOTP codes Fixed issue with admin alias verification accessing wrong profile Adding rate limiting to OTP discovery Form-data parser now properly URI decodes DefaultAccounts now re-syncs roles/scopes for existing accounts (4083ec2)
-- Upgrading rapidrest deps (8e5c186)
-- Upgrading rapidrest deps RateLimiter now includes trustedProxies when retrieving ip address for event recording Added in-place TOTP decryption Fixing issue that caused RATELIMIT_EXCEEDED to fire multiple times (31e1a1a)
-- Implementing encryption for storing TOTP secrets Implementing telemetry events for various activities (login, account creation, deletion, etc.) Implementing IP based rate limiting (6061ebb)
-- Updating CI build workflow (8f7177f)
-- Adding missing OpenAPI doc decorators (25a2a04)
-- Removing unnecessary peer dependencies Backup/recovery codes are now generated when registering an TOTP secret Implementing session revocation and recovation list Implementing per-IP throttling Argon2 is now configurable Cookies now default to secure Other fixes and improvements (eb99c0b)
-- Reverting RateLimiter implementation Adding new tests to improve coverage (3598d29)
-- BaseProfileRoute.validateCreate() now always forces verified to false Alias creation now only blocks on a verified collision, unverified collisions get replaced Fixing potential enumeration side channel issue in Passkey and FIDO2 routes (b7e6cb7)
-- Swapping if statement for in-line checks (2bd8015)
-- Upgrading @rapidrest deps (e65ebee)
-- Fixing license section of readme (ade0c6b)
-- Adding claude notes file Adding passwords file to .gitignore (2b38abb)
-- Upgrading dependencies Migrating from ioredis to node-redis Migrating to typeorm 1.x Migrating to @rapidrest/core 5.x Migrating to @rapidrest/service-core 1.x Refactoring RateLimiter to use RedisStore instead of separate MemoryStore and redis connection Migrating from sqlite3 to better-sqlite3 (5fda316)
-- BaseAliasRoute' `create()` and `delete()` endpoints now require elevation BaseAuthElevationRoute and BaseAuthMFARoute now return obfuscated methods for 2fa discovery Fixing issue with BaseAuthMFARoute that allowed unverified 2fa methods to be used for authentication (0f6cb2e)
-- Fixing issue with MFAStrategy that did not allow basic auth through POST payload (0f90443)
-- Delete any existing password file on startup (62496dc)
-- DefaultAccounts now writes default account passwords to a system file instead of log by default (4e73217)
-- Upgrading @rapidrest/core and @rapidrest/service-core (16a8222)
-- Updating readme (20b129d)
-- Fixing critical issue that allowed an attacker to bypass elevation Fixing issue that breaks refresh tokens when elevating a user Fixing unhandled exceptions that caused a crash Fixing issue with lastLogin getting stomped by user elevation (b267eb0)
-- Implementing user elevation (26a4cfb)
-- Implementing refresh tokens (d0789c3)
-- Adding requireMFA to User to enforce requiring MFA for a given user account. Adding system wide config flag to enforce the MFA requirement (1f15baf)
-- Adding update endpoint to BaseSecretRoute allowing modification of secrets in specific circumstances (ceb980d)
-- Adding rate limiting to verify() step of BaseRegistrationRoute (sec fix) Change rate limit in BaseRegistrationRoute.start() to be unconditional (sec fix) Removing stale mfaMethodId from session during OTP challenge (sec fix) Adding indexes to userUid on Alias/Secret (perf fix) (a6e2e2b)
-- Adding notes to known issues that aren't being fixed (e5fc586)
-- Adding new tests for BaseAuthTOTPRoute (2b69e4a)
-- Fixed issue with OIDC auth that allowed an attacker to take over another user's account by matching the same `name` alias Implementing FIDO2/TOTP support for MFAStrategy TOTPStrategy now enforces codes be used once Adding rate limiting to FIDO2/Passkey strategies Fixing issue in OTPStrategy that potentially allowed an attacker to enumeration contacts Fixing multiple bugs throughout (adb955f)
-- Adding missing verified flag for default account users (541926b)
-- Removing errant @Inject decorator in DefaultAccounts that caused runtime crash (53a6d75)
-- Alias' names can no longer be specified as an email or phone number. This fixes an issue that made it possible for someone to use someone else's email/phone (8508483)
-- Fixing issue in BaseAccountRoute that allowed secrets data to be leaked Fixing issue that allowed a user to set `verified` to `true` Adding rate limiting to MFA phase-2 challenge to prevent OTP bombing Fixing issue with DefaultAccounts that caused a runtime crash Fixing issue with BaseAuthBasicRoute that had potential for a side-channel attack Adding rate limiting to BasicStrategy Removing unused code in BaseAuthMFARoute (210a6d5)
-- Adding background job that creates default accounts (e.g. admin user) (e03f05c)
-- Adding new BaseAccountRoute allowing for easier retrieval and deletion of account data (e9c6663)
-- Adding `hint` property to `Secret` (da36444)
-- Fixing bug that caused contacts to be marked unverified when any changes are made (a0a76fd)
-- Updating code coverage thresholds (8a50cae)
-- Adding additional tests to reach full code coverage (e0ff3e0)
-- Fixed vulnerability that allowed a user to set their own roles Fixed vulnerability allowing anyone to set contacts as verified Fixing bug BaseAuthOTPRoute with filtering aliases Adding rate limiting to registration routes Fixing bug with FIDO2/Passkey secrets Fixing vulnerability with OIDC CSRF (5633b23)
-- Adding verification flow for contacts and aliases Adding auth method discovery route Fixing several bugs (326f3a0)
-- Adding new logout base route Fixing issue with BaseSecretRoute tests as a result of previous changes (f646dd0)
-- Fixing exploit allowing any user to read another's aliases and secrets (412d9d6)
-- Fixing issue with User creation that caused ACL permissions to not be properly created (40f2416)
-- Fixing issue causing profiles to not be listable by their own user Adding lots of tests to validate user permissions on data (alias, profile, secret) (01e4b75)
-- Moving JWT token creation to its own utility class Creating a JWT token can now set a cookie (fc441fb)
-- Fixing issue with passkey public key serialization (052f7f2)
-- Adding endpoint for retrieving password requirements (62b3233)
-- Removing record-level ACL for Profile Adding overrides for BaseProfileRoute to address ACL conflict issues with shared User/Profile ACL (381fdde)
-- Alias, Profile, Secret and User now all use record-level ACLs. This fixes issues with reading/updating after creation. (844d07d)
-- Adding default scopes to JWT token creation (1cf11fd)
-- Adding new registration route for performing account creation with email/phone verification (24afd71)
-- Adding missing create permission for Alias,Profile,Secret (SQL) (95014d6)
-- Adding missing create permission for Alias, Profile, Secret (e3b3ec6)
-- Updating deps Adding badges to readme (111733b)
-- Adding ca-certificates package to CI test job (c2e1e8a)
-- Updating github actions to v6 (f9ca305)
-- Fixing a issues that potentially allowed an attacker to take over someone elses profile or alias (e2655bc)
-- Fixing several more high severity bugs (5bc48ad)
-- Fixing several critical and high severity bugs Adding new password complexity rules Alias/Profile/Secret now enforce strict same-user ownership rules (a57be17)
-- Updating exports and readme (9137450)
-- Adding tests for 100% code coverage (d8ed891)
-- Added support for FIDO2 authentication (3ee1c09)
-- OAuth provider IDs are now stored as their own alias (e9c326f)
-- Improving TOTP registration flow (8c3c424)
-- Adding RFC compliant passkey registration (d4589f3)
-- Refactoring test server into two separate folders, one for mongo and one for sql. Adding new set of SQL test suites (f4b02c5)
-- Multiple fixes for MFAStrategy Adding test suite for AuthMFARoute (51c3deb)
-- Adding test suite for AuthOIDC Fixing multiple issues with OIDCStrategy (cb8d996)
-- Adding PasskeyStrategy route test suite (01ca5e6)
-- Fixing issues with OTPStrategy Adding test suite for OTPStrategy (0d13145)
-- Fixing passkey strategy tests (01acfca)
-- Fixing multiple issues with TOTPStrategy (c79eff5)
-- Initial commit (ab1a7df)
+## [1.1.1] - 2026-08-27
+
+### Fixed
+- Fixed bad import of `jsonwebtoken` in `OIDCStrategy`
+
+## [1.1.0] - 2026-08-27
+
+### Fixed
+- Fixed `BaseAuthOIDCRoute` hardcoding its registered strategy name to the literal `oauth`, which made it impossible to wire up more than one OIDC/OAuth provider in the same application
+
+### Added
+- Added an overridable `strategyName` field to `BaseAuthOIDCRoute` so subclasses can register additional OIDC/OAuth providers under their own name
+
+## [1.0.0] - 2026-08-22
+
+### Added
+- Initial release
+- `BasicStrategy` - Simple id and password authentication
+- `FIDO2Strategy` - FIDO2/WebAuthn hardware based authentication (e.g. YubiKey)
+- `MFAStrategy` - Simple id and password + 2FA authentication [fido2|otp|recovery-code|totp]
+- `OIDCStrategy` - OAuth 2.0 & OpenID Connect authentication
+- `OTPStrategy` - One-Time Password (OTP) authentication (e.g. email, sms)
+- `PasskeyStrategy` - WebAuthn based passkey authentication
+- `TOTPStrategy` - RFC 6238 Time-Based One Time Password authentication (e.g. Google Authenticator, etc.)
+
+[Unreleased]: https://github.com/rapidrest/auth/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/rapidrest/auth/compare/v1.2.0...v1.3.0
+[1.2.0]: https://github.com/rapidrest/auth/compare/v1.1.1...v1.2.0
+[1.1.1]: https://github.com/rapidrest/auth/compare/v1.1.0...v1.1.1
+[1.1.0]: https://github.com/rapidrest/auth/compare/v1.0.0...v1.1.0
+[1.0.0]: https://github.com/rapidrest/auth/commit/ab1a7df478c9c75a5af490ffee031fd33db97afc
