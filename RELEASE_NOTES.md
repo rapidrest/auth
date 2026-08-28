@@ -1,5 +1,11 @@
 # Release Notes
 
+## v1.2.0
+
+* BaseAuthOIDCRoute now instantiates OIDCStrategy using the strategy name instead of `default`. This fixes a bug when
+  supporting multiple OIDC providers.
+* Added new `/authorize` endpoint to `BaseAuthOIDCRoute` for building and returning the OAuth authorization URL.
+
 ## v1.1.1
 
 * Fixed bad import of `jsonwebtoken` in `OIDCStrategy`

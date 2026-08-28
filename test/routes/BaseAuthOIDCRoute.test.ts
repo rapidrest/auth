@@ -4,6 +4,7 @@
 ///////////////////////////////////////////////////////////////////////////////
 // Isolated unit tests for BaseAuthOIDCRoute — no HTTP server, no database.
 import { RepoUtils, RouteDecorators } from "@rapidrest/service-core";
+import { ObjectFactory } from "@rapidrest/core";
 import { OIDCProfile, OIDCProvider, OIDCStrategy, OIDCStrategyOptions } from "../../src/auth/OIDCStrategy.js";
 import { BaseAuthOIDCRoute } from "../../src/routes/BaseAuthOIDCRoute.js";
 import { UserUtils } from "../../src/routes/UserUtils.js";
@@ -167,6 +168,53 @@ describe("BaseAuthOIDCRoute Tests", () => {
             expect(strategies.has("oidc_google")).toBe(true);
             expect(strategies.has("oidc_apple")).toBe(true);
             expect(strategies.get("oidc_google")).not.toBe(strategies.get("oidc_apple"));
+        });
+
+        it("Creates genuinely distinct OIDCStrategy instances per provider through a real (non-mocked) ObjectFactory shared across routes.", async () => {
+            // Regression test: `makeMockObjectFactory()` above always constructs a fresh OIDCStrategy
+            // on every `newInstance(OIDCStrategy, ...)` call, which is NOT how the real
+            // `ObjectFactory.newInstance()` behaves — it previously special-cased the literal name
+            // `"default"` (see the fix in `BaseAuthOIDCRoute.initialize()`) as "give me *the* singleton
+            // instance of this class," silently handing every subsequent provider route the very first
+            // provider's `OIDCStrategy` instance instead of constructing its own. That collapsed every
+            // provider but the first-initialized one onto the same strategy object/config, and — since
+            // `authMiddleware.register(strategy.name, strategy)` uses the (wrong, shared) instance's own
+            // `.name` — only ever registered the first provider's name, leaving every other provider's
+            // `@Auth([...])` lookup failing at request time with "No authentication strategy has been
+            // registered." A mocked `objectFactory.newInstance` can't reproduce that, so this test uses
+            // a real one, shared across two route instances, exactly as `Server`'s `ClassLoader` would.
+            const objectFactory = new ObjectFactory();
+            const strategies = new Map<string, unknown>();
+            const authMiddleware = { register: (name: string, strategy: unknown) => strategies.set(name, strategy) };
+
+            const googleRoute = new GoogleAuthOIDCRoute();
+            (googleRoute as any).authMiddleware = authMiddleware;
+            (googleRoute as any)._objectFactory = objectFactory;
+            // Pre-set so initialize() skips RepoUtils/UserUtils construction (which needs a real
+            // datastore) and exercises only the OIDCStrategy instantiation path under test.
+            (googleRoute as any).aliasRepo = {};
+            (googleRoute as any).profileRepo = {};
+            (googleRoute as any).userRepo = {};
+            (googleRoute as any).userUtils = {};
+            await (googleRoute as any).initialize();
+
+            const appleRoute = new AppleAuthOIDCRoute();
+            (appleRoute as any).authMiddleware = authMiddleware;
+            (appleRoute as any)._objectFactory = objectFactory;
+            (appleRoute as any).aliasRepo = {};
+            (appleRoute as any).profileRepo = {};
+            (appleRoute as any).userRepo = {};
+            (appleRoute as any).userUtils = {};
+            await (appleRoute as any).initialize();
+
+            expect(strategies.size).toBe(2);
+            const googleStrategy = strategies.get("oidc_google");
+            const appleStrategy = strategies.get("oidc_apple");
+            expect(googleStrategy).toBeInstanceOf(OIDCStrategy);
+            expect(appleStrategy).toBeInstanceOf(OIDCStrategy);
+            expect(googleStrategy).not.toBe(appleStrategy);
+            expect((googleStrategy as OIDCStrategy).name).toBe("oidc_google");
+            expect((appleStrategy as OIDCStrategy).name).toBe("oidc_apple");
         });
 
         it("A subclass overriding login() with a matching @Auth([...]) shadows the base class's metadata without mutating it.", () => {
@@ -597,6 +645,60 @@ describe("BaseAuthOIDCRoute Tests", () => {
             );
             // Only the oauth alias should have been created — no phone alias since unverified.
             expect(aliasRepo.create).toHaveBeenCalledTimes(1);
+        });
+    });
+
+    describe("authorize", () => {
+        it("Returns the URL built by the already-registered strategy for this route's strategyName.", async () => {
+            const route = new TestAuthOIDCRoute();
+            const strategy = new OIDCStrategy(new OIDCStrategyOptions("oauth", providerConfig));
+            (route as any).authMiddleware = { strategies: new Map([["oauth", strategy]]) };
+            const req = { session: {}, query: {} } as any;
+
+            const result = await route.authorize(req);
+
+            expect(result.url).toContain(providerConfig.authorizationURL);
+            expect(result.url).toContain(`client_id=${providerConfig.clientID}`);
+        });
+
+        it("Looks up the strategy by this route's own strategyName, not a fixed name — the multi-provider case.", async () => {
+            const route = new GoogleAuthOIDCRoute();
+            const googleConfig: OIDCProvider = { ...providerConfig, name: "oidc_google" };
+            const strategy = new OIDCStrategy(new OIDCStrategyOptions("oidc_google", googleConfig));
+            const otherStrategy = new OIDCStrategy(new OIDCStrategyOptions("oidc_apple", providerConfig));
+            (route as any).authMiddleware = {
+                strategies: new Map<string, OIDCStrategy>([
+                    ["oidc_google", strategy],
+                    ["oidc_apple", otherStrategy],
+                ]),
+            };
+            const req = { session: {}, query: {} } as any;
+
+            const result = await route.authorize(req);
+
+            // Would fail if authorize() ever looked up a hardcoded "oauth"/first-registered strategy
+            // instead of `this.strategyName` — exactly the bug class the ObjectFactory-naming fix
+            // above addresses for `initialize()`'s own strategy construction.
+            expect(result.url).toContain(providerConfig.authorizationURL);
+        });
+
+        it("Throws when no strategy has been registered under this route's strategyName.", async () => {
+            const route = new TestAuthOIDCRoute();
+            (route as any).authMiddleware = { strategies: new Map() };
+            const req = { session: {}, query: {} } as any;
+
+            await expect(route.authorize(req)).rejects.toThrow(
+                /No authentication strategy has been registered with name: oauth/,
+            );
+        });
+
+        it("Propagates the session-support error thrown by the strategy's own URL builder.", async () => {
+            const route = new TestAuthOIDCRoute();
+            const strategy = new OIDCStrategy(new OIDCStrategyOptions("oauth", providerConfig));
+            (route as any).authMiddleware = { strategies: new Map([["oauth", strategy]]) };
+            const req = { query: {} } as any; // no `session` — OIDCStrategy.buildAuthorizationURI requires it
+
+            await expect(route.authorize(req)).rejects.toThrow(/requires session support/);
         });
     });
 

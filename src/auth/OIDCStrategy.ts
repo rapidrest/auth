@@ -205,12 +205,19 @@ export class OIDCStrategy implements AuthStrategy {
     }
 
     /**
-     * Creates and returns the Authorization Request URI for the configured OIDC provider.
+     * Creates and returns the Authorization Request URI for the configured OIDC provider. Public
+     * (not just used internally by `authenticate()`'s own redirect) so a route can hand this URL
+     * back to a caller as plain data — e.g. `BaseAuthOIDCRoute.authorize()` returns it as JSON
+     * instead of the browser being redirected automatically, letting a JS-driven frontend treat a
+     * failure to build it (missing session support, misconfiguration) as a normal API error it can
+     * render, rather than the browser silently landing on a raw error response after an automatic
+     * redirect. Building the URL still requires (and mutates) `req.session` exactly as before —
+     * that part of the contract is unchanged, only the caller decides what to do with the result.
      *
      * @param req The source HTTP request.
      * @param redirectURI The source URI to redirect the user to once authentication is complete.
      */
-    protected buildAuthorizationURI(req: HttpRequest, redirectURI?: string): string {
+    public buildAuthorizationURI(req: HttpRequest, redirectURI?: string): string {
         if (!req.session) {
             throw new ApiError(
                 ApiErrors.INTERNAL_ERROR,
@@ -375,7 +382,11 @@ export class OIDCStrategy implements AuthStrategy {
     }
 
     public authenticateSync(req: HttpRequest, res: HttpResponse, required?: boolean): AuthResult | undefined {
-        throw new ApiError(ApiErrors.INTERNAL_ERROR, 500, "Not supported. This auth strategy must be used asynchronously.");
+        throw new ApiError(
+            ApiErrors.INTERNAL_ERROR,
+            500,
+            "Not supported. This auth strategy must be used asynchronously.",
+        );
     }
 
     /**
