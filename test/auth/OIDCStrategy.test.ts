@@ -138,6 +138,36 @@ describe("OIDCStrategy Tests", () => {
             expect(res.end).toHaveBeenCalled();
         });
 
+        it("Returns the authorization URL as JSON when no_redirect=true instead of redirecting.", async () => {
+            const options = new OIDCStrategyOptions("test", makeProvider());
+            const strategy = new OIDCStrategy(options);
+            const req = makeReq({ session: {}, query: { no_redirect: "true" } });
+            const res = makeRes();
+
+            const result = await strategy.authenticate(req, res);
+
+            expect(result).toBeUndefined();
+            expect(res.status).toHaveBeenCalledWith(200);
+            expect(res.json).toHaveBeenCalledWith({
+                url: expect.stringContaining("https://provider.example.com/authorize"),
+            });
+            expect(res.setHeader).not.toHaveBeenCalledWith("Location", expect.anything());
+            expect(res.end).not.toHaveBeenCalled();
+        });
+
+        it("Falls back to a redirect when no_redirect is present but not the string 'true'.", async () => {
+            const options = new OIDCStrategyOptions("test", makeProvider());
+            const strategy = new OIDCStrategy(options);
+            const req = makeReq({ session: {}, query: { no_redirect: "false" } });
+            const res = makeRes();
+
+            await strategy.authenticate(req, res);
+
+            expect(res.status).toHaveBeenCalledWith(302);
+            expect(res.setHeader).toHaveBeenCalledWith("Location", expect.stringContaining("https://provider.example.com/authorize"));
+            expect(res.json).not.toHaveBeenCalled();
+        });
+
         it("Throws if req.session is missing.", async () => {
             const options = new OIDCStrategyOptions("test", makeProvider());
             const strategy = new OIDCStrategy(options);

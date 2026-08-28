@@ -150,7 +150,8 @@ const PKCE_VERIFIER_PATTERN = /^[A-Za-z0-9\-._~]{43,128}$/;
  * The authorization flow has the following steps:
  *
  * 1. Client initiates a request for an Authorization Request URI. Builds the Authorization Request URI and returns it
- * to the client.
+ * to the client in a `302 REDIRECT` response. Clients can pass in `no_redirect=true` to receive a JSON response with the
+ * URL instead.
  * 2. The client should automatically redirect the user to the Authorization Request URI obtained in step 1.
  * 3. Once the user has approved the authorization request with the third-party provider the client will be
  * redirected to the application's registered callback URL with a single query parameter containing an
@@ -373,10 +374,15 @@ export class OIDCStrategy implements AuthStrategy {
             };
         } else {
             const url: string = this.buildAuthorizationURI(req);
-            res.status(302);
-            res.setHeader("Location", url);
-            res.setHeader("Content-Length", 0);
-            res.end();
+            if (req.query?.no_redirect === "true") {
+                res.status(200);
+                res.json({ url: url });
+            } else {
+                res.status(302);
+                res.setHeader("Location", url);
+                res.setHeader("Content-Length", 0);
+                res.end();
+            }
             return undefined;
         }
     }
