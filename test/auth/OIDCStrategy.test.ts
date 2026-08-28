@@ -12,8 +12,10 @@ vi.mock("axios", () => ({
     },
 }));
 vi.mock("jsonwebtoken", () => ({
-    decode: vi.fn(),
-    verify: vi.fn(),
+    default: {
+        decode: vi.fn(),
+        verify: vi.fn(),
+    },
 }));
 vi.mock("jwks-rsa", () => ({
     default: vi.fn(),
@@ -21,7 +23,7 @@ vi.mock("jwks-rsa", () => ({
 
 import type { HttpRequest, HttpResponse } from "@rapidrest/service-core";
 import axios from "axios";
-import * as jwt from "jsonwebtoken";
+import jwt from "jsonwebtoken";
 import jwksClientFactory from "jwks-rsa";
 import { OIDCProvider, OIDCStrategy, OIDCStrategyOptions } from "../../src/auth/OIDCStrategy.js";
 

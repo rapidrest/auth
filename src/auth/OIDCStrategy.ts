@@ -4,7 +4,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 import axios, { AxiosResponse } from "axios";
 import * as crypto from "crypto";
-import * as jwt from "jsonwebtoken";
+import jwt from "jsonwebtoken";
 import { ApiError, type JWTUser } from "@rapidrest/core";
 import { ApiErrors, AuthStrategy, HttpRequest, HttpResponse, AuthResult } from "@rapidrest/service-core";
 

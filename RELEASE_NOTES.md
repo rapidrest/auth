@@ -1,5 +1,9 @@
 # Release Notes
 
+## v1.1.1
+
+* Fixed bad import of `jsonwebtoken` in `OIDCStrategy`
+
 ## v1.1.0
 
 * Fixed `BaseAuthOIDCRoute` hardcoding its registered strategy name to the literal `"oauth"` (both
