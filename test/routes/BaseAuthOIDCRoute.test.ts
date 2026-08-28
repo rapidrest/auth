@@ -648,60 +648,6 @@ describe("BaseAuthOIDCRoute Tests", () => {
         });
     });
 
-    describe("authorize", () => {
-        it("Returns the URL built by the already-registered strategy for this route's strategyName.", async () => {
-            const route = new TestAuthOIDCRoute();
-            const strategy = new OIDCStrategy(new OIDCStrategyOptions("oauth", providerConfig));
-            (route as any).authMiddleware = { strategies: new Map([["oauth", strategy]]) };
-            const req = { session: {}, query: {} } as any;
-
-            const result = await route.authorize(req);
-
-            expect(result.url).toContain(providerConfig.authorizationURL);
-            expect(result.url).toContain(`client_id=${providerConfig.clientID}`);
-        });
-
-        it("Looks up the strategy by this route's own strategyName, not a fixed name — the multi-provider case.", async () => {
-            const route = new GoogleAuthOIDCRoute();
-            const googleConfig: OIDCProvider = { ...providerConfig, name: "oidc_google" };
-            const strategy = new OIDCStrategy(new OIDCStrategyOptions("oidc_google", googleConfig));
-            const otherStrategy = new OIDCStrategy(new OIDCStrategyOptions("oidc_apple", providerConfig));
-            (route as any).authMiddleware = {
-                strategies: new Map<string, OIDCStrategy>([
-                    ["oidc_google", strategy],
-                    ["oidc_apple", otherStrategy],
-                ]),
-            };
-            const req = { session: {}, query: {} } as any;
-
-            const result = await route.authorize(req);
-
-            // Would fail if authorize() ever looked up a hardcoded "oauth"/first-registered strategy
-            // instead of `this.strategyName` — exactly the bug class the ObjectFactory-naming fix
-            // above addresses for `initialize()`'s own strategy construction.
-            expect(result.url).toContain(providerConfig.authorizationURL);
-        });
-
-        it("Throws when no strategy has been registered under this route's strategyName.", async () => {
-            const route = new TestAuthOIDCRoute();
-            (route as any).authMiddleware = { strategies: new Map() };
-            const req = { session: {}, query: {} } as any;
-
-            await expect(route.authorize(req)).rejects.toThrow(
-                /No authentication strategy has been registered with name: oauth/,
-            );
-        });
-
-        it("Propagates the session-support error thrown by the strategy's own URL builder.", async () => {
-            const route = new TestAuthOIDCRoute();
-            const strategy = new OIDCStrategy(new OIDCStrategyOptions("oauth", providerConfig));
-            (route as any).authMiddleware = { strategies: new Map([["oauth", strategy]]) };
-            const req = { query: {} } as any; // no `session` — OIDCStrategy.buildAuthorizationURI requires it
-
-            await expect(route.authorize(req)).rejects.toThrow(/requires session support/);
-        });
-    });
-
     describe("login", () => {
         it("Returns an AuthResult containing a signed access token and refresh token for the authenticated user.", async () => {
             const route = new TestAuthOIDCRoute();

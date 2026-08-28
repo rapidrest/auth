@@ -24,12 +24,6 @@ const { Summary, Description, Returns } = DocDecorators;
 const { Auth, Get, Post, Request, Response } = RouteDecorators;
 const AuthUser = RouteDecorators.User;
 
-/** Response shape for `BaseAuthOIDCRoute.authorize()`. */
-export interface OIDCAuthorizeResult {
-    /** The URL the browser should navigate to in order to begin this provider's OIDC/OAuth flow. */
-    url: string;
-}
-
 /**
  * IMPORTANT!! A subclass using a non-default `strategyName` (see its own doc comment — required for a
  * multi-provider setup) MUST override this method with a matching `@Auth([...])`, delegating
@@ -300,23 +294,11 @@ export abstract class BaseAuthOIDCRoute<U extends User, A extends Alias, P exten
     }
 
     /**
-     * Returns the URL the browser should navigate to in order to begin this provider's OIDC/OAuth
-     * flow.
-     */
-    @Summary("Get OIDC authorization URL")
-    @Description("Returns the URL the browser should navigate to in order to begin this provider's OIDC/OAuth flow.")
-    @Returns([Object])
-    @Get("/authorize")
-    public async authorize(@Request req: HttpRequest): Promise<OIDCAuthorizeResult> {
-        const strategy = this.authMiddleware?.strategies.get(this.strategyName);
-        if (!strategy || !(strategy instanceof OIDCStrategy)) {
-            throw new Error(`No authentication strategy has been registered with name: ${this.strategyName}`);
-        }
-        return { url: strategy.buildAuthorizationURI(req) };
-    }
-
-    /**
      * Authenticates the user using OIDC and returns a JSON Web Token access token to be used with future API requests.
+     * A request with no `code` redirects the browser to the provider's authorization page by default;
+     * pass `?no_redirect=true` to receive `{ url }` as JSON instead (see `OIDCStrategy.authenticate()`)
+     * — lets a JS-driven frontend fetch the URL itself and treat a failure to build it as a normal API
+     * error it can render, rather than the browser landing on a raw response after an automatic redirect.
      */
     @Summary("Login OIDC")
     @Description(
