@@ -8,6 +8,7 @@ export * from "./BaseAuthMFARouteMongo.js";
 export * from "./BaseAuthOIDCRouteMongo.js";
 export * from "./BaseAuthOTPRouteMongo.js";
 export * from "./BaseOAuthAuthorizeRouteMongo.js";
+export * from "./BaseOAuthClientRouteMongo.js";
 export * from "./BaseOAuthIntrospectRouteMongo.js";
 export * from "./BaseOAuthJwksRouteMongo.js";
 export * from "./BaseOAuthRevokeRouteMongo.js";

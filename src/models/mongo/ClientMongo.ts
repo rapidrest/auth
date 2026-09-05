@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Jean-Philippe Steinmetz. All rights reserved.
 // SPDX-License-Identifier: MPL-2.0
 ///////////////////////////////////////////////////////////////////////////////
-import { BaseMongoEntity, DocDecorators, ModelDecorators, PersistenceDecorators } from "@rapidrest/service-core";
+import { ACLAction, BaseMongoEntity, DocDecorators, ModelDecorators, PersistenceDecorators } from "@rapidrest/service-core";
 import { ObjectDecorators } from "@rapidrest/core";
 import { Client, ClientType, TokenEndpointAuthMethod } from "../types.js";
 
@@ -30,7 +30,7 @@ const { Column, Entity, Index } = PersistenceDecorators;
             },
             {
                 userOrRoleId: ".*",
-                actions: [],
+                actions: [ACLAction.CREATE],
             },
         ],
     },
