@@ -1,5 +1,11 @@
 # Release Notes
 
+## Unreleased
+
+### New Features
+
+* OAuth 2.0 + OpenID Connect Authorization Server
+
 ## v1.3.0
 
 * `OIDCStrategy` now supports passing in a `no_redirect=true` query flag to return the authorization URL as a JSON
