@@ -352,6 +352,27 @@ export const hashOpaqueToken = function (raw: string): string {
     return crypto.createHash("sha256").update(raw, "utf8").digest("hex");
 };
 
+/**
+ * Extracts the raw token from an `Authorization: Bearer <token>` header (RFC 6750 §2.1), or `undefined` if
+ * the header is absent or uses a different scheme. Unlike `getBasicData()`, the value is returned as-is —
+ * a bearer token is opaque to this function, not base64-encoded `id:password` credentials.
+ *
+ * @param req The request to extract the bearer token from.
+ */
+export const getBearerToken = function (req: HttpRequest): string | undefined {
+    const value: string | string[] | undefined = req.headers["authorization"];
+    const headers: string[] = Array.isArray(value) ? value : typeof value === "string" ? [value] : [];
+
+    for (const header of headers) {
+        const parts = header.split(" ");
+        if (parts.length === 2 && /^bearer$/i.test(parts[0])) {
+            return parts[1];
+        }
+    }
+
+    return undefined;
+};
+
 ///////////////////////////////////////////////////////////////////////////////
 // PASSWORD
 ///////////////////////////////////////////////////////////////////////////////

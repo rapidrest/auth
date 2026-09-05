@@ -32,6 +32,7 @@ import {
     generateTOTP,
     generateTOTPURI,
     getBasicData,
+    getBearerToken,
     getRequestData,
     isOTPResponse,
     isPasskeyRegistrationResponse,
@@ -133,6 +134,47 @@ describe("getBasicData", () => {
     it("Supports a custom headerKey/headerScheme.", () => {
         const req = makeReq({ headers: { "x-auth": `custom ${Buffer.from("user1:pass1").toString("base64")}` } });
         expect(getBasicData(req, "x-auth", "custom")).toEqual({ id: "user1", password: "pass1" });
+    });
+});
+
+describe("getBearerToken", () => {
+    it("Returns undefined when the authorization header is not present.", () => {
+        const req = makeReq({ headers: {} });
+        expect(getBearerToken(req)).toBeUndefined();
+    });
+
+    it("Returns undefined when the authorization header is present but its value is nullish.", () => {
+        const req = makeReq({ headers: { authorization: undefined } });
+        expect(getBearerToken(req)).toBeUndefined();
+    });
+
+    it("Extracts the raw token from a single matching header.", () => {
+        const req = makeReq({ headers: { authorization: "Bearer abc123.def456.ghi789" } });
+        expect(getBearerToken(req)).toBe("abc123.def456.ghi789");
+    });
+
+    it("Is case-insensitive on the scheme name.", () => {
+        const req = makeReq({ headers: { authorization: "bearer abc123" } });
+        expect(getBearerToken(req)).toBe("abc123");
+    });
+
+    it("Finds the matching header among an array of header values.", () => {
+        const req = makeReq({
+            headers: {
+                authorization: [`basic ${Buffer.from("user1:pass1").toString("base64")}`, "Bearer abc123"],
+            },
+        });
+        expect(getBearerToken(req)).toBe("abc123");
+    });
+
+    it("Skips a malformed header value (not exactly scheme + token).", () => {
+        const req = makeReq({ headers: { authorization: "malformed-no-space-here" } });
+        expect(getBearerToken(req)).toBeUndefined();
+    });
+
+    it("Skips a header whose scheme is not bearer.", () => {
+        const req = makeReq({ headers: { authorization: `basic ${Buffer.from("user1:pass1").toString("base64")}` } });
+        expect(getBearerToken(req)).toBeUndefined();
     });
 });
 
