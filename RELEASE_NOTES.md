@@ -1,10 +1,22 @@
 # Release Notes
 
-## v2.0.0-beta.1
+## Unreleased
+
+`2.0.0` is still in pre-release (`2.0.0-beta.x`). Everything toward it is condensed into this single
+listing rather than split per beta tag — it will be finalized as `2.0.0` once officially tagged.
 
 ### New Features
 
-* OAuth 2.0 + OpenID Connect Authorization Server
+* OAuth 2.0 + OpenID Connect Authorization Server. This library can now act as an authorization
+  server/OIDC provider, not just a relying party:
+  * Authorization Code + PKCE flow, with consent
+  * Refresh token grant, with rotation and reuse/theft detection
+  * `client_credentials` grant for machine-to-machine access
+  * Token revocation (`/revoke`) and introspection (`/introspect`)
+  * OIDC discovery metadata, `/userinfo`, and JWKS
+  * `BaseOAuthClientRoute` — owner/admin CRUD for registering and managing OAuth `Client`s, including
+    one-time secret reveal and secret regeneration. A non-admin caller can register and fully manage
+    their own client; an admin can manage any client.
 
 ## v1.3.0
 
