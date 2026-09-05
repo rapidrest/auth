@@ -5,7 +5,7 @@
 import "reflect-metadata";
 import { ApiError, JWTUser, ObjectDecorators } from "@rapidrest/core";
 import { DocDecorators, HttpRequest, HttpResponse, ObjectFactory, RepoUtils, RouteDecorators } from "@rapidrest/service-core";
-import { AuthorizationCode, Client, SigningKey } from "../models/types.js";
+import { AuthorizationCode, Client, OAuthRefreshToken, SigningKey } from "../models/types.js";
 import { ClientAuthUtils } from "../auth/ClientAuthUtils.js";
 import { OAuthTokenUtils } from "../auth/OAuthTokenUtils.js";
 import { SigningKeyUtils } from "../auth/SigningKeyUtils.js";
@@ -35,13 +35,13 @@ export class OAuthError extends Error {
 }
 
 /**
- * Handles the OAuth 2.0 `/token` endpoint (RFC 6749 §3.2), dispatching by `grant_type`. Only the
- * `authorization_code` grant is implemented so far — `refresh_token` and `client_credentials` are added in
- * later phases, which extend this same class's `token()` dispatch.
+ * Handles the OAuth 2.0 `/token` endpoint (RFC 6749 §3.2), dispatching by `grant_type`. `authorization_code`
+ * and `refresh_token` are implemented — `client_credentials` is added in a later phase, which extends this
+ * same class's `token()` dispatch.
  *
  * @author Jean-Philippe Steinmetz
  */
-export abstract class BaseOAuthTokenRoute<C extends Client, A extends AuthorizationCode> {
+export abstract class BaseOAuthTokenRoute<C extends Client, A extends AuthorizationCode, R extends OAuthRefreshToken> {
     protected abstract authorizationCodeClass: any;
 
     protected authorizationCodeRepo?: RepoUtils<A>;
@@ -56,6 +56,10 @@ export abstract class BaseOAuthTokenRoute<C extends Client, A extends Authorizat
 
     @Inject(RateLimiter)
     protected rateLimiter?: RateLimiter;
+
+    protected abstract refreshTokenClass: any;
+
+    protected refreshTokenRepo?: RepoUtils<R>;
 
     protected abstract signingKeyClass: any;
 
@@ -82,6 +86,13 @@ export abstract class BaseOAuthTokenRoute<C extends Client, A extends Authorizat
             this.authorizationCodeRepo = await this._objectFactory.newInstance(RepoUtils, {
                 name: this.authorizationCodeClass.name,
                 args: [this.authorizationCodeClass],
+            });
+        }
+
+        if (!this.refreshTokenRepo && this.refreshTokenClass) {
+            this.refreshTokenRepo = await this._objectFactory.newInstance(RepoUtils, {
+                name: this.refreshTokenClass.name,
+                args: [this.refreshTokenClass],
             });
         }
 
@@ -118,6 +129,46 @@ export abstract class BaseOAuthTokenRoute<C extends Client, A extends Authorizat
             return new OAuthError(error, err.message, err.status);
         }
         return new OAuthError("server_error", undefined, 500);
+    }
+
+    /**
+     * Builds the token response shared by every grant that issues on behalf of a resource owner: an access
+     * token, an `id_token` when `openid` was granted, and — when `client.grantTypes` includes
+     * `refresh_token` — a freshly persisted refresh token. `familyId` is omitted for a brand new grant (the
+     * `authorization_code` exchange) and carried forward from the presented token when rotating.
+     */
+    private async issueTokenResponse(client: Client, user: JWTUser, scope: string[], nonce: string | undefined, familyId?: string): Promise<any> {
+        const access = await this.oauthTokenUtils!.createAccessToken(client, user, scope);
+
+        const result: any = {
+            access_token: access.token,
+            token_type: "Bearer",
+            expires_in: access.expiresIn,
+            scope: scope.join(" "),
+        };
+
+        if (scope.includes("openid")) {
+            result.id_token = await this.oauthTokenUtils!.createIdToken(client, user, nonce);
+        }
+
+        if (client.grantTypes.includes("refresh_token")) {
+            const refresh = this.oauthTokenUtils!.createRefreshToken(familyId);
+            await this.refreshTokenRepo!.create(
+                {
+                    tokenHash: hashOpaqueToken(refresh.token),
+                    clientId: client.clientId,
+                    userUid: user.uid,
+                    scope: scope.join(" "),
+                    familyId: refresh.familyId,
+                    expiresAt: new Date(Date.now() + refresh.expiresIn * 1000),
+                    revoked: false,
+                } as Partial<R>,
+                { ignoreACL: true },
+            );
+            result.refresh_token = refresh.token;
+        }
+
+        return result;
     }
 
     /**
@@ -177,20 +228,92 @@ export abstract class BaseOAuthTokenRoute<C extends Client, A extends Authorizat
         const scope: string[] = authCode.scope ? authCode.scope.split(" ").filter(Boolean) : [];
         const user: JWTUser = { uid: authCode.userUid, roles: [], scopes: scope };
 
-        const access = await this.oauthTokenUtils!.createAccessToken(client, user, scope);
+        return this.issueTokenResponse(client, user, scope, authCode.nonce);
+    }
 
-        const result: any = {
-            access_token: access.token,
-            token_type: "Bearer",
-            expires_in: access.expiresIn,
-            scope: scope.join(" "),
-        };
+    /**
+     * Handles `grant_type=refresh_token`: redeems a refresh token for a new access token (and `id_token`, if
+     * `openid` was granted), rotating it into a new refresh token in the same `familyId`. Presenting a token
+     * that has already been rotated/revoked (`revoked === true`) is treated as token theft (RFC 9700
+     * §4.14.2) — the entire `familyId` is revoked, forcing the resource owner to re-authenticate from
+     * scratch, rather than only rejecting the one reused token.
+     */
+    private async handleOAuthRefreshTokenGrant(req: HttpRequest, payload: any): Promise<any> {
+        const client: Client = await this.clientAuthUtils!.authenticateClient(req);
 
-        if (scope.includes("openid")) {
-            result.id_token = await this.oauthTokenUtils!.createIdToken(client, user, authCode.nonce);
+        const rawToken: string | undefined = payload?.refresh_token;
+        if (!rawToken) {
+            throw new OAuthError("invalid_request", "refresh_token is required.");
+        }
+
+        const refreshToken: R | undefined = await this.refreshTokenRepo!.findOne(hashOpaqueToken(rawToken), {
+            ignoreACL: true,
+        });
+
+        if (!refreshToken || refreshToken.clientId !== client.clientId) {
+            throw new OAuthError("invalid_grant", "The refresh token is invalid.");
+        }
+
+        if (refreshToken.revoked) {
+            await this.revokeTokenFamily(refreshToken.familyId);
+            throw new OAuthError("invalid_grant", "This refresh token has already been used.");
+        }
+
+        if (refreshToken.expiresAt.getTime() < Date.now()) {
+            throw new OAuthError("invalid_grant", "This refresh token has expired.");
+        }
+
+        const requestedScope: string[] | undefined = payload?.scope
+            ? String(payload.scope).split(" ").filter(Boolean)
+            : undefined;
+        const grantedScope: string[] = refreshToken.scope ? refreshToken.scope.split(" ").filter(Boolean) : [];
+        // RFC 6749 §6: a rotation may narrow scope, never widen it.
+        const scope: string[] = requestedScope ? requestedScope.filter((s) => grantedScope.includes(s)) : grantedScope;
+        if (requestedScope && scope.length !== requestedScope.length) {
+            throw new OAuthError("invalid_scope", "Requested scope exceeds the scope originally granted.");
+        }
+
+        const user: JWTUser = { uid: refreshToken.userUid!, roles: [], scopes: scope };
+        const result = await this.issueTokenResponse(client, user, scope, undefined, refreshToken.familyId);
+
+        try {
+            await this.refreshTokenRepo!.update(
+                {
+                    uid: refreshToken.uid,
+                    version: refreshToken.version,
+                    revoked: true,
+                    revokedAt: new Date(),
+                    ...(result.refresh_token ? { replacedByHash: hashOpaqueToken(result.refresh_token) } : {}),
+                } as Partial<R>,
+                refreshToken,
+                { ignoreACL: true },
+            );
+        } catch (err) {
+            // Lost the optimistic-locking race against a concurrent redemption of the same refresh token —
+            // the new token was already issued above, so revoke the whole family rather than leave two
+            // live refresh tokens outstanding for what should be a single-use credential.
+            await this.revokeTokenFamily(refreshToken.familyId);
+            throw new OAuthError("invalid_grant", "This refresh token has already been used.");
         }
 
         return result;
+    }
+
+    /** Revokes every non-revoked `OAuthRefreshToken` sharing `familyId` — the RFC 9700 §4.14.2 response to a
+     * detected replay of an already-rotated-out token. */
+    private async revokeTokenFamily(familyId: string): Promise<void> {
+        const tokens: R[] = await this.refreshTokenRepo!.find({ familyId }, { ignoreACL: true, skipCache: true });
+        const now = new Date();
+        for (const token of tokens) {
+            if (token.revoked) {
+                continue;
+            }
+            await this.refreshTokenRepo!.update(
+                { uid: token.uid, version: token.version, revoked: true, revokedAt: now } as Partial<R>,
+                token,
+                { ignoreACL: true },
+            );
+        }
     }
 
     /**
@@ -200,7 +323,7 @@ export abstract class BaseOAuthTokenRoute<C extends Client, A extends Authorizat
      * usual `ApiError` envelope.
      */
     @Summary("OAuth 2.0 token endpoint")
-    @Description("Exchanges an authorization grant (currently: authorization_code) for an access token.")
+    @Description("Exchanges an authorization grant (authorization_code, refresh_token) for an access token.")
     @Returns([Object])
     @Post()
     public async token(@Request req: HttpRequest, @Response res: HttpResponse): Promise<any> {
@@ -216,6 +339,9 @@ export abstract class BaseOAuthTokenRoute<C extends Client, A extends Authorizat
             switch (payload?.grant_type) {
                 case "authorization_code":
                     result = await this.handleAuthorizationCodeGrant(req, payload);
+                    break;
+                case "refresh_token":
+                    result = await this.handleOAuthRefreshTokenGrant(req, payload);
                     break;
                 default:
                     throw new OAuthError("unsupported_grant_type", `Unsupported grant_type: "${payload?.grant_type}".`);

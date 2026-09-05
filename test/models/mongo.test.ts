@@ -7,6 +7,7 @@ import { AliasMongo } from "../../src/models/mongo/AliasMongo.js";
 import { AuthorizationCodeMongo } from "../../src/models/mongo/AuthorizationCodeMongo.js";
 import { ClientMongo } from "../../src/models/mongo/ClientMongo.js";
 import { ConsentGrantMongo } from "../../src/models/mongo/ConsentGrantMongo.js";
+import { OAuthRefreshTokenMongo } from "../../src/models/mongo/OAuthRefreshTokenMongo.js";
 import { ProfileMongo } from "../../src/models/mongo/ProfileMongo.js";
 import { SecretMongo } from "../../src/models/mongo/SecretMongo.js";
 import { SigningKeyMongo } from "../../src/models/mongo/SigningKeyMongo.js";
@@ -58,6 +59,27 @@ describe("Mongo model default construction", () => {
         expect(obj.userUid).toBe("user-1");
         expect(obj.clientId).toBe("client-1");
         expect(obj.scope).toBe("openid profile");
+    });
+
+    it("OAuthRefreshTokenMongo falls back to class defaults when constructed with no data.", () => {
+        const obj = new OAuthRefreshTokenMongo();
+
+        expect(obj.tokenHash).toBe("");
+        expect(obj.clientId).toBe("");
+        expect(obj.userUid).toBeUndefined();
+        expect(obj.scope).toBe("");
+        expect(obj.familyId).toBe("");
+        expect(obj.revoked).toBe(false);
+        expect(obj.revokedAt).toBeUndefined();
+        expect(obj.replacedByHash).toBeUndefined();
+    });
+
+    it("OAuthRefreshTokenMongo applies provided data when constructed with data.", () => {
+        const obj = new OAuthRefreshTokenMongo({ tokenHash: "hash-1", clientId: "client-1", revoked: true });
+
+        expect(obj.tokenHash).toBe("hash-1");
+        expect(obj.clientId).toBe("client-1");
+        expect(obj.revoked).toBe(true);
     });
 
     it("ClientMongo falls back to class defaults when constructed with no data.", () => {

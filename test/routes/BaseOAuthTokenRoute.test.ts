@@ -9,7 +9,7 @@ import { BaseOAuthTokenRoute, OAuthError } from "../../src/routes/BaseOAuthToken
 import { ClientAuthUtils } from "../../src/auth/ClientAuthUtils.js";
 import { OAuthTokenUtils } from "../../src/auth/OAuthTokenUtils.js";
 import { SigningKeyUtils } from "../../src/auth/SigningKeyUtils.js";
-import { AuthorizationCode, Client, ClientType, TokenEndpointAuthMethod } from "../../src/models/types.js";
+import { AuthorizationCode, Client, ClientType, OAuthRefreshToken, TokenEndpointAuthMethod } from "../../src/models/types.js";
 import { hashOpaqueToken } from "../../src/auth/shared.js";
 
 class FakeClientClass {
@@ -18,13 +18,17 @@ class FakeClientClass {
 class FakeAuthorizationCodeClass {
     static readonly name = "FakeAuthorizationCode";
 }
+class FakeOAuthRefreshTokenClass {
+    static readonly name = "FakeOAuthRefreshToken";
+}
 class FakeSigningKeyClass {
     static readonly name = "FakeSigningKey";
 }
 
-class TestOAuthTokenRoute extends BaseOAuthTokenRoute<any, any> {
+class TestOAuthTokenRoute extends BaseOAuthTokenRoute<any, any, any> {
     protected authorizationCodeClass: any = FakeAuthorizationCodeClass;
     protected clientClass: any = FakeClientClass;
+    protected refreshTokenClass: any = FakeOAuthRefreshTokenClass;
     protected signingKeyClass: any = FakeSigningKeyClass;
 }
 
@@ -63,6 +67,8 @@ const client: Client = {
     firstParty: false,
 };
 
+const refreshClient: Client = { ...client, grantTypes: ["authorization_code", "refresh_token"] };
+
 function makeAuthCode(overrides: Partial<AuthorizationCode> = {}): AuthorizationCode {
     return {
         uid: "code-record-1",
@@ -80,9 +86,27 @@ function makeAuthCode(overrides: Partial<AuthorizationCode> = {}): Authorization
     };
 }
 
+function makeOAuthRefreshToken(overrides: Partial<OAuthRefreshToken> = {}): OAuthRefreshToken {
+    return {
+        uid: "refresh-record-1",
+        dateCreated: new Date(),
+        dateModified: new Date(),
+        version: 0,
+        tokenHash: "",
+        clientId: refreshClient.clientId,
+        userUid: "user-1",
+        scope: "profile",
+        familyId: "family-1",
+        expiresAt: new Date(Date.now() + 60_000),
+        revoked: false,
+        ...overrides,
+    };
+}
+
 function makeRoute() {
     const clientRepo = makeMockRepo<Client>("clientId");
     const authorizationCodeRepo = makeMockRepo<AuthorizationCode>("codeHash");
+    const refreshTokenRepo = makeMockRepo<OAuthRefreshToken>("tokenHash");
 
     const route = new TestOAuthTokenRoute();
     (route as any)._objectFactory = {
@@ -90,20 +114,28 @@ function makeRoute() {
             if (type === RepoUtils) {
                 if (opts.name === FakeClientClass.name) return clientRepo;
                 if (opts.name === FakeAuthorizationCodeClass.name) return authorizationCodeRepo;
+                if (opts.name === FakeOAuthRefreshTokenClass.name) return refreshTokenRepo;
             }
             return undefined;
         }),
     };
     (route as any).clientRepo = clientRepo;
     (route as any).authorizationCodeRepo = authorizationCodeRepo;
+    (route as any).refreshTokenRepo = refreshTokenRepo;
     (route as any).clientAuthUtils = { authenticateClient: vi.fn(async () => client) };
+    let refreshCounter = 0;
     (route as any).oauthTokenUtils = {
         createAccessToken: vi.fn(async () => ({ token: "access-token-1", jti: "jti-1", expiresIn: 900 })),
         createIdToken: vi.fn(async () => "id-token-1"),
+        createRefreshToken: vi.fn((familyId?: string) => ({
+            token: `new-refresh-token-${++refreshCounter}`,
+            familyId: familyId ?? "new-family-1",
+            expiresIn: 2_592_000,
+        })),
     };
     (route as any).rateLimiter = { checkAndIncrement: vi.fn() };
 
-    return { route, clientRepo, authorizationCodeRepo };
+    return { route, clientRepo, authorizationCodeRepo, refreshTokenRepo };
 }
 
 function makeRequest(overrides: any = {}) {
@@ -133,9 +165,10 @@ describe("BaseOAuthTokenRoute Tests", () => {
             await expect((route as any).initialize()).rejects.toThrow(/objectFactory is not set/);
         });
 
-        it("Builds clientRepo, authorizationCodeRepo, clientAuthUtils, and oauthTokenUtils via the object factory.", async () => {
+        it("Builds clientRepo, authorizationCodeRepo, refreshTokenRepo, clientAuthUtils, and oauthTokenUtils via the object factory.", async () => {
             const clientRepo = makeMockRepo<Client>("clientId");
             const authorizationCodeRepo = makeMockRepo<AuthorizationCode>("codeHash");
+            const refreshTokenRepo = makeMockRepo<OAuthRefreshToken>("tokenHash");
             const signingKeyRepo = makeMockRepo<any>("kid");
             const clientAuthUtils = {};
             const signingKeyUtils = {};
@@ -147,6 +180,7 @@ describe("BaseOAuthTokenRoute Tests", () => {
                     if (type === RepoUtils) {
                         if (opts.name === FakeClientClass.name) return clientRepo;
                         if (opts.name === FakeAuthorizationCodeClass.name) return authorizationCodeRepo;
+                        if (opts.name === FakeOAuthRefreshTokenClass.name) return refreshTokenRepo;
                         if (opts.name === FakeSigningKeyClass.name) return signingKeyRepo;
                     }
                     if (type === ClientAuthUtils) return clientAuthUtils;
@@ -160,6 +194,7 @@ describe("BaseOAuthTokenRoute Tests", () => {
 
             expect((route as any).clientRepo).toBe(clientRepo);
             expect((route as any).authorizationCodeRepo).toBe(authorizationCodeRepo);
+            expect((route as any).refreshTokenRepo).toBe(refreshTokenRepo);
             expect((route as any).clientAuthUtils).toBe(clientAuthUtils);
             expect((route as any).oauthTokenUtils).toBe(oauthTokenUtils);
         });
@@ -478,6 +513,215 @@ describe("BaseOAuthTokenRoute Tests", () => {
                     { uid: "user-1", roles: [], scopes: ["openid", "profile"] },
                     "nonce-1",
                 );
+            });
+
+            it("Does not issue a refresh_token when the client's grantTypes does not include refresh_token.", async () => {
+                const { route, authorizationCodeRepo } = makeRoute();
+                const raw = "raw-code-1";
+                authorizationCodeRepo._store.set(hashOpaqueToken(raw), makeAuthCode());
+                const res = makeResponse();
+
+                await route.token(
+                    makeRequest({ body: { grant_type: "authorization_code", code: raw, redirect_uri: "https://app.example.com/callback" } }),
+                    res,
+                );
+
+                const body = res.json.mock.calls[0][0];
+                expect(body.refresh_token).toBeUndefined();
+                expect((route as any).refreshTokenRepo.create).not.toHaveBeenCalled();
+            });
+
+            it("Issues and persists a refresh_token when the client's grantTypes includes refresh_token.", async () => {
+                const { route, authorizationCodeRepo, refreshTokenRepo } = makeRoute();
+                (route as any).clientAuthUtils = { authenticateClient: vi.fn(async () => refreshClient) };
+                const raw = "raw-code-1";
+                authorizationCodeRepo._store.set(hashOpaqueToken(raw), makeAuthCode({ scope: "profile" }));
+                const res = makeResponse();
+
+                await route.token(
+                    makeRequest({ body: { grant_type: "authorization_code", code: raw, redirect_uri: "https://app.example.com/callback" } }),
+                    res,
+                );
+
+                const body = res.json.mock.calls[0][0];
+                expect(body.refresh_token).toBe("new-refresh-token-1");
+                expect(refreshTokenRepo.create).toHaveBeenCalledWith(
+                    expect.objectContaining({
+                        tokenHash: hashOpaqueToken("new-refresh-token-1"),
+                        clientId: refreshClient.clientId,
+                        userUid: "user-1",
+                        scope: "profile",
+                        familyId: "new-family-1",
+                        revoked: false,
+                    }),
+                    { ignoreACL: true },
+                );
+            });
+        });
+
+        describe("refresh_token grant", () => {
+            it("Fails with invalid_request when refresh_token is missing.", async () => {
+                const { route } = makeRoute();
+                (route as any).clientAuthUtils = { authenticateClient: vi.fn(async () => refreshClient) };
+                const res = makeResponse();
+                await route.token(makeRequest({ body: { grant_type: "refresh_token" } }), res);
+                expect(res.status).toHaveBeenCalledWith(400);
+                expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ error: "invalid_request" }));
+            });
+
+            it("Fails with invalid_grant when the token does not exist.", async () => {
+                const { route } = makeRoute();
+                (route as any).clientAuthUtils = { authenticateClient: vi.fn(async () => refreshClient) };
+                const res = makeResponse();
+                await route.token(makeRequest({ body: { grant_type: "refresh_token", refresh_token: "does-not-exist" } }), res);
+                expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ error: "invalid_grant" }));
+            });
+
+            it("Fails with invalid_grant when the token belongs to a different client.", async () => {
+                const { route, refreshTokenRepo } = makeRoute();
+                (route as any).clientAuthUtils = { authenticateClient: vi.fn(async () => refreshClient) };
+                const raw = "raw-refresh-1";
+                refreshTokenRepo._store.set(hashOpaqueToken(raw), makeOAuthRefreshToken({ clientId: "someone-else" }));
+                const res = makeResponse();
+                await route.token(makeRequest({ body: { grant_type: "refresh_token", refresh_token: raw } }), res);
+                expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ error: "invalid_grant" }));
+            });
+
+            it("Fails with invalid_grant when the token has expired.", async () => {
+                const { route, refreshTokenRepo } = makeRoute();
+                (route as any).clientAuthUtils = { authenticateClient: vi.fn(async () => refreshClient) };
+                const raw = "raw-refresh-1";
+                refreshTokenRepo._store.set(hashOpaqueToken(raw), makeOAuthRefreshToken({ expiresAt: new Date(Date.now() - 1000) }));
+                const res = makeResponse();
+                await route.token(makeRequest({ body: { grant_type: "refresh_token", refresh_token: raw } }), res);
+                expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ error: "invalid_grant" }));
+            });
+
+            it("Fails with invalid_scope when the requested scope exceeds what was originally granted.", async () => {
+                const { route, refreshTokenRepo } = makeRoute();
+                (route as any).clientAuthUtils = { authenticateClient: vi.fn(async () => refreshClient) };
+                const raw = "raw-refresh-1";
+                refreshTokenRepo._store.set(hashOpaqueToken(raw), makeOAuthRefreshToken({ scope: "profile" }));
+                const res = makeResponse();
+                await route.token(
+                    makeRequest({ body: { grant_type: "refresh_token", refresh_token: raw, scope: "profile openid" } }),
+                    res,
+                );
+                expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ error: "invalid_scope" }));
+            });
+
+            it("Narrows scope when a smaller scope is requested.", async () => {
+                const { route, refreshTokenRepo } = makeRoute();
+                (route as any).clientAuthUtils = { authenticateClient: vi.fn(async () => refreshClient) };
+                const raw = "raw-refresh-1";
+                refreshTokenRepo._store.set(hashOpaqueToken(raw), makeOAuthRefreshToken({ scope: "openid profile" }));
+                const res = makeResponse();
+                await route.token(makeRequest({ body: { grant_type: "refresh_token", refresh_token: raw, scope: "profile" } }), res);
+                const body = res.json.mock.calls[0][0];
+                expect(body.scope).toBe("profile");
+                expect(body.id_token).toBeUndefined();
+            });
+
+            it("Grants an empty scope when the token carries no scope at all.", async () => {
+                const { route, refreshTokenRepo } = makeRoute();
+                (route as any).clientAuthUtils = { authenticateClient: vi.fn(async () => refreshClient) };
+                const raw = "raw-refresh-1";
+                refreshTokenRepo._store.set(hashOpaqueToken(raw), makeOAuthRefreshToken({ scope: "" }));
+                const res = makeResponse();
+                await route.token(makeRequest({ body: { grant_type: "refresh_token", refresh_token: raw } }), res);
+                const body = res.json.mock.calls[0][0];
+                expect(body.scope).toBe("");
+            });
+
+            it("Does not set replacedByHash when the client no longer issues refresh tokens.", async () => {
+                const { route, refreshTokenRepo } = makeRoute();
+                (route as any).clientAuthUtils = { authenticateClient: vi.fn(async () => client) };
+                const raw = "raw-refresh-1";
+                const stored = makeOAuthRefreshToken({ clientId: client.clientId });
+                refreshTokenRepo._store.set(hashOpaqueToken(raw), stored);
+                const res = makeResponse();
+
+                await route.token(makeRequest({ body: { grant_type: "refresh_token", refresh_token: raw } }), res);
+
+                const body = res.json.mock.calls[0][0];
+                expect(body.refresh_token).toBeUndefined();
+                expect(refreshTokenRepo.update).toHaveBeenCalledWith(
+                    expect.not.objectContaining({ replacedByHash: expect.anything() }),
+                    stored,
+                    { ignoreACL: true },
+                );
+            });
+
+            it("Rotates the token: revokes the old one, persists a new one in the same family, and returns both tokens.", async () => {
+                const { route, refreshTokenRepo } = makeRoute();
+                (route as any).clientAuthUtils = { authenticateClient: vi.fn(async () => refreshClient) };
+                const raw = "raw-refresh-1";
+                const stored = makeOAuthRefreshToken({ scope: "openid profile", familyId: "family-1" });
+                refreshTokenRepo._store.set(hashOpaqueToken(raw), stored);
+                const res = makeResponse();
+
+                await route.token(makeRequest({ body: { grant_type: "refresh_token", refresh_token: raw } }), res);
+
+                expect(res.status).toHaveBeenCalledWith(200);
+                const body = res.json.mock.calls[0][0];
+                expect(body.access_token).toBe("access-token-1");
+                expect(body.id_token).toBe("id-token-1");
+                expect(body.refresh_token).toBe("new-refresh-token-1");
+
+                expect((route as any).oauthTokenUtils.createRefreshToken).toHaveBeenCalledWith("family-1");
+                expect(refreshTokenRepo.create).toHaveBeenCalledWith(
+                    expect.objectContaining({ tokenHash: hashOpaqueToken("new-refresh-token-1"), familyId: "family-1" }),
+                    { ignoreACL: true },
+                );
+                expect(refreshTokenRepo.update).toHaveBeenCalledWith(
+                    expect.objectContaining({
+                        uid: stored.uid,
+                        version: stored.version,
+                        revoked: true,
+                        replacedByHash: hashOpaqueToken("new-refresh-token-1"),
+                    }),
+                    stored,
+                    { ignoreACL: true },
+                );
+            });
+
+            it("Treats a replayed (already-revoked) token as theft and revokes the entire family.", async () => {
+                const { route, refreshTokenRepo } = makeRoute();
+                (route as any).clientAuthUtils = { authenticateClient: vi.fn(async () => refreshClient) };
+                const raw = "raw-refresh-1";
+                const revoked = makeOAuthRefreshToken({ familyId: "family-1", revoked: true });
+                const sibling = makeOAuthRefreshToken({ uid: "refresh-record-2", tokenHash: "sibling-hash", familyId: "family-1", revoked: false });
+                refreshTokenRepo._store.set(hashOpaqueToken(raw), revoked);
+                refreshTokenRepo.find.mockResolvedValueOnce([revoked, sibling]);
+                const res = makeResponse();
+
+                await route.token(makeRequest({ body: { grant_type: "refresh_token", refresh_token: raw } }), res);
+
+                expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ error: "invalid_grant" }));
+                expect(refreshTokenRepo.find).toHaveBeenCalledWith({ familyId: "family-1" }, { ignoreACL: true, skipCache: true });
+                // Only the still-live sibling needs revoking - the already-revoked token is skipped.
+                expect(refreshTokenRepo.update).toHaveBeenCalledTimes(1);
+                expect(refreshTokenRepo.update).toHaveBeenCalledWith(
+                    expect.objectContaining({ uid: "refresh-record-2", revoked: true }),
+                    sibling,
+                    { ignoreACL: true },
+                );
+            });
+
+            it("Revokes the whole family when the rotation update() loses the optimistic-locking race.", async () => {
+                const { route, refreshTokenRepo } = makeRoute();
+                (route as any).clientAuthUtils = { authenticateClient: vi.fn(async () => refreshClient) };
+                const raw = "raw-refresh-1";
+                const stored = makeOAuthRefreshToken({ familyId: "family-1" });
+                refreshTokenRepo._store.set(hashOpaqueToken(raw), stored);
+                refreshTokenRepo.update.mockRejectedValueOnce(new Error("version conflict"));
+                refreshTokenRepo.find.mockResolvedValueOnce([stored]);
+                const res = makeResponse();
+
+                await route.token(makeRequest({ body: { grant_type: "refresh_token", refresh_token: raw } }), res);
+
+                expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ error: "invalid_grant" }));
+                expect(refreshTokenRepo.find).toHaveBeenCalledWith({ familyId: "family-1" }, { ignoreACL: true, skipCache: true });
             });
         });
     });

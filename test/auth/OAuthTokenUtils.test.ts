@@ -159,4 +159,34 @@ describe("OAuthTokenUtils Tests", () => {
             expect(decoded.exp - decoded.iat).toBe(120);
         });
     });
+
+    describe("createRefreshToken", () => {
+        it("Generates a random, URL-safe opaque token and starts a new familyId when none is given.", () => {
+            const utils = makeOAuthTokenUtils();
+
+            const a = utils.createRefreshToken();
+            const b = utils.createRefreshToken();
+
+            expect(a.token).not.toBe(b.token);
+            expect(a.familyId).not.toBe(b.familyId);
+            expect(a.token).toMatch(/^[A-Za-z0-9\-_]+$/);
+            expect(a.expiresIn).toBe(60 * 60 * 24 * 30);
+        });
+
+        it("Carries forward an explicitly provided familyId (rotation).", () => {
+            const utils = makeOAuthTokenUtils();
+
+            const { familyId } = utils.createRefreshToken("family-1");
+
+            expect(familyId).toBe("family-1");
+        });
+
+        it("Honors a configured refreshTokenTTL.", () => {
+            const utils = makeOAuthTokenUtils({ refreshTokenTTL: "7d" });
+
+            const { expiresIn } = utils.createRefreshToken();
+
+            expect(expiresIn).toBe(60 * 60 * 24 * 7);
+        });
+    });
 });

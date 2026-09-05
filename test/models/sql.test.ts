@@ -7,6 +7,7 @@ import { AliasSQL } from "../../src/models/sql/AliasSQL.js";
 import { AuthorizationCodeSQL } from "../../src/models/sql/AuthorizationCodeSQL.js";
 import { ClientSQL } from "../../src/models/sql/ClientSQL.js";
 import { ConsentGrantSQL } from "../../src/models/sql/ConsentGrantSQL.js";
+import { OAuthRefreshTokenSQL } from "../../src/models/sql/OAuthRefreshTokenSQL.js";
 import { ProfileSQL } from "../../src/models/sql/ProfileSQL.js";
 import { SecretSQL } from "../../src/models/sql/SecretSQL.js";
 import { SigningKeySQL } from "../../src/models/sql/SigningKeySQL.js";
@@ -58,6 +59,27 @@ describe("SQL model default construction", () => {
         expect(obj.userUid).toBe("user-1");
         expect(obj.clientId).toBe("client-1");
         expect(obj.scope).toBe("openid profile");
+    });
+
+    it("OAuthRefreshTokenSQL falls back to class defaults when constructed with no data.", () => {
+        const obj = new OAuthRefreshTokenSQL();
+
+        expect(obj.tokenHash).toBe("");
+        expect(obj.clientId).toBe("");
+        expect(obj.userUid).toBeUndefined();
+        expect(obj.scope).toBe("");
+        expect(obj.familyId).toBe("");
+        expect(obj.revoked).toBe(false);
+        expect(obj.revokedAt).toBeUndefined();
+        expect(obj.replacedByHash).toBeUndefined();
+    });
+
+    it("OAuthRefreshTokenSQL applies provided data when constructed with data.", () => {
+        const obj = new OAuthRefreshTokenSQL({ tokenHash: "hash-1", clientId: "client-1", revoked: true });
+
+        expect(obj.tokenHash).toBe("hash-1");
+        expect(obj.clientId).toBe("client-1");
+        expect(obj.revoked).toBe(true);
     });
 
     it("ClientSQL falls back to class defaults when constructed with no data.", () => {

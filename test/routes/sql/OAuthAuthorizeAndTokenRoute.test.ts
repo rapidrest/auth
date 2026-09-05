@@ -25,6 +25,7 @@ import { SecretSQL } from "../../../src/models/sql/SecretSQL.js";
 import { ClientSQL } from "../../../src/models/sql/ClientSQL.js";
 import { AuthorizationCodeSQL } from "../../../src/models/sql/AuthorizationCodeSQL.js";
 import { ConsentGrantSQL } from "../../../src/models/sql/ConsentGrantSQL.js";
+import { OAuthRefreshTokenSQL } from "../../../src/models/sql/OAuthRefreshTokenSQL.js";
 import { SigningKeySQL } from "../../../src/models/sql/SigningKeySQL.js";
 import { ClientType, SecretType, TokenEndpointAuthMethod } from "../../../src/models/types.js";
 
@@ -45,6 +46,7 @@ describe("Route:OAuthAuthorizeAndTokenSQL Tests", () => {
     let clientRepo: Repository<ClientSQL>;
     let authorizationCodeRepo: Repository<AuthorizationCodeSQL>;
     let consentGrantRepo: Repository<ConsentGrantSQL>;
+    let refreshTokenRepo: Repository<OAuthRefreshTokenSQL>;
     let signingKeyRepo: Repository<SigningKeySQL>;
 
     const withOwnerACL = async function (uid: string, parentUid: string, ownerId: string): Promise<void> {
@@ -96,6 +98,7 @@ describe("Route:OAuthAuthorizeAndTokenSQL Tests", () => {
             clientRepo = conn.getRepository(ClientSQL);
             authorizationCodeRepo = conn.getRepository(AuthorizationCodeSQL);
             consentGrantRepo = conn.getRepository(ConsentGrantSQL);
+            refreshTokenRepo = conn.getRepository(OAuthRefreshTokenSQL);
             signingKeyRepo = conn.getRepository(SigningKeySQL);
         } else {
             throw new Error("Could not find sql connection");
@@ -114,6 +117,7 @@ describe("Route:OAuthAuthorizeAndTokenSQL Tests", () => {
         await clientRepo.clear();
         await authorizationCodeRepo.clear();
         await consentGrantRepo.clear();
+        await refreshTokenRepo.clear();
         await signingKeyRepo.clear();
     });
 
@@ -229,6 +233,86 @@ describe("Route:OAuthAuthorizeAndTokenSQL Tests", () => {
         });
         expect(replay.status).toBe(400);
         expect(replay.body.error).toBe("invalid_grant");
+    });
+
+    it("Issues a refresh_token, rotates it on use, and detects/punishes reuse of an already-rotated token.", async () => {
+        const user = await createUserSQL();
+        await createSecretSQL({ userUid: user.uid });
+        const client = await clientRepo.save(
+            new ClientSQL({
+                clientId: "mobile-app-2",
+                clientType: ClientType.PUBLIC,
+                clientName: "Mobile App",
+                redirectUris: ["app://callback"],
+                grantTypes: ["authorization_code", "refresh_token"],
+                responseTypes: ["code"],
+                scope: "openid profile",
+                tokenEndpointAuthMethod: TokenEndpointAuthMethod.NONE,
+                requirePkce: true,
+                firstParty: true,
+            }),
+        );
+
+        const testAgent = await loginAgent(user);
+        const { verifier, challenge } = buildPkce();
+
+        const authResult = await testAgent.get(
+            withQuery("/sql/oauth/authorize", {
+                response_type: "code",
+                client_id: client.clientId,
+                redirect_uri: "app://callback",
+                scope: "openid profile",
+                code_challenge: challenge,
+                code_challenge_method: "S256",
+            }),
+        );
+        const redirectUrl = new URL(authResult.body.redirectTo);
+        const code = redirectUrl.searchParams.get("code");
+
+        const tokenResult = await request(server.getApplication()).post("/sql/oauth/token").send({
+            grant_type: "authorization_code",
+            code,
+            redirect_uri: "app://callback",
+            code_verifier: verifier,
+            client_id: client.clientId,
+        });
+        expect(tokenResult.status).toBe(200);
+        const firstRefreshToken = tokenResult.body.refresh_token;
+        expect(firstRefreshToken).toBeTruthy();
+
+        // Redeeming the refresh token rotates it: a new access/id/refresh token comes back.
+        const refreshResult = await request(server.getApplication()).post("/sql/oauth/token").send({
+            grant_type: "refresh_token",
+            refresh_token: firstRefreshToken,
+            client_id: client.clientId,
+        });
+        expect(refreshResult.status).toBe(200);
+        expect(refreshResult.headers["cache-control"]).toBe("no-store");
+        expect(refreshResult.body.id_token).toBeDefined();
+        const secondRefreshToken = refreshResult.body.refresh_token;
+        expect(secondRefreshToken).toBeTruthy();
+        expect(secondRefreshToken).not.toBe(firstRefreshToken);
+
+        const claims = await verifyAccessToken(refreshResult.body.access_token);
+        expect(claims.sub).toBe(user.uid);
+
+        // The rotated-out first refresh token can't be redeemed a second time.
+        const reuseResult = await request(server.getApplication()).post("/sql/oauth/token").send({
+            grant_type: "refresh_token",
+            refresh_token: firstRefreshToken,
+            client_id: client.clientId,
+        });
+        expect(reuseResult.status).toBe(400);
+        expect(reuseResult.body.error).toBe("invalid_grant");
+
+        // Reuse of a rotated-out token revokes the whole family — the token it rotated into is now dead too.
+        const secondRefreshAfterTheft = await request(server.getApplication()).post("/sql/oauth/token").send({
+            grant_type: "refresh_token",
+            refresh_token: secondRefreshToken,
+            client_id: client.clientId,
+        });
+        expect(secondRefreshAfterTheft.status).toBe(400);
+        expect(secondRefreshAfterTheft.body.error).toBe("invalid_grant");
     });
 
     it("Requires consent for a non-first-party confidential client, then skips it on a later request.", async () => {

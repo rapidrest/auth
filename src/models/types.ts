@@ -366,6 +366,49 @@ export interface ConsentGrant extends BaseEntity {
 }
 
 /**
+ * Defines a single OAuth 2.0 refresh token (RFC 6749 §1.5), issued alongside an access token whenever the
+ * client's `grantTypes` includes `refresh_token`, and redeemed by `BaseOAuthTokenRoute`'s `refresh_token`
+ * grant to obtain a new access token without the resource owner re-authenticating.
+ *
+ * @author Jean-Philippe Steinmetz
+ */
+export interface OAuthRefreshToken extends BaseEntity {
+    /** The SHA-256 hex digest of the opaque token. The raw token itself is never persisted. */
+    tokenHash: string;
+
+    /** The `clientId` of the `Client` this token was issued to. */
+    clientId: string;
+
+    /** The `uid` of the `User` (resource owner) this token acts on behalf of. Absent for a token issued via
+     * the `client_credentials` grant, which has no resource owner. */
+    userUid?: string;
+
+    /** The space-delimited set of scopes this token (and any it rotates into) is authorized for. */
+    scope: string;
+
+    /**
+     * Groups every token produced by rotating a single original refresh token into one lineage. A brand new
+     * grant starts a fresh `familyId`; each rotation carries the same `familyId` forward. Presenting a token
+     * whose `revoked` is already `true` — a replayed, already-rotated-out token — revokes every token sharing
+     * its `familyId`, per RFC 9700 §4.14.2.
+     */
+    familyId: string;
+
+    /** When this token expires. */
+    expiresAt: Date;
+
+    /** Set to `true` once this token has either been rotated (see `replacedByHash`) or explicitly revoked. */
+    revoked: boolean;
+
+    /** When this token was revoked, if it has been. */
+    revokedAt?: Date;
+
+    /** The `tokenHash` of the token that replaced this one via rotation, for audit — distinguishes a
+     * routine rotation from an explicit revocation. */
+    replacedByHash?: string;
+}
+
+/**
  * Defines a single user's account within the system.
  *
  * @author Jean-Philippe Steinmetz

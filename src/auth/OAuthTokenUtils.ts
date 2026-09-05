@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: MPL-2.0
 ///////////////////////////////////////////////////////////////////////////////
 import { JWTUser, JWTUtils, JWTUtilsConfig, ObjectDecorators } from "@rapidrest/core";
+import * as crypto from "crypto";
 import parseDuration from "parse-duration";
 import * as uuid from "uuid";
 import { Client } from "../models/types.js";
@@ -20,6 +21,8 @@ export interface OAuthServerConfig {
     accessTokenTTL?: string;
     /** How long an issued `id_token` is valid for. Default `"15m"`. */
     idTokenTTL?: string;
+    /** How long an issued refresh token is valid for. Default `"30d"`. */
+    refreshTokenTTL?: string;
 }
 
 /**
@@ -120,5 +123,21 @@ export class OAuthTokenUtils {
             auth_time: Math.floor(Date.now() / 1000),
             ...(nonce ? { nonce } : {}),
         });
+    }
+
+    /**
+     * Generates a new opaque refresh token. Unlike access/ID tokens, a refresh token is not a JWT — it's a
+     * cryptographically random value, returned to the caller exactly once, so its `tokenHash` (the only
+     * form ever persisted, via `hashOpaqueToken()`) can never be reversed back into a usable credential from
+     * a database read alone.
+     *
+     * @param familyId The rotation lineage this token belongs to. Omit to start a new lineage (the initial
+     * grant from the `authorization_code` exchange); pass the previous token's `familyId` when rotating.
+     */
+    public createRefreshToken(familyId: string = uuid.v4()): { token: string; familyId: string; expiresIn: number } {
+        const expiresIn: number = parseDuration(this.config.refreshTokenTTL, "sec") || 60 * 60 * 24 * 30;
+        const token: string = crypto.randomBytes(32).toString("base64url");
+
+        return { token, familyId, expiresIn };
     }
 }
