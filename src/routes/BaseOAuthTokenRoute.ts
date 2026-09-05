@@ -3,36 +3,21 @@
 // SPDX-License-Identifier: MPL-2.0
 ///////////////////////////////////////////////////////////////////////////////
 import "reflect-metadata";
-import { ApiError, JWTUser, ObjectDecorators } from "@rapidrest/core";
+import { JWTUser, ObjectDecorators } from "@rapidrest/core";
 import { DocDecorators, HttpRequest, HttpResponse, ObjectFactory, RepoUtils, RouteDecorators } from "@rapidrest/service-core";
 import { AuthorizationCode, Client, ClientType, OAuthRefreshToken, SigningKey } from "../models/types.js";
 import { ClientAuthUtils } from "../auth/ClientAuthUtils.js";
+import { OAuthError, toOAuthError } from "../auth/OAuthError.js";
 import { OAuthTokenUtils } from "../auth/OAuthTokenUtils.js";
 import { SigningKeyUtils } from "../auth/SigningKeyUtils.js";
 import { RateLimiter } from "../auth/RateLimiter.js";
 import { getRequestData, hashOpaqueToken, verifyPkce } from "../auth/shared.js";
 
+export { OAuthError } from "../auth/OAuthError.js";
+
 const { Init, Inject } = ObjectDecorators;
 const { Summary, Description, Returns } = DocDecorators;
 const { Post, Request, Response } = RouteDecorators;
-
-/**
- * An OAuth 2.0 token-endpoint error, per RFC 6749 §5.2 — a distinct wire shape (`{error,
- * error_description}`) from this library's usual `ApiError` envelope, since the format here is spec-mandated
- * rather than this library's own convention.
- */
-export class OAuthError extends Error {
-    public readonly error: string;
-    public readonly errorDescription?: string;
-    public readonly status: number;
-
-    constructor(error: string, errorDescription?: string, status: number = 400) {
-        super(errorDescription ?? error);
-        this.error = error;
-        this.errorDescription = errorDescription;
-        this.status = status;
-    }
-}
 
 /**
  * Handles the OAuth 2.0 `/token` endpoint (RFC 6749 §3.2), dispatching by `grant_type`.
@@ -116,18 +101,6 @@ export abstract class BaseOAuthTokenRoute<C extends Client, A extends Authorizat
                 args: [signingKeyUtils],
             });
         }
-    }
-
-    /** Maps any error thrown while handling a grant into the RFC 6749 §5.2 error shape. */
-    private toOAuthError(err: unknown): OAuthError {
-        if (err instanceof OAuthError) {
-            return err;
-        }
-        if (err instanceof ApiError) {
-            const error = err.status === 401 ? "invalid_client" : err.status >= 500 ? "server_error" : "invalid_request";
-            return new OAuthError(error, err.message, err.status);
-        }
-        return new OAuthError("server_error", undefined, 500);
     }
 
     /**
@@ -390,7 +363,7 @@ export abstract class BaseOAuthTokenRoute<C extends Client, A extends Authorizat
             res.json(result);
             return undefined;
         } catch (err) {
-            const oauthError = this.toOAuthError(err);
+            const oauthError = toOAuthError(err);
             res.status(oauthError.status);
             res.json({
                 error: oauthError.error,

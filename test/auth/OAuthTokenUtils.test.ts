@@ -189,4 +189,81 @@ describe("OAuthTokenUtils Tests", () => {
             expect(expiresIn).toBe(60 * 60 * 24 * 7);
         });
     });
+
+    describe("verifyAccessToken", () => {
+        it("Round-trips: verifies a token this instance issued and returns its full claim set.", async () => {
+            const utils = makeOAuthTokenUtils({ issuer: "https://auth.example.com" });
+            const { token, jti } = await utils.createAccessToken(client, user, ["openid", "profile"]);
+
+            const claims = await utils.verifyAccessToken(token);
+
+            expect(claims.sub).toBe("user-1");
+            expect(claims.aud).toBe("abc123");
+            expect(claims.client_id).toBe("abc123");
+            expect(claims.scope).toBe("openid profile");
+            expect(claims.jti).toBe(jti);
+            expect(claims.iss).toBe("https://auth.example.com");
+        });
+
+        it("Verifies across a key rotation: a token signed by a since-retired key still verifies.", async () => {
+            const signingKeyUtils = new SigningKeyUtils(makeMockSigningKeyRepo() as any);
+            (signingKeyUtils as any).config = { encryption_key: ENCRYPTION_KEY };
+            const utils = new OAuthTokenUtils(signingKeyUtils);
+            (utils as any).config = {};
+
+            const { token } = await utils.createAccessToken(client, user, ["profile"]);
+            await signingKeyUtils.rotateKey();
+
+            await expect(utils.verifyAccessToken(token)).resolves.toMatchObject({ sub: "user-1" });
+        });
+
+        it("Returns undefined for a malformed (non-JWT) token.", async () => {
+            const utils = makeOAuthTokenUtils();
+            await expect(utils.verifyAccessToken("not-a-jwt-at-all")).resolves.toBeUndefined();
+        });
+
+        it("Returns undefined when the token has no kid header.", async () => {
+            const utils = makeOAuthTokenUtils();
+            const noKidToken = jwt.sign({ sub: "user-1" }, "some-hmac-secret", { algorithm: "HS256" });
+
+            await expect(utils.verifyAccessToken(noKidToken)).resolves.toBeUndefined();
+        });
+
+        it("Returns undefined when the kid does not match any known signing key.", async () => {
+            const utils = makeOAuthTokenUtils();
+            const unknownKidToken = jwt.sign({ sub: "user-1" }, "some-hmac-secret", {
+                algorithm: "HS256",
+                keyid: "does-not-exist",
+            });
+
+            await expect(utils.verifyAccessToken(unknownKidToken)).resolves.toBeUndefined();
+        });
+
+        it("Returns undefined once the token has expired.", async () => {
+            vi.useFakeTimers();
+            try {
+                const utils = makeOAuthTokenUtils({ accessTokenTTL: "1s" });
+                const { token } = await utils.createAccessToken(client, user, ["profile"]);
+
+                vi.advanceTimersByTime(2000);
+
+                await expect(utils.verifyAccessToken(token)).resolves.toBeUndefined();
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
+        it("Returns undefined when the configured issuer does not match the token's iss.", async () => {
+            const signingKeyUtils = new SigningKeyUtils(makeMockSigningKeyRepo() as any);
+            (signingKeyUtils as any).config = { encryption_key: ENCRYPTION_KEY };
+            const issuingUtils = new OAuthTokenUtils(signingKeyUtils);
+            (issuingUtils as any).config = { issuer: "https://auth.example.com" };
+            const verifyingUtils = new OAuthTokenUtils(signingKeyUtils);
+            (verifyingUtils as any).config = { issuer: "https://different-issuer.example.com" };
+
+            const { token } = await issuingUtils.createAccessToken(client, user, ["profile"]);
+
+            await expect(verifyingUtils.verifyAccessToken(token)).resolves.toBeUndefined();
+        });
+    });
 });

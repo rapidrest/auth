@@ -4,6 +4,7 @@
 ///////////////////////////////////////////////////////////////////////////////
 import { JWTUser, JWTUtils, JWTUtilsConfig, ObjectDecorators } from "@rapidrest/core";
 import * as crypto from "crypto";
+import jwt from "jsonwebtoken";
 import parseDuration from "parse-duration";
 import * as uuid from "uuid";
 import { Client } from "../models/types.js";
@@ -139,5 +140,45 @@ export class OAuthTokenUtils {
         const token: string = crypto.randomBytes(32).toString("base64url");
 
         return { token, familyId, expiresIn };
+    }
+
+    /**
+     * Verifies `token` as an access token this authorization server issued and returns its decoded claims,
+     * or `undefined` for anything invalid, expired, or unverifiable — every caller (`BaseOAuthRevokeRoute`,
+     * `BaseOAuthIntrospectRoute`, and `OAuthBearerStrategy`) treats every such failure identically, so there
+     * is nothing for them to distinguish.
+     *
+     * Resolves the signing key named by the token's `kid` header via `SigningKeyUtils.getSigningMaterial()`
+     * — deliberately not restricted to the currently *active* key, so a token signed just before a key
+     * rotation still verifies correctly up until it naturally expires. Verification itself goes through
+     * `JWTUtils.decodeToken()`, the same call whose `assertSafeAlgorithm()` guard protects every other token
+     * this library decodes, pinned to `algorithms: ["RS256"]` so a token can't smuggle in a different
+     * algorithm than this server ever signs with.
+     */
+    public async verifyAccessToken(token: string): Promise<any | undefined> {
+        const decodedHeader: any = jwt.decode(token, { complete: true });
+        const kid: string | undefined = decodedHeader?.header?.kid;
+        if (!kid) {
+            return undefined;
+        }
+
+        let publicKeyPem: string;
+        try {
+            const { privateKeyPem } = await this.signingKeyUtils.getSigningMaterial(kid);
+            publicKeyPem = crypto.createPublicKey(privateKeyPem).export({ type: "spki", format: "pem" });
+        } catch (err) {
+            return undefined;
+        }
+
+        const config: JWTUtilsConfig = {
+            secret: publicKeyPem,
+            options: { algorithms: ["RS256"], ...(this.config.issuer ? { issuer: this.config.issuer } : {}) },
+        };
+
+        try {
+            return await JWTUtils.decodeToken(config, token);
+        } catch (err) {
+            return undefined;
+        }
     }
 }
