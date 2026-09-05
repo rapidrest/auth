@@ -2,10 +2,12 @@
 // Copyright (C) 2026 Jean-Philippe Steinmetz
 // SPDX-License-Identifier: MPL-2.0
 ///////////////////////////////////////////////////////////////////////////////
-import { AliasType, SecretType } from "../../src/models/types.js";
+import { AliasType, ClientType, SecretType, SigningKeyStatus, TokenEndpointAuthMethod } from "../../src/models/types.js";
 import { AliasSQL } from "../../src/models/sql/AliasSQL.js";
+import { ClientSQL } from "../../src/models/sql/ClientSQL.js";
 import { ProfileSQL } from "../../src/models/sql/ProfileSQL.js";
 import { SecretSQL } from "../../src/models/sql/SecretSQL.js";
+import { SigningKeySQL } from "../../src/models/sql/SigningKeySQL.js";
 import { UserSQL } from "../../src/models/sql/UserSQL.js";
 
 describe("SQL model default construction", () => {
@@ -16,6 +18,51 @@ describe("SQL model default construction", () => {
         expect(obj.type).toBe(AliasType.NAME);
         expect(obj.userUid).toBe("");
         expect(obj.verified).toBe(false);
+    });
+
+    it("ClientSQL falls back to class defaults when constructed with no data.", () => {
+        const obj = new ClientSQL();
+
+        expect(obj.clientId).toBe("");
+        expect(obj.clientSecretHash).toBeUndefined();
+        expect(obj.clientType).toBe(ClientType.CONFIDENTIAL);
+        expect(obj.clientName).toBe("");
+        expect(obj.redirectUris).toEqual([]);
+        expect(obj.grantTypes).toEqual([]);
+        expect(obj.responseTypes).toEqual([]);
+        expect(obj.scope).toBe("");
+        expect(obj.tokenEndpointAuthMethod).toBe(TokenEndpointAuthMethod.CLIENT_SECRET_BASIC);
+        expect(obj.requirePkce).toBe(false);
+        expect(obj.firstParty).toBe(false);
+        expect(obj.disabled).toBeUndefined();
+    });
+
+    it("ClientSQL applies provided data when constructed with data.", () => {
+        const obj = new ClientSQL({ clientId: "abc123", clientName: "My App", firstParty: true });
+
+        expect(obj.clientId).toBe("abc123");
+        expect(obj.clientName).toBe("My App");
+        expect(obj.firstParty).toBe(true);
+    });
+
+    it("SigningKeySQL falls back to class defaults when constructed with no data.", () => {
+        const obj = new SigningKeySQL();
+
+        expect(obj.kid).toBe("");
+        expect(obj.alg).toBe("RS256");
+        expect(obj.publicKeyJwk).toEqual({});
+        expect(obj.privateKeyEncrypted).toBe("");
+        expect(obj.status).toBe(SigningKeyStatus.ACTIVE);
+        expect(obj.retiredAt).toBeUndefined();
+    });
+
+    it("SigningKeySQL applies provided data when constructed with data.", () => {
+        const retiredAt = new Date();
+        const obj = new SigningKeySQL({ kid: "key-1", status: SigningKeyStatus.RETIRED, retiredAt });
+
+        expect(obj.kid).toBe("key-1");
+        expect(obj.status).toBe(SigningKeyStatus.RETIRED);
+        expect(obj.retiredAt).toBe(retiredAt);
     });
 
     it("ProfileSQL falls back to class defaults when constructed with no data.", () => {

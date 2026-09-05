@@ -103,6 +103,14 @@ conf.defaults({
             algorithm: "sha1",
             epochTolerance: [5, 0],
         },
+        oauth_server: {
+            issuer: "https://auth.rapidrest.test",
+            keys: {
+                encryption_key: "a1b2c3d4e5f60718a1b2c3d4e5f60718a1b2c3d4e5f60718a1b2c3d4e5f60718",
+                rotationIntervalDays: 30,
+                retirementGraceDays: 7,
+            },
+        },
     },
     oauth_provider: {
         name: "oauth_test",

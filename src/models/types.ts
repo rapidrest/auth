@@ -161,6 +161,146 @@ export interface Secret extends BaseEntity {
 }
 
 /**
+ * The kind of OAuth 2.0 client a `Client` record describes, per RFC 6749 §2.1.
+ */
+export enum ClientType {
+    /** A client capable of maintaining the confidentiality of its credentials (e.g. a server-side app). */
+    CONFIDENTIAL = "confidential",
+    /** A client incapable of maintaining confidentiality (e.g. a native mobile app or SPA) — never issued a secret. */
+    PUBLIC = "public",
+}
+
+/**
+ * The method a `Client` uses to authenticate itself to the token endpoint, per RFC 6749 §2.3 and RFC 7591 §2.
+ */
+export enum TokenEndpointAuthMethod {
+    /** `client_id`/`client_secret` sent via HTTP Basic auth (RFC 6749 §2.3.1). */
+    CLIENT_SECRET_BASIC = "client_secret_basic",
+    /** `client_id`/`client_secret` sent as request body parameters. */
+    CLIENT_SECRET_POST = "client_secret_post",
+    /** A signed JWT assertion (RFC 7523) — not yet supported by `ClientAuthUtils`. */
+    PRIVATE_KEY_JWT = "private_key_jwt",
+    /** No client authentication — required for a `PUBLIC` client relying on PKCE alone. */
+    NONE = "none",
+}
+
+/**
+ * Defines a single OAuth 2.0 / OpenID Connect client application registered with this authorization server.
+ *
+ * @author Jean-Philippe Steinmetz
+ */
+export interface Client extends BaseEntity {
+    /** The opaque public identifier of the client. */
+    clientId: string;
+
+    /** The Argon2id hash of the client's secret. Unset for a `PUBLIC` client. */
+    clientSecretHash?: string;
+
+    /** Whether this client can maintain the confidentiality of its credentials. */
+    clientType: ClientType;
+
+    /** A human-readable name for the client, shown on a consent screen. */
+    clientName: string;
+
+    /** The exact-match allow-list of redirect URIs this client may request tokens be delivered to. */
+    redirectUris: string[];
+
+    /** The OAuth grant types this client is permitted to use (e.g. `authorization_code`, `refresh_token`). */
+    grantTypes: string[];
+
+    /** The OAuth response types this client is permitted to request (e.g. `code`). */
+    responseTypes: string[];
+
+    /** The space-delimited set of scopes this client may request. */
+    scope: string;
+
+    /** How this client authenticates itself to the token endpoint. */
+    tokenEndpointAuthMethod: TokenEndpointAuthMethod;
+
+    /** Whether PKCE is required for this client. Always `true` for a `PUBLIC` client, regardless of what was requested at registration. */
+    requirePkce: boolean;
+
+    /** The URI to fetch this client's JWK set from, for future `private_key_jwt` support. */
+    jwksUri?: string;
+
+    /** This client's JWK set inline, as an alternative to `jwksUri`. */
+    jwks?: any;
+
+    /** Contact addresses for the people/team responsible for this client (RFC 7591 `contacts`). */
+    contacts?: string[];
+
+    /** A URI to the client's logo, shown on a consent screen. */
+    logoUri?: string;
+
+    /** A URI to the client's home page. */
+    clientUri?: string;
+
+    /** A URI to the client's terms of service. */
+    tosUri?: string;
+
+    /** A URI to the client's privacy policy. */
+    policyUri?: string;
+
+    /** An identifier for the client software, shared across every instance of it (RFC 7591 `software_id`). */
+    softwareId?: string;
+
+    /** The version of the client software. */
+    softwareVersion?: string;
+
+    /** The `uid` of the `User` who registered this client, if registered by an authenticated user. */
+    ownerUid?: string;
+
+    /**
+     * Set to `true` to skip the consent screen for this client. Only ever set by a downstream admin path —
+     * never settable via dynamic client registration, which always registers a third-party client.
+     */
+    firstParty: boolean;
+
+    /** The Argon2id hash of this client's RFC 7592 registration access token, used to manage its own registration. */
+    registrationAccessTokenHash?: string;
+
+    /** Set to `true` to reject every authorization/token request for this client. */
+    disabled?: boolean;
+}
+
+/** The lifecycle status of a `SigningKey`. */
+export enum SigningKeyStatus {
+    /** Currently used to sign new tokens. Exactly one key is active at a time. */
+    ACTIVE = "active",
+    /** No longer used to sign new tokens, but still served from the JWKS endpoint so already-issued,
+     * not-yet-expired tokens can still be verified. */
+    RETIRED = "retired",
+}
+
+/**
+ * Defines a single asymmetric key pair used to sign tokens issued by this authorization server.
+ *
+ * @author Jean-Philippe Steinmetz
+ */
+export interface SigningKey extends BaseEntity {
+    /** The key id, embedded in every token's `kid` header so a verifier can select the matching public key. */
+    kid: string;
+
+    /** The signing algorithm this key is used with. */
+    alg: "RS256";
+
+    /** The public half of the key pair, as a JWK — safe to serve directly from `/jwks.json`. */
+    publicKeyJwk: any;
+
+    /** The private half of the key pair, PEM-encoded and encrypted at rest (see `SigningKeyUtils`). */
+    privateKeyEncrypted: string;
+
+    /** Whether this key is currently used to sign new tokens, or only retained to verify old ones. */
+    status: SigningKeyStatus;
+
+    /** The date this key became `ACTIVE`. */
+    activatedAt: Date;
+
+    /** The date this key was retired, if it has been. */
+    retiredAt?: Date;
+}
+
+/**
  * Defines a single user's account within the system.
  *
  * @author Jean-Philippe Steinmetz
