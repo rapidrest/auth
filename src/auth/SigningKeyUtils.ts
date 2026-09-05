@@ -192,9 +192,12 @@ export class SigningKeyUtils {
 
     /**
      * Returns the public JWK set: the active key plus any retired key still within its retirement grace
-     * period. Never includes private key material.
+     * period. Never includes private key material. Ensures an active key exists first (see
+     * `getActiveSigningKey()`), so a fresh deployment's very first call returns a real key instead of an
+     * empty set.
      */
     public async getPublicJwks(): Promise<{ keys: any[] }> {
+        await this.getActiveSigningKey();
         const all = await this.repo.find({}, { ignoreACL: true });
         const graceMs = (this.config.retirementGraceDays ?? 7) * 24 * 60 * 60 * 1000;
         const now = Date.now();
