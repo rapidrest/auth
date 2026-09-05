@@ -410,4 +410,62 @@ describe("Route:OAuthAuthorizeAndTokenSQL Tests", () => {
 
         expect(result.body).toEqual({ loginRequired: true });
     });
+
+    it("Issues a client-scoped access token via client_credentials, with no id_token or refresh_token.", async () => {
+        const clientSecretHash = await argon2.hash("service-secret-value");
+        const client = await clientRepo.save(
+            new ClientSQL({
+                clientId: "service-1",
+                clientSecretHash,
+                clientType: ClientType.CONFIDENTIAL,
+                clientName: "Backend Service",
+                redirectUris: [],
+                grantTypes: ["client_credentials", "refresh_token"],
+                responseTypes: [],
+                scope: "reports:read reports:write",
+                tokenEndpointAuthMethod: TokenEndpointAuthMethod.CLIENT_SECRET_POST,
+                requirePkce: false,
+                firstParty: false,
+            }),
+        );
+
+        const tokenResult = await request(server.getApplication()).post("/sql/oauth/token").send({
+            grant_type: "client_credentials",
+            scope: "reports:read",
+            client_id: client.clientId,
+            client_secret: "service-secret-value",
+        });
+
+        expect(tokenResult.status).toBe(200);
+        expect(tokenResult.body.scope).toBe("reports:read");
+        expect(tokenResult.body.id_token).toBeUndefined();
+        expect(tokenResult.body.refresh_token).toBeUndefined();
+
+        const claims = await verifyAccessToken(tokenResult.body.access_token);
+        expect(claims.sub).toBe(client.clientId);
+        expect(claims.aud).toBe(client.clientId);
+        expect(claims.scope).toBe("reports:read");
+
+        // A public client can never use this grant, regardless of secret.
+        const publicClient = await clientRepo.save(
+            new ClientSQL({
+                clientId: "mobile-app-3",
+                clientType: ClientType.PUBLIC,
+                clientName: "Mobile App",
+                redirectUris: ["app://callback"],
+                grantTypes: ["client_credentials"],
+                responseTypes: [],
+                scope: "reports:read",
+                tokenEndpointAuthMethod: TokenEndpointAuthMethod.NONE,
+                requirePkce: true,
+                firstParty: true,
+            }),
+        );
+        const rejected = await request(server.getApplication()).post("/sql/oauth/token").send({
+            grant_type: "client_credentials",
+            client_id: publicClient.clientId,
+        });
+        expect(rejected.status).toBe(400);
+        expect(rejected.body.error).toBe("unauthorized_client");
+    });
 });

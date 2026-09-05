@@ -69,6 +69,15 @@ const client: Client = {
 
 const refreshClient: Client = { ...client, grantTypes: ["authorization_code", "refresh_token"] };
 
+const clientCredentialsClient: Client = {
+    ...client,
+    clientId: "service-1",
+    grantTypes: ["client_credentials"],
+    scope: "profile email",
+};
+
+const publicClient: Client = { ...client, clientId: "mobile-1", clientType: ClientType.PUBLIC, grantTypes: ["client_credentials"] };
+
 function makeAuthCode(overrides: Partial<AuthorizationCode> = {}): AuthorizationCode {
     return {
         uid: "code-record-1",
@@ -722,6 +731,80 @@ describe("BaseOAuthTokenRoute Tests", () => {
 
                 expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ error: "invalid_grant" }));
                 expect(refreshTokenRepo.find).toHaveBeenCalledWith({ familyId: "family-1" }, { ignoreACL: true, skipCache: true });
+            });
+        });
+
+        describe("client_credentials grant", () => {
+            it("Fails with unauthorized_client when the client is public.", async () => {
+                const { route } = makeRoute();
+                (route as any).clientAuthUtils = { authenticateClient: vi.fn(async () => publicClient) };
+                const res = makeResponse();
+                await route.token(makeRequest({ body: { grant_type: "client_credentials" } }), res);
+                expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ error: "unauthorized_client" }));
+            });
+
+            it("Fails with unauthorized_client when the client's grantTypes does not include client_credentials.", async () => {
+                const { route } = makeRoute();
+                (route as any).clientAuthUtils = { authenticateClient: vi.fn(async () => client) };
+                const res = makeResponse();
+                await route.token(makeRequest({ body: { grant_type: "client_credentials" } }), res);
+                expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ error: "unauthorized_client" }));
+            });
+
+            it("Fails with invalid_scope when the requested scope exceeds what the client is registered for.", async () => {
+                const { route } = makeRoute();
+                (route as any).clientAuthUtils = { authenticateClient: vi.fn(async () => clientCredentialsClient) };
+                const res = makeResponse();
+                await route.token(makeRequest({ body: { grant_type: "client_credentials", scope: "profile admin" } }), res);
+                expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ error: "invalid_scope" }));
+            });
+
+            it("Defaults to the client's full registered scope when none is requested.", async () => {
+                const { route } = makeRoute();
+                (route as any).clientAuthUtils = { authenticateClient: vi.fn(async () => clientCredentialsClient) };
+                const res = makeResponse();
+
+                await route.token(makeRequest({ body: { grant_type: "client_credentials" } }), res);
+
+                expect(res.status).toHaveBeenCalledWith(200);
+                const body = res.json.mock.calls[0][0];
+                expect(body).toEqual({ access_token: "access-token-1", token_type: "Bearer", expires_in: 900, scope: "profile email" });
+                expect((route as any).oauthTokenUtils.createAccessToken).toHaveBeenCalledWith(
+                    clientCredentialsClient,
+                    undefined,
+                    ["profile", "email"],
+                );
+            });
+
+            it("Narrows scope when a smaller scope is requested.", async () => {
+                const { route } = makeRoute();
+                (route as any).clientAuthUtils = { authenticateClient: vi.fn(async () => clientCredentialsClient) };
+                const res = makeResponse();
+
+                await route.token(makeRequest({ body: { grant_type: "client_credentials", scope: "profile" } }), res);
+
+                const body = res.json.mock.calls[0][0];
+                expect(body.scope).toBe("profile");
+            });
+
+            it("Grants an empty scope when the client has no registered scope at all.", async () => {
+                const { route } = makeRoute();
+                const scopelessClient = { ...clientCredentialsClient, scope: "" };
+                (route as any).clientAuthUtils = { authenticateClient: vi.fn(async () => scopelessClient) };
+
+                await route.token(makeRequest({ body: { grant_type: "client_credentials" } }), makeResponse());
+
+                expect((route as any).oauthTokenUtils.createAccessToken).toHaveBeenCalledWith(scopelessClient, undefined, []);
+            });
+
+            it("Never issues a refresh_token, even when the client's grantTypes also includes refresh_token.", async () => {
+                const { route, refreshTokenRepo } = makeRoute();
+                const bothGrantsClient = { ...clientCredentialsClient, grantTypes: ["client_credentials", "refresh_token"] };
+                (route as any).clientAuthUtils = { authenticateClient: vi.fn(async () => bothGrantsClient) };
+
+                await route.token(makeRequest({ body: { grant_type: "client_credentials" } }), makeResponse());
+
+                expect(refreshTokenRepo.create).not.toHaveBeenCalled();
             });
         });
     });

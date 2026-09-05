@@ -5,7 +5,7 @@
 import "reflect-metadata";
 import { ApiError, JWTUser, ObjectDecorators } from "@rapidrest/core";
 import { DocDecorators, HttpRequest, HttpResponse, ObjectFactory, RepoUtils, RouteDecorators } from "@rapidrest/service-core";
-import { AuthorizationCode, Client, OAuthRefreshToken, SigningKey } from "../models/types.js";
+import { AuthorizationCode, Client, ClientType, OAuthRefreshToken, SigningKey } from "../models/types.js";
 import { ClientAuthUtils } from "../auth/ClientAuthUtils.js";
 import { OAuthTokenUtils } from "../auth/OAuthTokenUtils.js";
 import { SigningKeyUtils } from "../auth/SigningKeyUtils.js";
@@ -35,9 +35,8 @@ export class OAuthError extends Error {
 }
 
 /**
- * Handles the OAuth 2.0 `/token` endpoint (RFC 6749 §3.2), dispatching by `grant_type`. `authorization_code`
- * and `refresh_token` are implemented — `client_credentials` is added in a later phase, which extends this
- * same class's `token()` dispatch.
+ * Handles the OAuth 2.0 `/token` endpoint (RFC 6749 §3.2), dispatching by `grant_type`.
+ * `authorization_code`, `refresh_token`, and `client_credentials` are implemented.
  *
  * @author Jean-Philippe Steinmetz
  */
@@ -317,13 +316,50 @@ export abstract class BaseOAuthTokenRoute<C extends Client, A extends Authorizat
     }
 
     /**
+     * Handles `grant_type=client_credentials` (RFC 6749 §4.4): issues an access token identifying the client
+     * itself, with no resource owner. Requires a confidential client — a public client has no way to prove
+     * its identity, and this grant has no PKCE-equivalent fallback. Never issues a refresh token (RFC 6749
+     * §4.4.3) or an `id_token` (there is no resource owner to assert an identity for), regardless of what the
+     * client is otherwise configured to receive.
+     */
+    private async handleClientCredentialsGrant(req: HttpRequest, payload: any): Promise<any> {
+        const client: Client = await this.clientAuthUtils!.authenticateClient(req);
+
+        if (client.clientType !== ClientType.CONFIDENTIAL) {
+            throw new OAuthError("unauthorized_client", "The client_credentials grant requires a confidential client.");
+        }
+
+        if (!client.grantTypes.includes("client_credentials")) {
+            throw new OAuthError("unauthorized_client", "This client is not authorized to use the client_credentials grant.");
+        }
+
+        const clientScope: string[] = client.scope ? client.scope.split(" ").filter(Boolean) : [];
+        const requestedScope: string[] | undefined = payload?.scope
+            ? String(payload.scope).split(" ").filter(Boolean)
+            : undefined;
+        const scope: string[] = requestedScope ? requestedScope.filter((s) => clientScope.includes(s)) : clientScope;
+        if (requestedScope && scope.length !== requestedScope.length) {
+            throw new OAuthError("invalid_scope", "Requested scope exceeds the scope registered for this client.");
+        }
+
+        const access = await this.oauthTokenUtils!.createAccessToken(client, undefined, scope);
+
+        return {
+            access_token: access.token,
+            token_type: "Bearer",
+            expires_in: access.expiresIn,
+            scope: scope.join(" "),
+        };
+    }
+
+    /**
      * Dispatches an incoming token request by `grant_type`. Always sets `Cache-Control: no-store` and
      * `Pragma: no-cache` (RFC 6749 §5.1), and always responds with a `2xx`/`4xx` JSON body directly (never
      * throws past this point) so error responses use the RFC 6749 §5.2 shape rather than this library's
      * usual `ApiError` envelope.
      */
     @Summary("OAuth 2.0 token endpoint")
-    @Description("Exchanges an authorization grant (authorization_code, refresh_token) for an access token.")
+    @Description("Exchanges an authorization grant (authorization_code, refresh_token, client_credentials) for an access token.")
     @Returns([Object])
     @Post()
     public async token(@Request req: HttpRequest, @Response res: HttpResponse): Promise<any> {
@@ -342,6 +378,9 @@ export abstract class BaseOAuthTokenRoute<C extends Client, A extends Authorizat
                     break;
                 case "refresh_token":
                     result = await this.handleOAuthRefreshTokenGrant(req, payload);
+                    break;
+                case "client_credentials":
+                    result = await this.handleClientCredentialsGrant(req, payload);
                     break;
                 default:
                     throw new OAuthError("unsupported_grant_type", `Unsupported grant_type: "${payload?.grant_type}".`);
