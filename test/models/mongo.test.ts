@@ -4,7 +4,9 @@
 ///////////////////////////////////////////////////////////////////////////////
 import { AliasType, ClientType, SecretType, SigningKeyStatus, TokenEndpointAuthMethod } from "../../src/models/types.js";
 import { AliasMongo } from "../../src/models/mongo/AliasMongo.js";
+import { AuthorizationCodeMongo } from "../../src/models/mongo/AuthorizationCodeMongo.js";
 import { ClientMongo } from "../../src/models/mongo/ClientMongo.js";
+import { ConsentGrantMongo } from "../../src/models/mongo/ConsentGrantMongo.js";
 import { ProfileMongo } from "../../src/models/mongo/ProfileMongo.js";
 import { SecretMongo } from "../../src/models/mongo/SecretMongo.js";
 import { SigningKeyMongo } from "../../src/models/mongo/SigningKeyMongo.js";
@@ -18,6 +20,44 @@ describe("Mongo model default construction", () => {
         expect(obj.type).toBe(AliasType.NAME);
         expect(obj.userUid).toBe("");
         expect(obj.verified).toBe(false);
+    });
+
+    it("AuthorizationCodeMongo falls back to class defaults when constructed with no data.", () => {
+        const obj = new AuthorizationCodeMongo();
+
+        expect(obj.codeHash).toBe("");
+        expect(obj.clientId).toBe("");
+        expect(obj.userUid).toBe("");
+        expect(obj.redirectUri).toBe("");
+        expect(obj.scope).toBe("");
+        expect(obj.codeChallenge).toBeUndefined();
+        expect(obj.codeChallengeMethod).toBeUndefined();
+        expect(obj.nonce).toBeUndefined();
+        expect(obj.used).toBe(false);
+    });
+
+    it("AuthorizationCodeMongo applies provided data when constructed with data.", () => {
+        const obj = new AuthorizationCodeMongo({ codeHash: "hash-1", used: true });
+
+        expect(obj.codeHash).toBe("hash-1");
+        expect(obj.used).toBe(true);
+    });
+
+    it("ConsentGrantMongo falls back to class defaults when constructed with no data.", () => {
+        const obj = new ConsentGrantMongo();
+
+        expect(obj.userUid).toBe("");
+        expect(obj.clientId).toBe("");
+        expect(obj.scope).toBe("");
+        expect(obj.lastUsedAt).toBeUndefined();
+    });
+
+    it("ConsentGrantMongo applies provided data when constructed with data.", () => {
+        const obj = new ConsentGrantMongo({ userUid: "user-1", clientId: "client-1", scope: "openid profile" });
+
+        expect(obj.userUid).toBe("user-1");
+        expect(obj.clientId).toBe("client-1");
+        expect(obj.scope).toBe("openid profile");
     });
 
     it("ClientMongo falls back to class defaults when constructed with no data.", () => {

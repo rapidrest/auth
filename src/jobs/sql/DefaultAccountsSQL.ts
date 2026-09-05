@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: MPL-2.0
 ///////////////////////////////////////////////////////////////////////////////
 import { DefaultAccounts } from "../DefaultAccounts.js";
-import { AliasSQL, ProfileSQL, SecretSQL, UserSQL } from "../../sql.js";
+import { AliasSQL, ProfileSQL, SecretSQL, UserSQL } from "../../models/sql/index.js";
 
 export class DefaultAccountsSQL extends DefaultAccounts<UserSQL, AliasSQL, ProfileSQL, SecretSQL> {
     protected aliasClass: any = AliasSQL;

@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Jean-Philippe Steinmetz. All rights reserved.
 // SPDX-License-Identifier: MPL-2.0
 ///////////////////////////////////////////////////////////////////////////////
-import { AliasMongo, ProfileMongo, UserMongo } from "../../mongo.js";
+import { AliasMongo, ProfileMongo, UserMongo } from "../../models/mongo/index.js";
 import { BaseAuthOIDCRoute } from "../BaseAuthOIDCRoute.js";
 
 export abstract class BaseAuthOIDCRouteMongo extends BaseAuthOIDCRoute<UserMongo, AliasMongo, ProfileMongo> {

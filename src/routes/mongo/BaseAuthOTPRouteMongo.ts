@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Jean-Philippe Steinmetz. All rights reserved.
 // SPDX-License-Identifier: MPL-2.0
 ///////////////////////////////////////////////////////////////////////////////
-import { AliasMongo, SecretMongo, UserMongo } from "../../mongo.js";
+import { AliasMongo, SecretMongo, UserMongo } from "../../models/mongo/index.js";
 import { BaseAuthOTPRoute } from "../BaseAuthOTPRoute.js";
 
 export abstract class BaseAuthOTPRouteMongo extends BaseAuthOTPRoute<UserMongo, AliasMongo, SecretMongo> {

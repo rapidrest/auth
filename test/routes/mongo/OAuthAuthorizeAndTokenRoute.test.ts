@@ -1,0 +1,326 @@
+///////////////////////////////////////////////////////////////////////////////
+// Copyright (C) 2026 Jean-Philippe Steinmetz
+// SPDX-License-Identifier: MPL-2.0
+///////////////////////////////////////////////////////////////////////////////
+import config from "../../config.js";
+import * as argon2 from "argon2";
+import * as crypto from "crypto";
+import jwt from "jsonwebtoken";
+import { agent, request } from "@rapidrest/service-core/test";
+import { ACLRecord, MongoConnection, MongoRepository, Server, ObjectFactory, ConnectionManager, ACLAction } from "@rapidrest/service-core";
+import { Logger } from "@rapidrest/core";
+import { MongoMemoryServer } from "mongodb-memory-server";
+import { UserMongo } from "../../../src/models/mongo/UserMongo.js";
+import { SecretMongo } from "../../../src/models/mongo/SecretMongo.js";
+import { ClientMongo } from "../../../src/models/mongo/ClientMongo.js";
+import { AuthorizationCodeMongo } from "../../../src/models/mongo/AuthorizationCodeMongo.js";
+import { ConsentGrantMongo } from "../../../src/models/mongo/ConsentGrantMongo.js";
+import { SigningKeyMongo } from "../../../src/models/mongo/SigningKeyMongo.js";
+import { ClientType, SecretType, TokenEndpointAuthMethod } from "../../../src/models/types.js";
+
+const mongod: MongoMemoryServer = new MongoMemoryServer({
+    instance: {
+        port: 9999,
+        dbName: "rrst-test",
+    },
+});
+
+describe("Route:OAuthAuthorizeAndTokenMongo Tests", () => {
+    const logger = Logger();
+    const objectFactory: ObjectFactory = new ObjectFactory(config, logger);
+    const server: Server = new Server({ config, basePath: "./test/server-mongo", logger, objectFactory });
+    let userRepo: MongoRepository<UserMongo>;
+    let aclRepo: MongoRepository<any>;
+    let secretRepo: MongoRepository<SecretMongo>;
+    let clientRepo: MongoRepository<ClientMongo>;
+    let authorizationCodeRepo: MongoRepository<AuthorizationCodeMongo>;
+    let consentGrantRepo: MongoRepository<ConsentGrantMongo>;
+    let signingKeyRepo: MongoRepository<SigningKeyMongo>;
+
+    const withOwnerACL = async function (uid: string, parentUid: string, ownerId: string): Promise<void> {
+        const records: ACLRecord[] = [
+            {
+                userOrRoleId: ownerId,
+                actions: [
+                    ACLAction.COUNT,
+                    ACLAction.CREATE,
+                    ACLAction.DELETE,
+                    ACLAction.EXISTS,
+                    ACLAction.LIST,
+                    ACLAction.READ,
+                    ACLAction.TRUNCATE,
+                    ACLAction.UPDATE,
+                ],
+            },
+        ];
+        await aclRepo.save({ uid, dateCreated: new Date(), dateModified: new Date(), version: 0, records, parentUid });
+    };
+
+    const createUserMongo = async function (data?: any): Promise<UserMongo> {
+        const obj = new UserMongo({ roles: [], scopes: [], verified: true, ...data });
+        const result = await userRepo.save(obj);
+        await withOwnerACL(result.uid, "UserMongo", result.uid);
+        return result;
+    };
+
+    const createSecretMongo = async function (data?: any): Promise<SecretMongo> {
+        const obj = new SecretMongo({ data: await argon2.hash("password"), type: SecretType.PASSWORD, ...data });
+        const result = await secretRepo.save(obj);
+        await withOwnerACL(result.uid, "SecretMongo", result.userUid);
+        return result;
+    };
+
+    async function clearCollection(repo: MongoRepository<any>): Promise<void> {
+        try {
+            await repo.clear();
+        } catch (err: any) {
+            // The error "ns not found" occurs when the collection doesn't exist yet. We can ignore this error.
+            if (err.message !== "ns not found") {
+                throw err;
+            }
+        }
+    }
+
+    beforeAll(async () => {
+        await mongod.start();
+        await server.start();
+
+        const connMgr: ConnectionManager | undefined = objectFactory.getInstance(ConnectionManager);
+        let conn: any = connMgr?.connections.get("acl");
+        if (conn instanceof MongoConnection) {
+            aclRepo = conn.getMongoRepository("AccessControlListMongo");
+        }
+        conn = connMgr?.connections.get("mongo");
+        if (conn instanceof MongoConnection) {
+            userRepo = conn.getMongoRepository("UserMongo");
+            secretRepo = conn.getMongoRepository("SecretMongo");
+            clientRepo = conn.getMongoRepository("ClientMongo");
+            authorizationCodeRepo = conn.getMongoRepository("AuthorizationCodeMongo");
+            consentGrantRepo = conn.getMongoRepository("ConsentGrantMongo");
+            signingKeyRepo = conn.getMongoRepository("SigningKeyMongo");
+        } else {
+            throw new Error("Could not find mongo connection");
+        }
+    });
+
+    afterAll(async () => {
+        await server.stop();
+        await mongod.stop();
+        await objectFactory.destroy();
+    });
+
+    beforeEach(async () => {
+        await clearCollection(userRepo);
+        await clearCollection(secretRepo);
+        await clearCollection(clientRepo);
+        await clearCollection(authorizationCodeRepo);
+        await clearCollection(consentGrantRepo);
+        await clearCollection(signingKeyRepo);
+    });
+
+    async function loginAgent(user: UserMongo) {
+        const testAgent = agent(server.getApplication());
+        const loginResult = await testAgent
+            .get("/mongo/auth/password")
+            .set("Authorization", `basic ${Buffer.from(user.uid + ":password").toString("base64")}`);
+        expect(loginResult.status).toBeGreaterThanOrEqual(200);
+        expect(loginResult.status).toBeLessThan(300);
+        return testAgent;
+    }
+
+    function buildPkce() {
+        const verifier = crypto.randomBytes(32).toString("base64url");
+        const challenge = crypto.createHash("sha256").update(verifier, "ascii").digest("base64url");
+        return { verifier, challenge };
+    }
+
+    // See the SQL variant of this test for why this doesn't use `URLSearchParams`.
+    function withQuery(path: string, params: Record<string, string>): string {
+        const qs = Object.entries(params)
+            .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
+            .join("&");
+        return `${path}?${qs}`;
+    }
+
+    async function verifyAccessToken(token: string) {
+        const decodedHeader: any = jwt.decode(token, { complete: true });
+        const jwksResult = await request(server.getApplication()).get("/mongo/oauth/jwks");
+        const jwk = jwksResult.body.keys.find((k: any) => k.kid === decodedHeader.header.kid);
+        expect(jwk).toBeDefined();
+        const publicKey = crypto.createPublicKey({ key: jwk, format: "jwk" });
+        return jwt.verify(token, publicKey, { algorithms: ["RS256"] }) as any;
+    }
+
+    it("Completes the full Authorization Code + PKCE + OIDC flow for a first-party public client.", async () => {
+        const user = await createUserMongo();
+        await createSecretMongo({ userUid: user.uid });
+        const client = await clientRepo.save(
+            new ClientMongo({
+                clientId: "mobile-app-1",
+                clientType: ClientType.PUBLIC,
+                clientName: "Mobile App",
+                redirectUris: ["app://callback"],
+                grantTypes: ["authorization_code"],
+                responseTypes: ["code"],
+                scope: "openid profile",
+                tokenEndpointAuthMethod: TokenEndpointAuthMethod.NONE,
+                requirePkce: true,
+                firstParty: true,
+            }),
+        );
+
+        const testAgent = await loginAgent(user);
+        const { verifier, challenge } = buildPkce();
+
+        const authResult = await testAgent.get(
+            withQuery("/mongo/oauth/authorize", {
+                response_type: "code",
+                client_id: client.clientId,
+                redirect_uri: "app://callback",
+                scope: "openid profile",
+                code_challenge: challenge,
+                code_challenge_method: "S256",
+                state: "xyz",
+            }),
+        );
+
+        expect(authResult.status).toBe(200);
+        expect(authResult.body.redirectTo).toBeDefined();
+        const redirectUrl = new URL(authResult.body.redirectTo);
+        expect(redirectUrl.searchParams.get("state")).toBe("xyz");
+        const code = redirectUrl.searchParams.get("code");
+        expect(code).toBeTruthy();
+
+        const tokenResult = await request(server.getApplication()).post("/mongo/oauth/token").send({
+            grant_type: "authorization_code",
+            code,
+            redirect_uri: "app://callback",
+            code_verifier: verifier,
+            client_id: client.clientId,
+        });
+
+        expect(tokenResult.status).toBe(200);
+        expect(tokenResult.headers["cache-control"]).toBe("no-store");
+        expect(tokenResult.headers["pragma"]).toBe("no-cache");
+        expect(tokenResult.body.token_type).toBe("Bearer");
+        expect(tokenResult.body.scope).toBe("openid profile");
+        expect(tokenResult.body.id_token).toBeDefined();
+
+        const claims = await verifyAccessToken(tokenResult.body.access_token);
+        expect(claims.sub).toBe(user.uid);
+        expect(claims.aud).toBe(client.clientId);
+        expect(claims.client_id).toBe(client.clientId);
+        expect(claims.scope).toBe("openid profile");
+
+        const idClaims = jwt.decode(tokenResult.body.id_token) as any;
+        expect(idClaims.sub).toBe(user.uid);
+        expect(idClaims.aud).toBe(client.clientId);
+
+        // Replay: the same code cannot be redeemed twice.
+        const replay = await request(server.getApplication()).post("/mongo/oauth/token").send({
+            grant_type: "authorization_code",
+            code,
+            redirect_uri: "app://callback",
+            code_verifier: verifier,
+            client_id: client.clientId,
+        });
+        expect(replay.status).toBe(400);
+        expect(replay.body.error).toBe("invalid_grant");
+    });
+
+    it("Requires consent for a non-first-party confidential client, then skips it on a later request.", async () => {
+        const user = await createUserMongo();
+        await createSecretMongo({ userUid: user.uid });
+        const clientSecretHash = await argon2.hash("client-secret-value");
+        const client = await clientRepo.save(
+            new ClientMongo({
+                clientId: "web-app-1",
+                clientSecretHash,
+                clientType: ClientType.CONFIDENTIAL,
+                clientName: "Web App",
+                redirectUris: ["https://app.example.com/callback"],
+                grantTypes: ["authorization_code"],
+                responseTypes: ["code"],
+                scope: "profile email",
+                tokenEndpointAuthMethod: TokenEndpointAuthMethod.CLIENT_SECRET_POST,
+                requirePkce: false,
+                firstParty: false,
+            }),
+        );
+
+        const testAgent = await loginAgent(user);
+
+        const firstAuth = await testAgent.get(
+            withQuery("/mongo/oauth/authorize", {
+                response_type: "code",
+                client_id: client.clientId,
+                redirect_uri: "https://app.example.com/callback",
+                scope: "profile email",
+                state: "abc",
+            }),
+        );
+
+        expect(firstAuth.body.consentRequired).toBe(true);
+        expect(firstAuth.body.requestId).toBeTruthy();
+        expect(firstAuth.body.client.clientName).toBe("Web App");
+
+        const decision = await testAgent.post("/mongo/oauth/authorize/consent").send({
+            requestId: firstAuth.body.requestId,
+            approved: true,
+        });
+
+        expect(decision.body.redirectTo).toBeDefined();
+        const redirectUrl = new URL(decision.body.redirectTo);
+        expect(redirectUrl.searchParams.get("state")).toBe("abc");
+        const code = redirectUrl.searchParams.get("code");
+
+        const tokenResult = await request(server.getApplication()).post("/mongo/oauth/token").send({
+            grant_type: "authorization_code",
+            code,
+            redirect_uri: "https://app.example.com/callback",
+            client_id: client.clientId,
+            client_secret: "client-secret-value",
+        });
+        expect(tokenResult.status).toBe(200);
+        expect(tokenResult.body.id_token).toBeUndefined();
+
+        // A second /authorize for the same user/client/scope should now skip consent entirely.
+        const secondAuth = await testAgent.get(
+            withQuery("/mongo/oauth/authorize", {
+                response_type: "code",
+                client_id: client.clientId,
+                redirect_uri: "https://app.example.com/callback",
+                scope: "profile email",
+            }),
+        );
+        expect(secondAuth.body.redirectTo).toBeDefined();
+        expect(secondAuth.body.consentRequired).toBeUndefined();
+    });
+
+    it("Returns loginRequired when no one is authenticated.", async () => {
+        const client = await clientRepo.save(
+            new ClientMongo({
+                clientId: "app-1",
+                clientType: ClientType.PUBLIC,
+                clientName: "App",
+                redirectUris: ["app://callback"],
+                grantTypes: ["authorization_code"],
+                responseTypes: ["code"],
+                scope: "profile",
+                tokenEndpointAuthMethod: TokenEndpointAuthMethod.NONE,
+                requirePkce: false,
+                firstParty: true,
+            }),
+        );
+
+        const result = await request(server.getApplication()).get(
+            withQuery("/mongo/oauth/authorize", {
+                response_type: "code",
+                client_id: client.clientId,
+                redirect_uri: "app://callback",
+            }),
+        );
+
+        expect(result.body).toEqual({ loginRequired: true });
+    });
+});

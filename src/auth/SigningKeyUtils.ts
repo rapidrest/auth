@@ -183,9 +183,11 @@ export class SigningKeyUtils {
     public async rotateKey(): Promise<SigningKey> {
         const active = await this.repo.find({ status: SigningKeyStatus.ACTIVE }, { ignoreACL: true });
         for (const key of active) {
-            await this.repo.update({ status: SigningKeyStatus.RETIRED, retiredAt: new Date() }, key, {
-                ignoreACL: true,
-            });
+            await this.repo.update(
+                { uid: key.uid, version: key.version, status: SigningKeyStatus.RETIRED, retiredAt: new Date() },
+                key,
+                { ignoreACL: true },
+            );
         }
         return this.createKey();
     }

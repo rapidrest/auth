@@ -37,7 +37,13 @@ function makeMockRepo() {
         }),
         findOne: vi.fn(async (kid: string) => store.get(kid)),
         update: vi.fn(async (obj: Partial<SigningKey>, existing: SigningKey) => {
-            const updated = { ...existing, ...obj };
+            // Mirrors RepoUtils.update()'s real optimistic-locking contract: `obj` must carry the same
+            // `uid`/`version` as `existing`, not just the fields being changed — a bare partial like
+            // `{status: ...}` would fail this check in production even on a first, uncontested call.
+            if ((obj as any).uid !== existing.uid || obj.version !== existing.version) {
+                throw new Error("Invalid object version. Do you have the latest version?");
+            }
+            const updated = { ...existing, ...obj, version: existing.version + 1 };
             store.set(existing.kid, updated);
             return updated;
         }),

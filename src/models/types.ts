@@ -301,6 +301,71 @@ export interface SigningKey extends BaseEntity {
 }
 
 /**
+ * Defines a single, one-time-use OAuth 2.0 authorization code (RFC 6749 §4.1.2), issued by
+ * `BaseOAuthAuthorizeRoute` and redeemed by `BaseOAuthTokenRoute`'s `authorization_code` grant.
+ *
+ * @author Jean-Philippe Steinmetz
+ */
+export interface AuthorizationCode extends BaseEntity {
+    /** The SHA-256 hex digest of the opaque code. The raw code itself is never persisted. */
+    codeHash: string;
+
+    /** The `clientId` of the `Client` this code was issued to. */
+    clientId: string;
+
+    /** The `uid` of the `User` (resource owner) who authorized this code. */
+    userUid: string;
+
+    /** The exact `redirect_uri` presented at `/authorize` — must match exactly again at `/token`. */
+    redirectUri: string;
+
+    /** The space-delimited set of scopes granted. */
+    scope: string;
+
+    /** The RFC 7636 PKCE code challenge, if the client used PKCE. */
+    codeChallenge?: string;
+
+    /** The method used to derive `codeChallenge` from the client's `code_verifier`. */
+    codeChallengeMethod?: "S256" | "plain";
+
+    /** The OIDC `nonce` to carry into the `id_token`, if the client requested the `openid` scope. */
+    nonce?: string;
+
+    /** When this code expires — typically ~60 seconds after issuance. */
+    expiresAt: Date;
+
+    /**
+     * Set to `true` once this code has been redeemed at `/token`. A second presentation of an
+     * already-used code is treated as a replay/leak: see `BaseOAuthTokenRoute`.
+     */
+    used: boolean;
+}
+
+/**
+ * Records a resource owner's consent for a `Client` to be granted a set of scopes, so a returning user
+ * isn't re-prompted for consent they've already given. Not created for a `Client` with `firstParty: true`,
+ * which skips consent entirely.
+ *
+ * @author Jean-Philippe Steinmetz
+ */
+export interface ConsentGrant extends BaseEntity {
+    /** The `uid` of the `User` who granted consent. */
+    userUid: string;
+
+    /** The `clientId` of the `Client` consent was granted to. */
+    clientId: string;
+
+    /** The space-delimited, cumulative set of scopes approved across every consent decision so far. */
+    scope: string;
+
+    /** When consent was first granted. */
+    grantedAt: Date;
+
+    /** When this grant was last relied upon to skip the consent screen. */
+    lastUsedAt?: Date;
+}
+
+/**
  * Defines a single user's account within the system.
  *
  * @author Jean-Philippe Steinmetz

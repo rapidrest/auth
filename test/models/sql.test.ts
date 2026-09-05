@@ -4,7 +4,9 @@
 ///////////////////////////////////////////////////////////////////////////////
 import { AliasType, ClientType, SecretType, SigningKeyStatus, TokenEndpointAuthMethod } from "../../src/models/types.js";
 import { AliasSQL } from "../../src/models/sql/AliasSQL.js";
+import { AuthorizationCodeSQL } from "../../src/models/sql/AuthorizationCodeSQL.js";
 import { ClientSQL } from "../../src/models/sql/ClientSQL.js";
+import { ConsentGrantSQL } from "../../src/models/sql/ConsentGrantSQL.js";
 import { ProfileSQL } from "../../src/models/sql/ProfileSQL.js";
 import { SecretSQL } from "../../src/models/sql/SecretSQL.js";
 import { SigningKeySQL } from "../../src/models/sql/SigningKeySQL.js";
@@ -18,6 +20,44 @@ describe("SQL model default construction", () => {
         expect(obj.type).toBe(AliasType.NAME);
         expect(obj.userUid).toBe("");
         expect(obj.verified).toBe(false);
+    });
+
+    it("AuthorizationCodeSQL falls back to class defaults when constructed with no data.", () => {
+        const obj = new AuthorizationCodeSQL();
+
+        expect(obj.codeHash).toBe("");
+        expect(obj.clientId).toBe("");
+        expect(obj.userUid).toBe("");
+        expect(obj.redirectUri).toBe("");
+        expect(obj.scope).toBe("");
+        expect(obj.codeChallenge).toBeUndefined();
+        expect(obj.codeChallengeMethod).toBeUndefined();
+        expect(obj.nonce).toBeUndefined();
+        expect(obj.used).toBe(false);
+    });
+
+    it("AuthorizationCodeSQL applies provided data when constructed with data.", () => {
+        const obj = new AuthorizationCodeSQL({ codeHash: "hash-1", used: true });
+
+        expect(obj.codeHash).toBe("hash-1");
+        expect(obj.used).toBe(true);
+    });
+
+    it("ConsentGrantSQL falls back to class defaults when constructed with no data.", () => {
+        const obj = new ConsentGrantSQL();
+
+        expect(obj.userUid).toBe("");
+        expect(obj.clientId).toBe("");
+        expect(obj.scope).toBe("");
+        expect(obj.lastUsedAt).toBeUndefined();
+    });
+
+    it("ConsentGrantSQL applies provided data when constructed with data.", () => {
+        const obj = new ConsentGrantSQL({ userUid: "user-1", clientId: "client-1", scope: "openid profile" });
+
+        expect(obj.userUid).toBe("user-1");
+        expect(obj.clientId).toBe("client-1");
+        expect(obj.scope).toBe("openid profile");
     });
 
     it("ClientSQL falls back to class defaults when constructed with no data.", () => {

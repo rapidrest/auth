@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: MPL-2.0
 ///////////////////////////////////////////////////////////////////////////////
 import { RouteDecorators } from "@rapidrest/service-core";
-import { ProfileMongo } from "../../mongo.js";
+import { ProfileMongo } from "../../models/mongo/index.js";
 import { BaseProfileRoute } from "../BaseProfileRoute.js";
 const { Model } = RouteDecorators;
 

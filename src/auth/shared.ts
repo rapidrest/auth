@@ -314,6 +314,45 @@ export const verifyOTP = async function (req: HttpRequest, payload?: any): Promi
 };
 
 ///////////////////////////////////////////////////////////////////////////////
+// OAUTH
+///////////////////////////////////////////////////////////////////////////////
+
+/** RFC 7636 §4.1: a PKCE `code_verifier` must be 43-128 characters from the unreserved character set. */
+export const PKCE_VERIFIER_PATTERN = /^[A-Za-z0-9\-._~]{43,128}$/;
+
+/**
+ * Verifies a PKCE (RFC 7636) `code_verifier` presented at the token endpoint against the `code_challenge`
+ * recorded at the authorization endpoint. For `S256`, hashes `verifier` with SHA-256 and compares the
+ * base64url digest to `challenge`; for `plain`, compares the values directly.
+ *
+ * @param verifier The `code_verifier` presented at `/token`.
+ * @param challenge The `code_challenge` recorded when the authorization code was issued.
+ * @param method The `code_challenge_method` recorded alongside `challenge`.
+ */
+export const verifyPkce = function (verifier: string, challenge: string, method: "S256" | "plain"): boolean {
+    if (!PKCE_VERIFIER_PATTERN.test(verifier)) {
+        return false;
+    }
+
+    if (method === "plain") {
+        return verifier === challenge;
+    }
+
+    const computed = crypto.createHash("sha256").update(verifier, "ascii").digest("base64url");
+    return computed === challenge;
+};
+
+/**
+ * Hashes an opaque, single-presentation secret (an authorization code or refresh token) for storage — SHA-256
+ * hex, so the raw value is never persisted and a database read alone can never recover it.
+ *
+ * @param raw The raw opaque value to hash.
+ */
+export const hashOpaqueToken = function (raw: string): string {
+    return crypto.createHash("sha256").update(raw, "utf8").digest("hex");
+};
+
+///////////////////////////////////////////////////////////////////////////////
 // PASSWORD
 ///////////////////////////////////////////////////////////////////////////////
 

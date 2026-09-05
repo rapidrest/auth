@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: MPL-2.0
 ///////////////////////////////////////////////////////////////////////////////
 import { RouteDecorators } from "@rapidrest/service-core";
-import { SecretSQL } from "../../sql.js";
+import { SecretSQL } from "../../models/sql/index.js";
 import { BaseSecretRoute } from "../BaseSecretRoute.js";
 const { Model } = RouteDecorators;
 
