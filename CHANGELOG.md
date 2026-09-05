@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0-beta.2] - 2026-09-05
+
+### Added
+- Added BaseOAuthClientRoute for owner/admin Client CRUD
+- Added regenerate-secret action and one-time secret reveal on create
+- Added BaseOAuthClientRoute entry to the changelog
+
+### Changed
+- Change Client ACL to allow self-service creation (Secret's pattern)
+- Wire up SQL/Mongo bindings and test-server routes
+- Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+- Condense pre-release changelog into a single Unreleased listing
+- Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
 While `2.0.0` is in pre-release (`2.0.0-beta.x`), all changes toward it are condensed into this single
 listing rather than split per beta tag. This section will be finalized as `[2.0.0]` once it's officially
 tagged.
@@ -75,7 +89,8 @@ tagged.
 - `PasskeyStrategy` - WebAuthn based passkey authentication
 - `TOTPStrategy` - RFC 6238 Time-Based One Time Password authentication (e.g. Google Authenticator, etc.)
 
-[Unreleased]: https://github.com/rapidrest/auth/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.2...HEAD
+[2.0.0-beta.2]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.1...v2.0.0-beta.2
 [1.3.0]: https://github.com/rapidrest/auth/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/rapidrest/auth/compare/v1.1.1...v1.2.0
 [1.1.1]: https://github.com/rapidrest/auth/compare/v1.1.0...v1.1.1
