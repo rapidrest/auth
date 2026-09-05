@@ -510,6 +510,166 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
 
             expect(result.consentRequired).toBe(true);
         });
+
+        describe("prompt handling (OIDC Core §3.1.2.1)", () => {
+            it("Rejects prompt=none combined with another value with invalid_request.", async () => {
+                const { route, client } = makeRoute();
+                const result = await route.authorize(
+                    makeRequest({
+                        query: {
+                            client_id: client.clientId,
+                            redirect_uri: "https://app.example.com/callback",
+                            response_type: "code",
+                            prompt: "none login",
+                        },
+                        session: { userUid: "user-1" },
+                    }),
+                    res,
+                );
+                const url = new URL(result.redirectTo);
+                expect(url.searchParams.get("error")).toBe("invalid_request");
+            });
+
+            it("Returns a login_required error redirect for prompt=none when there is no authenticated user.", async () => {
+                const { route, client } = makeRoute();
+                (route as any).authMiddleware = { authenticate: vi.fn(async () => undefined) };
+                const result = await route.authorize(
+                    makeRequest({
+                        query: {
+                            client_id: client.clientId,
+                            redirect_uri: "https://app.example.com/callback",
+                            response_type: "code",
+                            prompt: "none",
+                            state: "xyz",
+                        },
+                    }),
+                    res,
+                );
+                const url = new URL(result.redirectTo);
+                expect(url.searchParams.get("error")).toBe("login_required");
+                expect(url.searchParams.get("state")).toBe("xyz");
+            });
+
+            it("Returns a consent_required error redirect for prompt=none when consent would otherwise be required.", async () => {
+                const { route, client } = makeRoute();
+                const result = await route.authorize(
+                    makeRequest({
+                        query: {
+                            client_id: client.clientId,
+                            redirect_uri: "https://app.example.com/callback",
+                            response_type: "code",
+                            scope: "openid profile",
+                            prompt: "none",
+                        },
+                        session: { userUid: "user-1" },
+                    }),
+                    res,
+                );
+                const url = new URL(result.redirectTo);
+                expect(url.searchParams.get("error")).toBe("consent_required");
+            });
+
+            it("Succeeds normally under prompt=none when already authenticated and no consent is needed.", async () => {
+                const { route, client } = makeRoute({ client: makeClient({ firstParty: true }) });
+                const result = await route.authorize(
+                    makeRequest({
+                        query: {
+                            client_id: client.clientId,
+                            redirect_uri: "https://app.example.com/callback",
+                            response_type: "code",
+                            prompt: "none",
+                        },
+                        session: { userUid: "user-1" },
+                    }),
+                    res,
+                );
+                expect(result.redirectTo).toContain("code=");
+            });
+
+            it("Forces {loginRequired:true} for prompt=login even when a session already resolves a user.", async () => {
+                const { route, client } = makeRoute({ client: makeClient({ firstParty: true }) });
+                const authenticate = vi.fn();
+                (route as any).authMiddleware = { authenticate };
+                const result = await route.authorize(
+                    makeRequest({
+                        query: {
+                            client_id: client.clientId,
+                            redirect_uri: "https://app.example.com/callback",
+                            response_type: "code",
+                            prompt: "login",
+                        },
+                        session: { userUid: "user-1" },
+                    }),
+                    res,
+                );
+                expect(result).toEqual({ loginRequired: true });
+                expect(authenticate).not.toHaveBeenCalled();
+            });
+
+            it("Forces {loginRequired:true} for prompt=select_account even when a session already resolves a user.", async () => {
+                const { route, client } = makeRoute({ client: makeClient({ firstParty: true }) });
+                const result = await route.authorize(
+                    makeRequest({
+                        query: {
+                            client_id: client.clientId,
+                            redirect_uri: "https://app.example.com/callback",
+                            response_type: "code",
+                            prompt: "select_account",
+                        },
+                        session: { userUid: "user-1" },
+                    }),
+                    res,
+                );
+                expect(result).toEqual({ loginRequired: true });
+            });
+
+            it("Forces consent even when a sufficient ConsentGrant already exists, for prompt=consent.", async () => {
+                const { route, client, consentGrantRepo } = makeRoute();
+                consentGrantRepo._store.set("grant-1", {
+                    uid: "grant-1",
+                    dateCreated: new Date(),
+                    dateModified: new Date(),
+                    version: 0,
+                    userUid: "user-1",
+                    clientId: client.clientId,
+                    scope: "openid profile email",
+                    grantedAt: new Date(),
+                });
+
+                const result = await route.authorize(
+                    makeRequest({
+                        query: {
+                            client_id: client.clientId,
+                            redirect_uri: "https://app.example.com/callback",
+                            response_type: "code",
+                            scope: "openid profile",
+                            prompt: "consent",
+                        },
+                        session: { userUid: "user-1" },
+                    }),
+                    res,
+                );
+
+                expect(result.consentRequired).toBe(true);
+            });
+
+            it("A first-party client still skips consent even when prompt=consent is requested.", async () => {
+                const { route, client } = makeRoute({ client: makeClient({ firstParty: true }) });
+                const result = await route.authorize(
+                    makeRequest({
+                        query: {
+                            client_id: client.clientId,
+                            redirect_uri: "https://app.example.com/callback",
+                            response_type: "code",
+                            prompt: "consent",
+                        },
+                        session: { userUid: "user-1" },
+                    }),
+                    res,
+                );
+                expect(result.redirectTo).toContain("code=");
+            });
+        });
     });
 
     describe("decideConsent", () => {

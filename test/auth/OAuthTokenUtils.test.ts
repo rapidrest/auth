@@ -43,7 +43,9 @@ function makeOAuthTokenUtils(config: any = {}) {
     const signingKeyUtils = new SigningKeyUtils(makeMockSigningKeyRepo() as any);
     (signingKeyUtils as any).config = { encryption_key: ENCRYPTION_KEY };
     const utils = new OAuthTokenUtils(signingKeyUtils);
-    (utils as any).config = config;
+    // `issuer` defaults to a real value here since every signing/verification call now requires one -
+    // pass `{ issuer: undefined }` explicitly to test the unconfigured-issuer behavior itself.
+    (utils as any).config = { issuer: "https://auth.example.com", ...config };
     return utils;
 }
 
@@ -109,7 +111,7 @@ describe("OAuthTokenUtils Tests", () => {
             const signingKeyUtils = new SigningKeyUtils(makeMockSigningKeyRepo() as any);
             (signingKeyUtils as any).config = { encryption_key: ENCRYPTION_KEY };
             const utils = new OAuthTokenUtils(signingKeyUtils);
-            (utils as any).config = {};
+            (utils as any).config = { issuer: "https://auth.example.com" };
 
             const { token } = await utils.createAccessToken(client, user, ["openid"]);
             const jwks = await signingKeyUtils.getPublicJwks();
@@ -123,6 +125,11 @@ describe("OAuthTokenUtils Tests", () => {
             const material = await signingKeyUtils.getSigningMaterial(decodedHeader.header.kid);
             const publicKey = crypto.createPublicKey(material.privateKeyPem);
             expect(() => jwt.verify(token, publicKey, { algorithms: ["RS256"] })).not.toThrow();
+        });
+
+        it("Throws a 500 when no issuer is configured - there is no valid token to issue without one.", async () => {
+            const utils = makeOAuthTokenUtils({ issuer: undefined });
+            await expect(utils.createAccessToken(client, user, [])).rejects.toMatchObject({ status: 500 });
         });
     });
 
@@ -157,6 +164,11 @@ describe("OAuthTokenUtils Tests", () => {
 
             const decoded = jwt.decode(token) as any;
             expect(decoded.exp - decoded.iat).toBe(120);
+        });
+
+        it("Throws a 500 when no issuer is configured.", async () => {
+            const utils = makeOAuthTokenUtils({ issuer: undefined });
+            await expect(utils.createIdToken(client, user, undefined)).rejects.toMatchObject({ status: 500 });
         });
     });
 
@@ -209,7 +221,7 @@ describe("OAuthTokenUtils Tests", () => {
             const signingKeyUtils = new SigningKeyUtils(makeMockSigningKeyRepo() as any);
             (signingKeyUtils as any).config = { encryption_key: ENCRYPTION_KEY };
             const utils = new OAuthTokenUtils(signingKeyUtils);
-            (utils as any).config = {};
+            (utils as any).config = { issuer: "https://auth.example.com" };
 
             const { token } = await utils.createAccessToken(client, user, ["profile"]);
             await signingKeyUtils.rotateKey();
@@ -264,6 +276,19 @@ describe("OAuthTokenUtils Tests", () => {
             const { token } = await issuingUtils.createAccessToken(client, user, ["profile"]);
 
             await expect(verifyingUtils.verifyAccessToken(token)).resolves.toBeUndefined();
+        });
+
+        it("Throws a 500 when no issuer is configured on the verifying instance.", async () => {
+            const signingKeyUtils = new SigningKeyUtils(makeMockSigningKeyRepo() as any);
+            (signingKeyUtils as any).config = { encryption_key: ENCRYPTION_KEY };
+            const issuingUtils = new OAuthTokenUtils(signingKeyUtils);
+            (issuingUtils as any).config = { issuer: "https://auth.example.com" };
+            const verifyingUtils = new OAuthTokenUtils(signingKeyUtils);
+            (verifyingUtils as any).config = {};
+
+            const { token } = await issuingUtils.createAccessToken(client, user, ["profile"]);
+
+            await expect(verifyingUtils.verifyAccessToken(token)).rejects.toMatchObject({ status: 500 });
         });
     });
 });

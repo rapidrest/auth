@@ -566,6 +566,46 @@ describe("BaseOAuthTokenRoute Tests", () => {
                     { ignoreACL: true },
                 );
             });
+
+            // Regression coverage for OIDC Core §11 (Offline Access): a refresh token must not be handed
+            // out just because the client is configured for the grant type - for an OIDC flow (openid
+            // requested), the resource owner must have also explicitly consented to offline_access.
+            it("Does not issue a refresh_token for an OIDC flow (openid scope) that did not also request offline_access.", async () => {
+                const { route, authorizationCodeRepo, refreshTokenRepo } = makeRoute();
+                (route as any).clientAuthUtils = { authenticateClient: vi.fn(async () => refreshClient) };
+                const raw = "raw-code-1";
+                authorizationCodeRepo._store.set(hashOpaqueToken(raw), makeAuthCode({ scope: "openid profile" }));
+                const res = makeResponse();
+
+                await route.token(
+                    makeRequest({ body: { grant_type: "authorization_code", code: raw, redirect_uri: "https://app.example.com/callback" } }),
+                    res,
+                );
+
+                const body = res.json.mock.calls[0][0];
+                expect(body.refresh_token).toBeUndefined();
+                expect(refreshTokenRepo.create).not.toHaveBeenCalled();
+            });
+
+            it("Issues a refresh_token for an OIDC flow that also requested offline_access.", async () => {
+                const { route, authorizationCodeRepo, refreshTokenRepo } = makeRoute();
+                (route as any).clientAuthUtils = { authenticateClient: vi.fn(async () => refreshClient) };
+                const raw = "raw-code-1";
+                authorizationCodeRepo._store.set(hashOpaqueToken(raw), makeAuthCode({ scope: "openid profile offline_access" }));
+                const res = makeResponse();
+
+                await route.token(
+                    makeRequest({ body: { grant_type: "authorization_code", code: raw, redirect_uri: "https://app.example.com/callback" } }),
+                    res,
+                );
+
+                const body = res.json.mock.calls[0][0];
+                expect(body.refresh_token).toBe("new-refresh-token-1");
+                expect(refreshTokenRepo.create).toHaveBeenCalledWith(
+                    expect.objectContaining({ scope: "openid profile offline_access" }),
+                    { ignoreACL: true },
+                );
+            });
         });
 
         describe("refresh_token grant", () => {
@@ -665,7 +705,7 @@ describe("BaseOAuthTokenRoute Tests", () => {
                 const { route, refreshTokenRepo } = makeRoute();
                 (route as any).clientAuthUtils = { authenticateClient: vi.fn(async () => refreshClient) };
                 const raw = "raw-refresh-1";
-                const stored = makeOAuthRefreshToken({ scope: "openid profile", familyId: "family-1" });
+                const stored = makeOAuthRefreshToken({ scope: "openid profile offline_access", familyId: "family-1" });
                 refreshTokenRepo._store.set(hashOpaqueToken(raw), stored);
                 const res = makeResponse();
 

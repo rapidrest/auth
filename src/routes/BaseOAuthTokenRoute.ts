@@ -108,6 +108,12 @@ export abstract class BaseOAuthTokenRoute<C extends Client, A extends Authorizat
      * token, an `id_token` when `openid` was granted, and — when `client.grantTypes` includes
      * `refresh_token` — a freshly persisted refresh token. `familyId` is omitted for a brand new grant (the
      * `authorization_code` exchange) and carried forward from the presented token when rotating.
+     *
+     * For an OIDC flow (`openid` in `scope`), a refresh token is only issued when `offline_access` was also
+     * granted, per OIDC Core §11 ("Offline Access") — the client must explicitly request that scope to be
+     * issued a token usable while the resource owner isn't present. This restriction is specific to OIDC;
+     * a plain OAuth flow (no `openid`) is governed by RFC 6749 alone, where `client.grantTypes` is this
+     * deployment's own sufficient basis for issuing one.
      */
     private async issueTokenResponse(client: Client, user: JWTUser, scope: string[], nonce: string | undefined, familyId?: string): Promise<any> {
         const access = await this.oauthTokenUtils!.createAccessToken(client, user, scope);
@@ -123,7 +129,8 @@ export abstract class BaseOAuthTokenRoute<C extends Client, A extends Authorizat
             result.id_token = await this.oauthTokenUtils!.createIdToken(client, user, nonce);
         }
 
-        if (client.grantTypes.includes("refresh_token")) {
+        const canIssueRefreshToken = client.grantTypes.includes("refresh_token") && (!scope.includes("openid") || scope.includes("offline_access"));
+        if (canIssueRefreshToken) {
             const refresh = this.oauthTokenUtils!.createRefreshToken(familyId);
             await this.refreshTokenRepo!.create(
                 {

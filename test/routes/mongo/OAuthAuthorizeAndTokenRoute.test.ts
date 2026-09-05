@@ -243,7 +243,7 @@ describe("Route:OAuthAuthorizeAndTokenMongo Tests", () => {
                 redirectUris: ["app://callback"],
                 grantTypes: ["authorization_code", "refresh_token"],
                 responseTypes: ["code"],
-                scope: "openid profile",
+                scope: "openid profile offline_access",
                 tokenEndpointAuthMethod: TokenEndpointAuthMethod.NONE,
                 requirePkce: true,
                 firstParty: true,
@@ -258,7 +258,9 @@ describe("Route:OAuthAuthorizeAndTokenMongo Tests", () => {
                 response_type: "code",
                 client_id: client.clientId,
                 redirect_uri: "app://callback",
-                scope: "openid profile",
+                // `offline_access` is required alongside `openid` for this OIDC flow to be issued a refresh
+                // token at all (OIDC Core §11) - see BaseOAuthTokenRoute.issueTokenResponse().
+                scope: "openid profile offline_access",
                 code_challenge: challenge,
                 code_challenge_method: "S256",
             }),

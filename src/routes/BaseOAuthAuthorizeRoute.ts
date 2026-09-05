@@ -46,6 +46,15 @@ const CONSENT_TICKET_TYPE = "oauth_consent";
  * request, and `decideConsent()` verifies and decodes it — avoiding a second storage dependency (Redis/
  * memory) for state that's inherently short-lived and only ever round-tripped through the caller.
  *
+ * Honors the OIDC Core §3.1.2.1 `prompt` request parameter: `none` demands zero user interaction, failing
+ * fast with a `login_required`/`consent_required` error redirect instead of the usual
+ * `{loginRequired:true}`/`{consentRequired:true}` (which invite the downstream app to interact with the
+ * user) whenever either would otherwise be needed; `login`/`select_account` force fresh interactive login
+ * even when a session already resolves a user (this library has no concept of an account picker, so both
+ * collapse to the same "log in again" signal); `consent` forces the consent screen even when a sufficient
+ * `ConsentGrant` already exists. `none` MUST NOT be combined with any other value (RFC-mandated), and is
+ * rejected with `invalid_request` if it is.
+ *
  * @author Jean-Philippe Steinmetz
  */
 export abstract class BaseOAuthAuthorizeRoute<C extends Client, A extends AuthorizationCode, G extends ConsentGrant> {
@@ -275,6 +284,7 @@ export abstract class BaseOAuthAuthorizeRoute<C extends Client, A extends Author
         const codeChallenge = asString(query.code_challenge);
         const codeChallengeMethodParam = asString(query.code_challenge_method);
         const nonce = asString(query.nonce);
+        const promptValues: string[] = (asString(query.prompt) ?? "").split(" ").filter(Boolean);
 
         if (!clientId) {
             throw new ApiError(ApiErrors.INVALID_REQUEST, 400, "Missing required parameter: client_id.");
@@ -312,19 +322,36 @@ export abstract class BaseOAuthAuthorizeRoute<C extends Client, A extends Author
             codeChallengeMethod = codeChallengeMethodParam === "S256" ? "S256" : "plain";
         }
 
+        // OIDC Core §3.1.2.1: `none` MUST NOT be combined with any other `prompt` value.
+        if (promptValues.includes("none") && promptValues.length > 1) {
+            return this.buildErrorRedirect(redirectUri, state, "invalid_request", "prompt=none must not be combined with other prompt values.");
+        }
+
         const clientScopes = new Set(client.scope ? client.scope.split(" ").filter(Boolean) : []);
         const scope: string[] = requestedScope.split(" ").filter((s) => s && clientScopes.has(s));
 
-        const userUid: string | undefined = await this.resolveUserUid(req, res);
+        // `login`/`select_account` demand fresh, active interaction — never silently reuse an existing
+        // session — so the session-based fast path in `resolveUserUid()` is deliberately skipped entirely
+        // rather than merely double-checked, forcing the same `{loginRequired:true}` (or, under `none`,
+        // `login_required`) outcome a genuinely unauthenticated caller would get.
+        const forceLogin = promptValues.includes("login") || promptValues.includes("select_account");
+        const userUid: string | undefined = forceLogin ? undefined : await this.resolveUserUid(req, res);
         if (!userUid) {
+            if (promptValues.includes("none")) {
+                return this.buildErrorRedirect(redirectUri, state, "login_required");
+            }
             return { loginRequired: true };
         }
 
-        const sufficientGrant: G | undefined = client.firstParty
-            ? undefined
-            : await this.findSufficientConsent(userUid, client.clientId, scope);
+        // `consent` demands the consent screen even when a sufficient grant already exists.
+        const forceConsent = promptValues.includes("consent");
+        const sufficientGrant: G | undefined =
+            client.firstParty || forceConsent ? undefined : await this.findSufficientConsent(userUid, client.clientId, scope);
 
         if (!client.firstParty && !sufficientGrant) {
+            if (promptValues.includes("none")) {
+                return this.buildErrorRedirect(redirectUri, state, "consent_required");
+            }
             const requestId = await this.createConsentTicket({
                 clientId: client.clientId,
                 userUid,

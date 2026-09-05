@@ -2,7 +2,8 @@
 // Copyright (C) 2026 Jean-Philippe Steinmetz
 // SPDX-License-Identifier: MPL-2.0
 ///////////////////////////////////////////////////////////////////////////////
-import { JWTUser, JWTUtils, JWTUtilsConfig, ObjectDecorators } from "@rapidrest/core";
+import { ApiError, JWTUser, JWTUtils, JWTUtilsConfig, ObjectDecorators } from "@rapidrest/core";
+import { ApiErrors } from "@rapidrest/service-core";
 import * as crypto from "crypto";
 import jwt from "jsonwebtoken";
 import parseDuration from "parse-duration";
@@ -16,7 +17,11 @@ const { Config } = ObjectDecorators;
  * Configuration options for `OAuthTokenUtils`.
  */
 export interface OAuthServerConfig {
-    /** This authorization server's issuer identifier, stamped into every token's `iss` claim. */
+    /**
+     * This authorization server's issuer identifier, stamped into every token's `iss` claim and required
+     * on verification. Required before any token can be issued or verified (OIDC Core §2) — there is no
+     * plaintext/no-issuer fallback, unlike this config block's other, genuinely optional settings.
+     */
     issuer?: string;
     /** How long an issued access token is valid for. Default `"15m"`. */
     accessTokenTTL?: string;
@@ -49,12 +54,28 @@ export class OAuthTokenUtils {
     }
 
     /**
+     * Returns the configured issuer, throwing a deployment-misconfiguration error if it's unset. OIDC Core
+     * §2 mandates `iss` be present on every ID Token (and, by the same reasoning, every access token this
+     * server signs and later verifies) — unlike `accessTokenTTL`/`idTokenTTL`/etc., there is no sane default
+     * to silently fall back to, so this is enforced at the point of use rather than left optional.
+     */
+    private requireIssuer(): string {
+        if (!this.config.issuer) {
+            throw new ApiError(
+                ApiErrors.INTERNAL_ERROR,
+                500,
+                "`auth:oauth_server:issuer` must be configured before this authorization server can issue or verify tokens.",
+            );
+        }
+        return this.config.issuer;
+    }
+
+    /**
      * Builds the `jwt.SignOptions` passed through `JWTUtilsConfig.options` for a token signed with `kid`.
      * Declared as `any` (rather than a `JWTUtilsConfig["options"]` object literal) to avoid TypeScript's
      * excess-property check rejecting `algorithm`/`keyid` — `SignOptions`-only fields the stricter
      * `jwt.VerifyOptions` shape `JWTUtilsConfig.options` doesn't declare, even though `JWTUtils.createToken`
-     * forwards them to `jwt.sign()` correctly. `issuer` is omitted entirely (not just left `undefined`) when
-     * unconfigured — `jsonwebtoken` rejects a present-but-`undefined` `issuer` key outright.
+     * forwards them to `jwt.sign()` correctly.
      */
     private buildSignOptions(kid: string, expiresIn: number): any {
         return {
@@ -62,7 +83,7 @@ export class OAuthTokenUtils {
             algorithms: ["RS256"],
             keyid: kid,
             expiresIn,
-            ...(this.config.issuer ? { issuer: this.config.issuer } : {}),
+            issuer: this.requireIssuer(),
         };
     }
 
@@ -172,7 +193,7 @@ export class OAuthTokenUtils {
 
         const config: JWTUtilsConfig = {
             secret: publicKeyPem,
-            options: { algorithms: ["RS256"], ...(this.config.issuer ? { issuer: this.config.issuer } : {}) },
+            options: { algorithms: ["RS256"], issuer: this.requireIssuer() },
         };
 
         try {
