@@ -20,6 +20,11 @@ Keep entries terse — this is a reference, not a transcript.
   races with no concrete external trigger path. Every finding should be able to name the actual
   HTTP route/method or WS message type that reaches the code in question.
 
+- **Commit message style: concise, one line per task/bug/feature — no verbose prose.** A commit
+  message is a short list of one-line bullets, one per item. Never a paragraph explaining what was
+  done or why for any single item — that belongs in the diff/code comments/NOTES.md, not the commit
+  message. This mirrors JP's standing convention across his other repos.
+
 - **Commit discipline.** Don't `git commit` unless explicitly asked, even after a full
   review-and-fix cycle with passing tests. Leave changes staged/unstaged and say so. Approval for
   one task/phase (e.g. a plan step that says "implement, test, and commit") does NOT carry over to
