@@ -223,7 +223,7 @@ export abstract class BaseOAuthAuthorizeRoute<C extends Client, A extends Author
         await this.authorizationCodeRepo!.create(
             {
                 codeHash: hashOpaqueToken(raw),
-                clientId: client.clientId,
+                clientId: client.uid,
                 userUid,
                 redirectUri,
                 scope: scope.join(" "),
@@ -346,14 +346,14 @@ export abstract class BaseOAuthAuthorizeRoute<C extends Client, A extends Author
         // `consent` demands the consent screen even when a sufficient grant already exists.
         const forceConsent = promptValues.includes("consent");
         const sufficientGrant: G | undefined =
-            client.firstParty || forceConsent ? undefined : await this.findSufficientConsent(userUid, client.clientId, scope);
+            client.firstParty || forceConsent ? undefined : await this.findSufficientConsent(userUid, client.uid, scope);
 
         if (!client.firstParty && !sufficientGrant) {
             if (promptValues.includes("none")) {
                 return this.buildErrorRedirect(redirectUri, state, "consent_required");
             }
             const requestId = await this.createConsentTicket({
-                clientId: client.clientId,
+                clientId: client.uid,
                 userUid,
                 redirectUri,
                 scope: scope.join(" "),
@@ -436,7 +436,7 @@ export abstract class BaseOAuthAuthorizeRoute<C extends Client, A extends Author
         // Never grant more than was originally offered on the consent screen — down-select only.
         const grantedScope: string[] = scopeOverride ? originalScope.filter((s) => scopeOverride.includes(s)) : originalScope;
 
-        await this.upsertConsentGrant(userUid, client.clientId, grantedScope);
+        await this.upsertConsentGrant(userUid, client.uid, grantedScope);
 
         const redirectTo = await this.issueCode(
             client,

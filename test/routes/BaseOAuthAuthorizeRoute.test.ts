@@ -75,7 +75,6 @@ function makeClient(overrides: Partial<Client> = {}): Client {
         dateCreated: new Date(),
         dateModified: new Date(),
         version: 0,
-        clientId: "abc123",
         clientType: ClientType.CONFIDENTIAL,
         clientName: "Test App",
         redirectUris: ["https://app.example.com/callback"],
@@ -90,12 +89,12 @@ function makeClient(overrides: Partial<Client> = {}): Client {
 }
 
 function makeRoute(overrides: { client?: Client } = {}) {
-    const clientRepo = makeMockRepo<Client>("clientId");
+    const clientRepo = makeMockRepo<Client>();
     const authorizationCodeRepo = makeMockRepo<AuthorizationCode>("codeHash");
     const consentGrantRepo = makeMockRepo<ConsentGrant>();
 
     const client = overrides.client ?? makeClient();
-    clientRepo._store.set(client.clientId, client);
+    clientRepo._store.set(client.uid, client);
 
     const route = new TestOAuthAuthorizeRoute();
     (route as any)._objectFactory = makeMockObjectFactory(clientRepo, authorizationCodeRepo, consentGrantRepo);
@@ -163,14 +162,14 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
         it("Throws when the client is disabled.", async () => {
             const { route } = makeRoute({ client: makeClient({ disabled: true }) });
             await expect(
-                route.authorize(makeRequest({ query: { client_id: "abc123" } }), res),
+                route.authorize(makeRequest({ query: { client_id: "client-record-1" } }), res),
             ).rejects.toThrow(/Unknown or disabled/);
         });
 
         it("Throws when redirect_uri is missing.", async () => {
             const { route } = makeRoute();
             await expect(
-                route.authorize(makeRequest({ query: { client_id: "abc123" } }), res),
+                route.authorize(makeRequest({ query: { client_id: "client-record-1" } }), res),
             ).rejects.toThrow(/redirect_uri/);
         });
 
@@ -178,7 +177,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
             const { route } = makeRoute();
             await expect(
                 route.authorize(
-                    makeRequest({ query: { client_id: "abc123", redirect_uri: "https://evil.example.com" } }),
+                    makeRequest({ query: { client_id: "client-record-1", redirect_uri: "https://evil.example.com" } }),
                     res,
                 ),
             ).rejects.toThrow(/redirect_uri/);
@@ -188,7 +187,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
             const { route } = makeRoute();
             const result = await route.authorize(
                 makeRequest({
-                    query: { client_id: "abc123", redirect_uri: "https://app.example.com/callback", response_type: "token" },
+                    query: { client_id: "client-record-1", redirect_uri: "https://app.example.com/callback", response_type: "token" },
                 }),
                 res,
             );
@@ -206,7 +205,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
             await route.authorize(
                 makeRequest({
                     query: {
-                        client_id: "abc123",
+                        client_id: "client-record-1",
                         redirect_uri: "https://app.example.com/callback",
                         response_type: "code",
                         scope: "openid",
@@ -223,7 +222,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
             const { route } = makeRoute({ client: makeClient({ requirePkce: true }) });
             const result = await route.authorize(
                 makeRequest({
-                    query: { client_id: "abc123", redirect_uri: "https://app.example.com/callback", response_type: "code" },
+                    query: { client_id: "client-record-1", redirect_uri: "https://app.example.com/callback", response_type: "code" },
                 }),
                 res,
             );
@@ -236,7 +235,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
             const result = await route.authorize(
                 makeRequest({
                     query: {
-                        client_id: "abc123",
+                        client_id: "client-record-1",
                         redirect_uri: "https://app.example.com/callback",
                         response_type: "code",
                         code_challenge: "challenge-value",
@@ -254,7 +253,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
             const result = await route.authorize(
                 makeRequest({
                     query: {
-                        client_id: "abc123",
+                        client_id: "client-record-1",
                         redirect_uri: "https://app.example.com/callback",
                         response_type: "code",
                         code_challenge: "challenge-value",
@@ -273,7 +272,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
             const { route } = makeRoute({ client: makeClient({ firstParty: true }) });
             const result = await route.authorize(
                 makeRequest({
-                    query: { client_id: "abc123", redirect_uri: "https://app.example.com/callback", response_type: "code" },
+                    query: { client_id: "client-record-1", redirect_uri: "https://app.example.com/callback", response_type: "code" },
                     session: { userUid: "user-1" },
                 }),
                 res,
@@ -286,7 +285,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
             const { route } = makeRoute();
             const result = await route.authorize(
                 makeRequest({
-                    query: { client_id: "abc123", redirect_uri: "https://app.example.com/callback", response_type: "token" },
+                    query: { client_id: "client-record-1", redirect_uri: "https://app.example.com/callback", response_type: "token" },
                 }),
                 res,
             );
@@ -299,7 +298,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
             await route.authorize(
                 makeRequest({
                     query: {
-                        client_id: "abc123",
+                        client_id: "client-record-1",
                         redirect_uri: "https://app.example.com/callback",
                         response_type: "code",
                         code_challenge: "challenge-value",
@@ -317,7 +316,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
             (route as any).authMiddleware = { authenticate: vi.fn(async () => undefined) };
             const result = await route.authorize(
                 makeRequest({
-                    query: { client_id: "abc123", redirect_uri: "https://app.example.com/callback", response_type: "code" },
+                    query: { client_id: "client-record-1", redirect_uri: "https://app.example.com/callback", response_type: "code" },
                 }),
                 res,
             );
@@ -330,7 +329,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
             (route as any).authMiddleware = { authenticate };
             const result = await route.authorize(
                 makeRequest({
-                    query: { client_id: client.clientId, redirect_uri: "https://app.example.com/callback", response_type: "code" },
+                    query: { client_id: client.uid, redirect_uri: "https://app.example.com/callback", response_type: "code" },
                     session: { userUid: "user-1" },
                 }),
                 res,
@@ -345,7 +344,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
             (route as any).authMiddleware = { authenticate };
             const result = await route.authorize(
                 makeRequest({
-                    query: { client_id: client.clientId, redirect_uri: "https://app.example.com/callback", response_type: "code" },
+                    query: { client_id: client.uid, redirect_uri: "https://app.example.com/callback", response_type: "code" },
                 }),
                 res,
             );
@@ -360,7 +359,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
 
             await route.authorize(
                 makeRequest({
-                    query: { client_id: client.clientId, redirect_uri: "https://app.example.com/callback", response_type: "code" },
+                    query: { client_id: client.uid, redirect_uri: "https://app.example.com/callback", response_type: "code" },
                     session: { userUid: "user-1" },
                 }),
                 res,
@@ -377,7 +376,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
 
             const result = await route.authorize(
                 makeRequest({
-                    query: { client_id: client.clientId, redirect_uri: "https://app.example.com/callback", response_type: "code" },
+                    query: { client_id: client.uid, redirect_uri: "https://app.example.com/callback", response_type: "code" },
                     session: { userUid: "user-1" },
                 }),
                 res,
@@ -393,7 +392,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
             const result = await route.authorize(
                 makeRequest({
                     query: {
-                        client_id: client.clientId,
+                        client_id: client.uid,
                         redirect_uri: "https://app.example.com/callback",
                         response_type: "code",
                         scope: "openid profile",
@@ -419,7 +418,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
             const result = await route.authorize(
                 makeRequest({
                     query: {
-                        client_id: client.clientId,
+                        client_id: client.uid,
                         redirect_uri: "https://app.example.com/callback",
                         response_type: "code",
                         scope: "openid profile admin",
@@ -436,7 +435,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
             const result = await route.authorize(
                 makeRequest({
                     query: {
-                        client_id: client.clientId,
+                        client_id: client.uid,
                         redirect_uri: "https://app.example.com/callback",
                         response_type: "code",
                         scope: "openid profile",
@@ -458,7 +457,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
                 dateModified: new Date(),
                 version: 0,
                 userUid: "user-1",
-                clientId: client.clientId,
+                clientId: client.uid,
                 scope: "openid profile email",
                 grantedAt: new Date(),
             });
@@ -466,7 +465,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
             const result = await route.authorize(
                 makeRequest({
                     query: {
-                        client_id: client.clientId,
+                        client_id: client.uid,
                         redirect_uri: "https://app.example.com/callback",
                         response_type: "code",
                         scope: "openid profile",
@@ -490,7 +489,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
                 dateModified: new Date(),
                 version: 0,
                 userUid: "user-1",
-                clientId: client.clientId,
+                clientId: client.uid,
                 scope: "openid",
                 grantedAt: new Date(),
             });
@@ -498,7 +497,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
             const result = await route.authorize(
                 makeRequest({
                     query: {
-                        client_id: client.clientId,
+                        client_id: client.uid,
                         redirect_uri: "https://app.example.com/callback",
                         response_type: "code",
                         scope: "openid profile",
@@ -517,7 +516,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
                 const result = await route.authorize(
                     makeRequest({
                         query: {
-                            client_id: client.clientId,
+                            client_id: client.uid,
                             redirect_uri: "https://app.example.com/callback",
                             response_type: "code",
                             prompt: "none login",
@@ -536,7 +535,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
                 const result = await route.authorize(
                     makeRequest({
                         query: {
-                            client_id: client.clientId,
+                            client_id: client.uid,
                             redirect_uri: "https://app.example.com/callback",
                             response_type: "code",
                             prompt: "none",
@@ -555,7 +554,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
                 const result = await route.authorize(
                     makeRequest({
                         query: {
-                            client_id: client.clientId,
+                            client_id: client.uid,
                             redirect_uri: "https://app.example.com/callback",
                             response_type: "code",
                             scope: "openid profile",
@@ -574,7 +573,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
                 const result = await route.authorize(
                     makeRequest({
                         query: {
-                            client_id: client.clientId,
+                            client_id: client.uid,
                             redirect_uri: "https://app.example.com/callback",
                             response_type: "code",
                             prompt: "none",
@@ -593,7 +592,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
                 const result = await route.authorize(
                     makeRequest({
                         query: {
-                            client_id: client.clientId,
+                            client_id: client.uid,
                             redirect_uri: "https://app.example.com/callback",
                             response_type: "code",
                             prompt: "login",
@@ -611,7 +610,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
                 const result = await route.authorize(
                     makeRequest({
                         query: {
-                            client_id: client.clientId,
+                            client_id: client.uid,
                             redirect_uri: "https://app.example.com/callback",
                             response_type: "code",
                             prompt: "select_account",
@@ -631,7 +630,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
                     dateModified: new Date(),
                     version: 0,
                     userUid: "user-1",
-                    clientId: client.clientId,
+                    clientId: client.uid,
                     scope: "openid profile email",
                     grantedAt: new Date(),
                 });
@@ -639,7 +638,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
                 const result = await route.authorize(
                     makeRequest({
                         query: {
-                            client_id: client.clientId,
+                            client_id: client.uid,
                             redirect_uri: "https://app.example.com/callback",
                             response_type: "code",
                             scope: "openid profile",
@@ -658,7 +657,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
                 const result = await route.authorize(
                     makeRequest({
                         query: {
-                            client_id: client.clientId,
+                            client_id: client.uid,
                             redirect_uri: "https://app.example.com/callback",
                             response_type: "code",
                             prompt: "consent",
@@ -675,7 +674,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
     describe("decideConsent", () => {
         async function makeTicket(route: any, overrides: Record<string, any> = {}): Promise<string> {
             return (route).createConsentTicket({
-                clientId: "abc123",
+                clientId: "client-record-1",
                 userUid: "user-1",
                 redirectUri: "https://app.example.com/callback",
                 scope: "openid profile",
@@ -792,7 +791,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
                 dateModified: new Date(),
                 version: 0,
                 userUid: "user-1",
-                clientId: "abc123",
+                clientId: "client-record-1",
                 scope: "email",
                 grantedAt: new Date(),
             });

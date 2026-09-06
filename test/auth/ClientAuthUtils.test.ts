@@ -25,7 +25,10 @@ function makeRequest(overrides: Partial<HttpRequest> = {}): HttpRequest {
 
 function makeMockRepo(clients: Client[]) {
     return {
-        findOne: vi.fn(async (clientId: string) => clients.find((c) => c.clientId === clientId)),
+        // Mirrors RepoUtils.findOne()'s real contract: lookups are always by `uid`, since `client_id`
+        // (the OAuth wire parameter) is the record's own `uid` post-refactor - there is no separate
+        // identifier field on `Client` to look up by.
+        findOne: vi.fn(async (uid: string) => clients.find((c) => c.uid === uid)),
     };
 }
 
@@ -38,11 +41,10 @@ describe("ClientAuthUtils Tests", () => {
     it("Authenticates a confidential client via an Authorization: Basic header.", async () => {
         const clientSecretHash = await hashSecret("s3cret");
         const client: Client = {
-            uid: "client-1",
+            uid: "abc123",
             dateCreated: new Date(),
             dateModified: new Date(),
             version: 0,
-            clientId: "abc123",
             clientSecretHash,
             clientType: ClientType.CONFIDENTIAL,
             clientName: "Test App",
@@ -61,17 +63,16 @@ describe("ClientAuthUtils Tests", () => {
 
         const result = await utils.authenticateClient(req);
 
-        expect(result.clientId).toBe("abc123");
+        expect(result.uid).toBe("abc123");
     });
 
     it("Authenticates a confidential client via client_secret_post body parameters.", async () => {
         const clientSecretHash = await hashSecret("s3cret");
         const client: Client = {
-            uid: "client-1",
+            uid: "abc123",
             dateCreated: new Date(),
             dateModified: new Date(),
             version: 0,
-            clientId: "abc123",
             clientSecretHash,
             clientType: ClientType.CONFIDENTIAL,
             clientName: "Test App",
@@ -89,16 +90,15 @@ describe("ClientAuthUtils Tests", () => {
 
         const result = await utils.authenticateClient(req);
 
-        expect(result.clientId).toBe("abc123");
+        expect(result.uid).toBe("abc123");
     });
 
     it("Authenticates a public client with tokenEndpointAuthMethod 'none' without a secret.", async () => {
         const client: Client = {
-            uid: "client-2",
+            uid: "public-app",
             dateCreated: new Date(),
             dateModified: new Date(),
             version: 0,
-            clientId: "public-app",
             clientType: ClientType.PUBLIC,
             clientName: "Mobile App",
             redirectUris: [],
@@ -115,7 +115,7 @@ describe("ClientAuthUtils Tests", () => {
 
         const result = await utils.authenticateClient(req);
 
-        expect(result.clientId).toBe("public-app");
+        expect(result.uid).toBe("public-app");
     });
 
     it("Rejects a request with no client_id at all.", async () => {
@@ -137,11 +137,10 @@ describe("ClientAuthUtils Tests", () => {
     it("Rejects a disabled client.", async () => {
         const clientSecretHash = await hashSecret("s3cret");
         const client: Client = {
-            uid: "client-1",
+            uid: "abc123",
             dateCreated: new Date(),
             dateModified: new Date(),
             version: 0,
-            clientId: "abc123",
             clientSecretHash,
             clientType: ClientType.CONFIDENTIAL,
             clientName: "Test App",
@@ -164,11 +163,10 @@ describe("ClientAuthUtils Tests", () => {
     it("Rejects a confidential client presenting the wrong secret.", async () => {
         const clientSecretHash = await hashSecret("s3cret");
         const client: Client = {
-            uid: "client-1",
+            uid: "abc123",
             dateCreated: new Date(),
             dateModified: new Date(),
             version: 0,
-            clientId: "abc123",
             clientSecretHash,
             clientType: ClientType.CONFIDENTIAL,
             clientName: "Test App",
@@ -189,11 +187,10 @@ describe("ClientAuthUtils Tests", () => {
 
     it("Rejects a confidential client with no secret configured when no secret is presented.", async () => {
         const client: Client = {
-            uid: "client-1",
+            uid: "abc123",
             dateCreated: new Date(),
             dateModified: new Date(),
             version: 0,
-            clientId: "abc123",
             clientType: ClientType.CONFIDENTIAL,
             clientName: "Test App",
             redirectUris: [],
@@ -213,11 +210,10 @@ describe("ClientAuthUtils Tests", () => {
 
     it("Rejects a client registered with private_key_jwt as not yet supported.", async () => {
         const client: Client = {
-            uid: "client-1",
+            uid: "abc123",
             dateCreated: new Date(),
             dateModified: new Date(),
             version: 0,
-            clientId: "abc123",
             clientType: ClientType.CONFIDENTIAL,
             clientName: "Test App",
             redirectUris: [],

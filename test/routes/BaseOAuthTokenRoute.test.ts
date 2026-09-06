@@ -55,7 +55,6 @@ const client: Client = {
     dateCreated: new Date(),
     dateModified: new Date(),
     version: 0,
-    clientId: "abc123",
     clientType: ClientType.CONFIDENTIAL,
     clientName: "Test App",
     redirectUris: ["https://app.example.com/callback"],
@@ -71,12 +70,12 @@ const refreshClient: Client = { ...client, grantTypes: ["authorization_code", "r
 
 const clientCredentialsClient: Client = {
     ...client,
-    clientId: "service-1",
+    uid: "service-1",
     grantTypes: ["client_credentials"],
     scope: "profile email",
 };
 
-const publicClient: Client = { ...client, clientId: "mobile-1", clientType: ClientType.PUBLIC, grantTypes: ["client_credentials"] };
+const publicClient: Client = { ...client, uid: "mobile-1", clientType: ClientType.PUBLIC, grantTypes: ["client_credentials"] };
 
 function makeAuthCode(overrides: Partial<AuthorizationCode> = {}): AuthorizationCode {
     return {
@@ -85,7 +84,7 @@ function makeAuthCode(overrides: Partial<AuthorizationCode> = {}): Authorization
         dateModified: new Date(),
         version: 0,
         codeHash: "",
-        clientId: client.clientId,
+        clientId: client.uid,
         userUid: "user-1",
         redirectUri: "https://app.example.com/callback",
         scope: "profile",
@@ -102,7 +101,7 @@ function makeOAuthRefreshToken(overrides: Partial<OAuthRefreshToken> = {}): OAut
         dateModified: new Date(),
         version: 0,
         tokenHash: "",
-        clientId: refreshClient.clientId,
+        clientId: refreshClient.uid,
         userUid: "user-1",
         scope: "profile",
         familyId: "family-1",
@@ -113,7 +112,7 @@ function makeOAuthRefreshToken(overrides: Partial<OAuthRefreshToken> = {}): OAut
 }
 
 function makeRoute() {
-    const clientRepo = makeMockRepo<Client>("clientId");
+    const clientRepo = makeMockRepo<Client>("uid");
     const authorizationCodeRepo = makeMockRepo<AuthorizationCode>("codeHash");
     const refreshTokenRepo = makeMockRepo<OAuthRefreshToken>("tokenHash");
 
@@ -175,7 +174,7 @@ describe("BaseOAuthTokenRoute Tests", () => {
         });
 
         it("Builds clientRepo, authorizationCodeRepo, refreshTokenRepo, clientAuthUtils, and oauthTokenUtils via the object factory.", async () => {
-            const clientRepo = makeMockRepo<Client>("clientId");
+            const clientRepo = makeMockRepo<Client>("uid");
             const authorizationCodeRepo = makeMockRepo<AuthorizationCode>("codeHash");
             const refreshTokenRepo = makeMockRepo<OAuthRefreshToken>("tokenHash");
             const signingKeyRepo = makeMockRepo<any>("kid");
@@ -557,7 +556,7 @@ describe("BaseOAuthTokenRoute Tests", () => {
                 expect(refreshTokenRepo.create).toHaveBeenCalledWith(
                     expect.objectContaining({
                         tokenHash: hashOpaqueToken("new-refresh-token-1"),
-                        clientId: refreshClient.clientId,
+                        clientId: refreshClient.uid,
                         userUid: "user-1",
                         scope: "profile",
                         familyId: "new-family-1",
@@ -686,7 +685,7 @@ describe("BaseOAuthTokenRoute Tests", () => {
                 const { route, refreshTokenRepo } = makeRoute();
                 (route as any).clientAuthUtils = { authenticateClient: vi.fn(async () => client) };
                 const raw = "raw-refresh-1";
-                const stored = makeOAuthRefreshToken({ clientId: client.clientId });
+                const stored = makeOAuthRefreshToken({ clientId: client.uid });
                 refreshTokenRepo._store.set(hashOpaqueToken(raw), stored);
                 const res = makeResponse();
 

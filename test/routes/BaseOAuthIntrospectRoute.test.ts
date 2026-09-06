@@ -45,7 +45,6 @@ const client: Client = {
     dateCreated: new Date(),
     dateModified: new Date(),
     version: 0,
-    clientId: "abc123",
     clientType: ClientType.CONFIDENTIAL,
     clientName: "Test App",
     redirectUris: ["https://app.example.com/callback"],
@@ -57,7 +56,7 @@ const client: Client = {
     firstParty: false,
 };
 
-const publicClient: Client = { ...client, clientId: "mobile-1", clientType: ClientType.PUBLIC };
+const publicClient: Client = { ...client, uid: "mobile-1", clientType: ClientType.PUBLIC };
 
 function makeOAuthRefreshToken(overrides: Partial<OAuthRefreshToken> = {}): OAuthRefreshToken {
     return {
@@ -66,7 +65,7 @@ function makeOAuthRefreshToken(overrides: Partial<OAuthRefreshToken> = {}): OAut
         dateModified: new Date(),
         version: 0,
         tokenHash: "",
-        clientId: client.clientId,
+        clientId: client.uid,
         userUid: "user-1",
         scope: "profile",
         familyId: "family-1",
@@ -245,7 +244,7 @@ describe("BaseOAuthIntrospectRoute Tests", () => {
                 expect(res.json).toHaveBeenCalledWith({
                     active: true,
                     token_type: "refresh_token",
-                    client_id: client.clientId,
+                    client_id: client.uid,
                     scope: "profile",
                     exp: Math.floor(stored.expiresAt.getTime() / 1000),
                     sub: "user-1",
@@ -293,7 +292,7 @@ describe("BaseOAuthIntrospectRoute Tests", () => {
                 const { route } = makeRoute();
                 (route as any).oauthTokenUtils = {
                     verifyAccessToken: vi.fn(async () => ({
-                        client_id: client.clientId,
+                        client_id: client.uid,
                         scope: "openid profile",
                         sub: "user-1",
                         jti: "jti-1",
@@ -308,7 +307,7 @@ describe("BaseOAuthIntrospectRoute Tests", () => {
                 expect(res.json).toHaveBeenCalledWith({
                     active: true,
                     token_type: "access_token",
-                    client_id: client.clientId,
+                    client_id: client.uid,
                     scope: "openid profile",
                     sub: "user-1",
                     exp: 1700000900,
@@ -329,7 +328,7 @@ describe("BaseOAuthIntrospectRoute Tests", () => {
             it("Returns {active:false} once the access token's jti has been denylisted (revoked).", async () => {
                 const { route } = makeRoute();
                 (route as any).oauthTokenUtils = {
-                    verifyAccessToken: vi.fn(async () => ({ client_id: client.clientId, jti: "jti-1", scope: "profile", sub: "user-1" })),
+                    verifyAccessToken: vi.fn(async () => ({ client_id: client.uid, jti: "jti-1", scope: "profile", sub: "user-1" })),
                 };
                 (route as any).accessTokenDenylist = { revoke: vi.fn(), isRevoked: vi.fn(async () => true) };
                 const res = makeResponse();

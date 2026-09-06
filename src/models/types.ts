@@ -190,9 +190,6 @@ export enum TokenEndpointAuthMethod {
  * @author Jean-Philippe Steinmetz
  */
 export interface Client extends BaseEntity {
-    /** The opaque public identifier of the client. */
-    clientId: string;
-
     /** The Argon2id hash of the client's secret. Unset for a `PUBLIC` client. */
     clientSecretHash?: string;
 
@@ -310,7 +307,7 @@ export interface AuthorizationCode extends BaseEntity {
     /** The SHA-256 hex digest of the opaque code. The raw code itself is never persisted. */
     codeHash: string;
 
-    /** The `clientId` of the `Client` this code was issued to. */
+    /** The `uid` of the `Client` this code was issued to. */
     clientId: string;
 
     /** The `uid` of the `User` (resource owner) who authorized this code. */
@@ -352,7 +349,7 @@ export interface ConsentGrant extends BaseEntity {
     /** The `uid` of the `User` who granted consent. */
     userUid: string;
 
-    /** The `clientId` of the `Client` consent was granted to. */
+    /** The `uid` of the `Client` consent was granted to. */
     clientId: string;
 
     /** The space-delimited, cumulative set of scopes approved across every consent decision so far. */
@@ -376,7 +373,7 @@ export interface OAuthRefreshToken extends BaseEntity {
     /** The SHA-256 hex digest of the opaque token. The raw token itself is never persisted. */
     tokenHash: string;
 
-    /** The `clientId` of the `Client` this token was issued to. */
+    /** The `uid` of the `Client` this token was issued to. */
     clientId: string;
 
     /** The `uid` of the `User` (resource owner) this token acts on behalf of. Absent for a token issued via

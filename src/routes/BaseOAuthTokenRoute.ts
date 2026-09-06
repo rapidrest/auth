@@ -135,7 +135,7 @@ export abstract class BaseOAuthTokenRoute<C extends Client, A extends Authorizat
             await this.refreshTokenRepo!.create(
                 {
                     tokenHash: hashOpaqueToken(refresh.token),
-                    clientId: client.clientId,
+                    clientId: client.uid,
                     userUid: user.uid,
                     scope: scope.join(" "),
                     familyId: refresh.familyId,
@@ -171,7 +171,7 @@ export abstract class BaseOAuthTokenRoute<C extends Client, A extends Authorizat
             ignoreACL: true,
         });
 
-        if (!authCode || authCode.clientId !== client.clientId) {
+        if (!authCode || authCode.clientId !== client.uid) {
             throw new OAuthError("invalid_grant", "The authorization code is invalid.");
         }
 
@@ -229,7 +229,7 @@ export abstract class BaseOAuthTokenRoute<C extends Client, A extends Authorizat
             ignoreACL: true,
         });
 
-        if (!refreshToken || refreshToken.clientId !== client.clientId) {
+        if (!refreshToken || refreshToken.clientId !== client.uid) {
             throw new OAuthError("invalid_grant", "The refresh token is invalid.");
         }
 

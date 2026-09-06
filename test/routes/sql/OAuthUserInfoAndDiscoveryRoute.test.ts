@@ -146,7 +146,7 @@ describe("Route:OAuthUserInfoAndDiscoverySQL Tests", () => {
         const authResult = await testAgent.get(
             withQuery("/sql/oauth/authorize", {
                 response_type: "code",
-                client_id: client.clientId,
+                client_id: client.uid,
                 redirect_uri: "app://callback",
                 scope,
                 code_challenge: challenge,
@@ -161,7 +161,7 @@ describe("Route:OAuthUserInfoAndDiscoverySQL Tests", () => {
             code,
             redirect_uri: "app://callback",
             code_verifier: verifier,
-            client_id: client.clientId,
+            client_id: client.uid,
         });
         expect(tokenResult.status).toBe(200);
         return tokenResult.body.access_token;
@@ -184,7 +184,6 @@ describe("Route:OAuthUserInfoAndDiscoverySQL Tests", () => {
             );
             const client = await clientRepo.save(
                 new ClientSQL({
-                    clientId: "mobile-app-1",
                     clientType: ClientType.PUBLIC,
                     clientName: "Mobile App",
                     redirectUris: ["app://callback"],
@@ -222,7 +221,6 @@ describe("Route:OAuthUserInfoAndDiscoverySQL Tests", () => {
             await profileRepo.save(new ProfileSQL({ uid: user.uid, givenName: "Ada" }));
             const client = await clientRepo.save(
                 new ClientSQL({
-                    clientId: "mobile-app-2",
                     clientType: ClientType.PUBLIC,
                     clientName: "Mobile App",
                     redirectUris: ["app://callback"],
@@ -254,7 +252,6 @@ describe("Route:OAuthUserInfoAndDiscoverySQL Tests", () => {
             await createSecretSQL({ userUid: user.uid });
             const client = await clientRepo.save(
                 new ClientSQL({
-                    clientId: "service-1",
                     clientSecretHash: await argon2.hash("client-secret-value"),
                     clientType: ClientType.CONFIDENTIAL,
                     clientName: "Backend Service",
@@ -269,7 +266,7 @@ describe("Route:OAuthUserInfoAndDiscoverySQL Tests", () => {
             );
             const tokenResult = await request(server.getApplication()).post("/sql/oauth/token").send({
                 grant_type: "client_credentials",
-                client_id: client.clientId,
+                client_id: client.uid,
                 client_secret: "client-secret-value",
             });
             expect(tokenResult.status).toBe(200);
@@ -286,7 +283,6 @@ describe("Route:OAuthUserInfoAndDiscoverySQL Tests", () => {
             await createSecretSQL({ userUid: user.uid });
             const client = await clientRepo.save(
                 new ClientSQL({
-                    clientId: "mobile-app-3",
                     clientType: ClientType.PUBLIC,
                     clientName: "Mobile App",
                     redirectUris: ["app://callback"],
@@ -303,7 +299,7 @@ describe("Route:OAuthUserInfoAndDiscoverySQL Tests", () => {
             await request(server.getApplication()).post("/sql/oauth/revoke").send({
                 token: accessToken,
                 token_type_hint: "access_token",
-                client_id: client.clientId,
+                client_id: client.uid,
             });
 
             const result = await request(server.getApplication())

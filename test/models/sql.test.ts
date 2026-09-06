@@ -85,7 +85,6 @@ describe("SQL model default construction", () => {
     it("ClientSQL falls back to class defaults when constructed with no data.", () => {
         const obj = new ClientSQL();
 
-        expect(obj.clientId).toBe("");
         expect(obj.clientSecretHash).toBeUndefined();
         expect(obj.clientType).toBe(ClientType.CONFIDENTIAL);
         expect(obj.clientName).toBe("");
@@ -100,9 +99,8 @@ describe("SQL model default construction", () => {
     });
 
     it("ClientSQL applies provided data when constructed with data.", () => {
-        const obj = new ClientSQL({ clientId: "abc123", clientName: "My App", firstParty: true });
+        const obj = new ClientSQL({ clientName: "My App", firstParty: true });
 
-        expect(obj.clientId).toBe("abc123");
         expect(obj.clientName).toBe("My App");
         expect(obj.firstParty).toBe(true);
     });

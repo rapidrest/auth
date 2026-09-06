@@ -58,6 +58,51 @@ Keep entries terse — this is a reference, not a transcript.
 
 ## Session Log
 
+### 2026-09-06 — `Client.clientId` removed entirely; `Client.uid` is now the OAuth `client_id`
+
+While building a real end-to-end integration test in the downstream `auth-server` repo (register a
+client → authorize → consent → token exchange → JWKS verify → userinfo), the very first "create a
+second client" step failed: `BaseOAuthClientRoute.validateCreate()` (added in Phase A) never actually
+generated a `clientId` — it silently persisted the model's own default (`""`) on every create, and
+since `ClientSQL`/`ClientMongo`'s `clientId` column had a **unique index**, the *second* client ever
+created in a deployment would fail outright on the unique-constraint violation.
+
+The first fix attempt (generate `clientId` server-side, same opaque-token style as `SigningKeyUtils`'s
+`kid`) was then **superseded** after the user asked the sharper question: why does `Client` need its
+own separate identifier at all, when `BaseEntity.uid` is already unique, auto-generated (`uuid.v4()`),
+and exposed in every API response? Unlike `SigningKey.kid` (which must stay valid across a key's
+active→retired lifecycle, independent of whether the key row itself is ever renamed) there's no
+equivalent lifecycle reason for `Client` to have two identities. **Decision: removed `clientId` from
+`Client` entirely; `Client.uid` now serves as the OAuth `client_id` everywhere.**
+
+- Removed the field from `types.ts`'s `Client` interface, `ClientSQL`/`ClientMongo` (including the
+  `@Identifier`/`@Index("clientId", {unique:true})` decorators and constructor copy-line), and the
+  now-dead clientId-generation block in `BaseOAuthClientRoute.validateCreate()`.
+- Every `client.clientId` read across `OAuthTokenUtils` (`sub`/`aud`/`azp`/`client_id` claims),
+  `BaseOAuthAuthorizeRoute` (issuing codes, consent tickets/grants), `BaseOAuthTokenRoute` (refresh
+  token issuance, authCode/refreshToken ownership checks), and `BaseOAuthRevokeRoute` (ownership
+  checks) became `client.uid`. `ClientAuthUtils.authenticateClient()` and `BaseOAuthIntrospectRoute`
+  needed **no changes** — both already looked up/echoed the client by whatever value `RepoUtils`
+  treats as the identifier, which is `uid` natively.
+  The `clientId` *field name* is deliberately **kept** on `AuthorizationCode`/`ConsentGrant`/
+  `OAuthRefreshToken` — those are legitimate foreign-key-style references to a client, just now
+  populated with the client's `uid` instead of a separate identifier.
+- Updated ~20 test files across unit and sql/mongo integration tiers to match (fixture `Client`
+  literals no longer set `clientId`; comparisons/query params changed from `client.clientId` to
+  `client.uid`). `yarn build` clean; full `yarn test:prod` run: 1789/1789 real tests passed. The only
+  failures were 4 suites hit by the known `ObjectFactory`/`ClassLoader` flake (see
+  [[project_rapidrest_core_sibling]]), including `UserRoute` (sql+mongo) which this refactor never
+  touched — confirmed non-real by isolated re-run of every affected file.
+- Added the missing real-database integration test tier this bug exposed in the first place:
+  `test/routes/{sql,mongo}/OAuthClientRoute.test.ts` (Phase A had only ever gotten the isolated
+  mocked-repo unit test), covering `uid` uniqueness, ownership/ACL (owner vs. admin vs. third party),
+  the `firstParty` field-level rule, and secret generation/regeneration against the real persisted
+  hash. **Lesson: a route this central to a cross-repo integration deserves the same 3-tier
+  convention as everything else in this library from the start.**
+- Not published — per standing decision, only the user runs `yarn release`. `auth-server` will need
+  its `node_modules/@rapidrest/auth` patched or a fresh publish+bump, plus its own integration tests
+  updated (`createClientRes.body.clientId` → `.uid`), before its OAuth integration test can proceed.
+
 ### 2026-09-05 — OAuth 2.0/OIDC authorization server (Phases 1-6 + conformance fixes + Phase A client CRUD)
 
 - **Built full OAuth 2.0 / OpenID Connect authorization-server capability** on top of what was

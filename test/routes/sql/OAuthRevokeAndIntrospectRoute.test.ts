@@ -61,7 +61,6 @@ describe("Route:OAuthRevokeAndIntrospectSQL Tests", () => {
         const clientSecretHash = await argon2.hash("client-secret-value");
         return clientRepo.save(
             new ClientSQL({
-                clientId: "service-1",
                 clientSecretHash,
                 clientType: ClientType.CONFIDENTIAL,
                 clientName: "Backend Service",
@@ -80,7 +79,7 @@ describe("Route:OAuthRevokeAndIntrospectSQL Tests", () => {
     async function issueAccessToken(client: ClientSQL): Promise<string> {
         const tokenResult = await request(server.getApplication()).post("/sql/oauth/token").send({
             grant_type: "client_credentials",
-            client_id: client.clientId,
+            client_id: client.uid,
             client_secret: "client-secret-value",
         });
         expect(tokenResult.status).toBe(200);
@@ -91,7 +90,7 @@ describe("Route:OAuthRevokeAndIntrospectSQL Tests", () => {
         await refreshTokenRepo.save(
             new OAuthRefreshTokenSQL({
                 tokenHash: hashOpaqueToken(raw),
-                clientId: client.clientId,
+                clientId: client.uid,
                 userUid: "user-1",
                 scope: "reports:read",
                 familyId: "family-1",
@@ -110,7 +109,7 @@ describe("Route:OAuthRevokeAndIntrospectSQL Tests", () => {
 
             const revokeResult = await request(server.getApplication()).post("/sql/oauth/revoke").send({
                 token: raw,
-                client_id: client.clientId,
+                client_id: client.uid,
                 client_secret: "client-secret-value",
             });
             expect(revokeResult.status).toBe(200);
@@ -119,7 +118,7 @@ describe("Route:OAuthRevokeAndIntrospectSQL Tests", () => {
             const refreshResult = await request(server.getApplication()).post("/sql/oauth/token").send({
                 grant_type: "refresh_token",
                 refresh_token: raw,
-                client_id: client.clientId,
+                client_id: client.uid,
                 client_secret: "client-secret-value",
             });
             expect(refreshResult.status).toBe(400);
@@ -133,14 +132,14 @@ describe("Route:OAuthRevokeAndIntrospectSQL Tests", () => {
             const revokeResult = await request(server.getApplication()).post("/sql/oauth/revoke").send({
                 token: accessToken,
                 token_type_hint: "access_token",
-                client_id: client.clientId,
+                client_id: client.uid,
                 client_secret: "client-secret-value",
             });
             expect(revokeResult.status).toBe(200);
 
             const introspectResult = await request(server.getApplication()).post("/sql/oauth/introspect").send({
                 token: accessToken,
-                client_id: client.clientId,
+                client_id: client.uid,
                 client_secret: "client-secret-value",
             });
             expect(introspectResult.body).toEqual({ active: false });
@@ -150,7 +149,7 @@ describe("Route:OAuthRevokeAndIntrospectSQL Tests", () => {
             const client = await createClient();
             const result = await request(server.getApplication()).post("/sql/oauth/revoke").send({
                 token: "does-not-exist",
-                client_id: client.clientId,
+                client_id: client.uid,
                 client_secret: "client-secret-value",
             });
             expect(result.status).toBe(200);
@@ -175,16 +174,16 @@ describe("Route:OAuthRevokeAndIntrospectSQL Tests", () => {
 
             const result = await request(server.getApplication()).post("/sql/oauth/introspect").send({
                 token: accessToken,
-                client_id: client.clientId,
+                client_id: client.uid,
                 client_secret: "client-secret-value",
             });
 
             expect(result.status).toBe(200);
             expect(result.body.active).toBe(true);
             expect(result.body.token_type).toBe("access_token");
-            expect(result.body.client_id).toBe(client.clientId);
+            expect(result.body.client_id).toBe(client.uid);
             expect(result.body.scope).toBe("reports:read");
-            expect(result.body.sub).toBe(client.clientId);
+            expect(result.body.sub).toBe(client.uid);
         });
 
         it("Reports an active refresh token with its claims.", async () => {
@@ -195,14 +194,14 @@ describe("Route:OAuthRevokeAndIntrospectSQL Tests", () => {
 
             const result = await request(server.getApplication()).post("/sql/oauth/introspect").send({
                 token: raw,
-                client_id: client.clientId,
+                client_id: client.uid,
                 client_secret: "client-secret-value",
             });
 
             expect(result.body).toEqual({
                 active: true,
                 token_type: "refresh_token",
-                client_id: client.clientId,
+                client_id: client.uid,
                 scope: "reports:read",
                 exp: Math.floor(expiresAt.getTime() / 1000),
                 sub: "user-1",
@@ -213,7 +212,7 @@ describe("Route:OAuthRevokeAndIntrospectSQL Tests", () => {
             const client = await createClient();
             const result = await request(server.getApplication()).post("/sql/oauth/introspect").send({
                 token: "does-not-exist",
-                client_id: client.clientId,
+                client_id: client.uid,
                 client_secret: "client-secret-value",
             });
             expect(result.status).toBe(200);
@@ -223,7 +222,6 @@ describe("Route:OAuthRevokeAndIntrospectSQL Tests", () => {
         it("Rejects a public client caller with invalid_client.", async () => {
             const publicClient = await clientRepo.save(
                 new ClientSQL({
-                    clientId: "mobile-1",
                     clientType: ClientType.PUBLIC,
                     clientName: "Mobile App",
                     redirectUris: ["app://callback"],
@@ -238,7 +236,7 @@ describe("Route:OAuthRevokeAndIntrospectSQL Tests", () => {
 
             const result = await request(server.getApplication()).post("/sql/oauth/introspect").send({
                 token: "some-token",
-                client_id: publicClient.clientId,
+                client_id: publicClient.uid,
             });
             expect(result.status).toBe(401);
             expect(result.body.error).toBe("invalid_client");

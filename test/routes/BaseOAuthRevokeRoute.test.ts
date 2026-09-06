@@ -50,7 +50,6 @@ const client: Client = {
     dateCreated: new Date(),
     dateModified: new Date(),
     version: 0,
-    clientId: "abc123",
     clientType: ClientType.CONFIDENTIAL,
     clientName: "Test App",
     redirectUris: ["https://app.example.com/callback"],
@@ -69,7 +68,7 @@ function makeOAuthRefreshToken(overrides: Partial<OAuthRefreshToken> = {}): OAut
         dateModified: new Date(),
         version: 0,
         tokenHash: "",
-        clientId: client.clientId,
+        clientId: client.uid,
         userUid: "user-1",
         scope: "profile",
         familyId: "family-1",
@@ -265,7 +264,7 @@ describe("BaseOAuthRevokeRoute Tests", () => {
         it("Falls back to denylisting an access token when the refresh-token lookup finds nothing.", async () => {
             const { route } = makeRoute();
             (route as any).oauthTokenUtils = {
-                verifyAccessToken: vi.fn(async () => ({ client_id: client.clientId, jti: "jti-1", exp: Math.floor(Date.now() / 1000) + 300 })),
+                verifyAccessToken: vi.fn(async () => ({ client_id: client.uid, jti: "jti-1", exp: Math.floor(Date.now() / 1000) + 300 })),
             };
             const denylist = { revoke: vi.fn(), isRevoked: vi.fn(async () => false) };
             (route as any).accessTokenDenylist = denylist;
@@ -295,7 +294,7 @@ describe("BaseOAuthRevokeRoute Tests", () => {
         it("Treats a missing exp claim as an already-expired token (ttlSeconds 0) rather than denylisting forever.", async () => {
             const { route } = makeRoute();
             (route as any).oauthTokenUtils = {
-                verifyAccessToken: vi.fn(async () => ({ client_id: client.clientId, jti: "jti-1" })),
+                verifyAccessToken: vi.fn(async () => ({ client_id: client.uid, jti: "jti-1" })),
             };
             const denylist = { revoke: vi.fn(), isRevoked: vi.fn(async () => false) };
             (route as any).accessTokenDenylist = denylist;

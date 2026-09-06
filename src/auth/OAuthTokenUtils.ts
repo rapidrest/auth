@@ -90,7 +90,7 @@ export class OAuthTokenUtils {
     /**
      * Signs a new OAuth access token for `client`. When `user` is provided, the token is scoped to that
      * resource owner (`sub` = `user.uid`); otherwise (the `client_credentials` grant) it's scoped to the
-     * client itself (`sub` = `client.clientId`).
+     * client itself (`sub` = `client.uid`).
      *
      * @param client The client the token is being issued to.
      * @param user The resource owner the token acts on behalf of, or `undefined` for `client_credentials`.
@@ -110,13 +110,13 @@ export class OAuthTokenUtils {
         // `JWTUtils.createToken` mandates a `user.uid`, and this keeps the resulting `profile` claim (an
         // artifact of reusing `createToken` — see its own doc comment) a faithful reflection of who/what the
         // token actually represents, rather than an arbitrary placeholder.
-        const tokenUser: JWTUser = user ?? { uid: client.clientId, roles: [], scopes: scope };
+        const tokenUser: JWTUser = user ?? { uid: client.uid, roles: [], scopes: scope };
 
         const token: string = await JWTUtils.createToken(config, tokenUser, {
-            sub: user?.uid ?? client.clientId,
-            aud: client.clientId,
-            azp: client.clientId,
-            client_id: client.clientId,
+            sub: user?.uid ?? client.uid,
+            aud: client.uid,
+            azp: client.uid,
+            client_id: client.uid,
             scope: scope.join(" "),
             jti,
         });
@@ -140,8 +140,8 @@ export class OAuthTokenUtils {
 
         return JWTUtils.createToken(config, user, {
             sub: user.uid,
-            aud: client.clientId,
-            azp: client.clientId,
+            aud: client.uid,
+            azp: client.uid,
             auth_time: Math.floor(Date.now() / 1000),
             ...(nonce ? { nonce } : {}),
         });

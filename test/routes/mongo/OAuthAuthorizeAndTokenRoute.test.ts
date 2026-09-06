@@ -160,7 +160,6 @@ describe("Route:OAuthAuthorizeAndTokenMongo Tests", () => {
         await createSecretMongo({ userUid: user.uid });
         const client = await clientRepo.save(
             new ClientMongo({
-                clientId: "mobile-app-1",
                 clientType: ClientType.PUBLIC,
                 clientName: "Mobile App",
                 redirectUris: ["app://callback"],
@@ -179,7 +178,7 @@ describe("Route:OAuthAuthorizeAndTokenMongo Tests", () => {
         const authResult = await testAgent.get(
             withQuery("/mongo/oauth/authorize", {
                 response_type: "code",
-                client_id: client.clientId,
+                client_id: client.uid,
                 redirect_uri: "app://callback",
                 scope: "openid profile",
                 code_challenge: challenge,
@@ -200,7 +199,7 @@ describe("Route:OAuthAuthorizeAndTokenMongo Tests", () => {
             code,
             redirect_uri: "app://callback",
             code_verifier: verifier,
-            client_id: client.clientId,
+            client_id: client.uid,
         });
 
         expect(tokenResult.status).toBe(200);
@@ -212,13 +211,13 @@ describe("Route:OAuthAuthorizeAndTokenMongo Tests", () => {
 
         const claims = await verifyAccessToken(tokenResult.body.access_token);
         expect(claims.sub).toBe(user.uid);
-        expect(claims.aud).toBe(client.clientId);
-        expect(claims.client_id).toBe(client.clientId);
+        expect(claims.aud).toBe(client.uid);
+        expect(claims.client_id).toBe(client.uid);
         expect(claims.scope).toBe("openid profile");
 
         const idClaims = jwt.decode(tokenResult.body.id_token) as any;
         expect(idClaims.sub).toBe(user.uid);
-        expect(idClaims.aud).toBe(client.clientId);
+        expect(idClaims.aud).toBe(client.uid);
 
         // Replay: the same code cannot be redeemed twice.
         const replay = await request(server.getApplication()).post("/mongo/oauth/token").send({
@@ -226,7 +225,7 @@ describe("Route:OAuthAuthorizeAndTokenMongo Tests", () => {
             code,
             redirect_uri: "app://callback",
             code_verifier: verifier,
-            client_id: client.clientId,
+            client_id: client.uid,
         });
         expect(replay.status).toBe(400);
         expect(replay.body.error).toBe("invalid_grant");
@@ -237,7 +236,6 @@ describe("Route:OAuthAuthorizeAndTokenMongo Tests", () => {
         await createSecretMongo({ userUid: user.uid });
         const client = await clientRepo.save(
             new ClientMongo({
-                clientId: "mobile-app-2",
                 clientType: ClientType.PUBLIC,
                 clientName: "Mobile App",
                 redirectUris: ["app://callback"],
@@ -256,7 +254,7 @@ describe("Route:OAuthAuthorizeAndTokenMongo Tests", () => {
         const authResult = await testAgent.get(
             withQuery("/mongo/oauth/authorize", {
                 response_type: "code",
-                client_id: client.clientId,
+                client_id: client.uid,
                 redirect_uri: "app://callback",
                 // `offline_access` is required alongside `openid` for this OIDC flow to be issued a refresh
                 // token at all (OIDC Core §11) - see BaseOAuthTokenRoute.issueTokenResponse().
@@ -273,7 +271,7 @@ describe("Route:OAuthAuthorizeAndTokenMongo Tests", () => {
             code,
             redirect_uri: "app://callback",
             code_verifier: verifier,
-            client_id: client.clientId,
+            client_id: client.uid,
         });
         expect(tokenResult.status).toBe(200);
         const firstRefreshToken = tokenResult.body.refresh_token;
@@ -283,7 +281,7 @@ describe("Route:OAuthAuthorizeAndTokenMongo Tests", () => {
         const refreshResult = await request(server.getApplication()).post("/mongo/oauth/token").send({
             grant_type: "refresh_token",
             refresh_token: firstRefreshToken,
-            client_id: client.clientId,
+            client_id: client.uid,
         });
         expect(refreshResult.status).toBe(200);
         expect(refreshResult.headers["cache-control"]).toBe("no-store");
@@ -299,7 +297,7 @@ describe("Route:OAuthAuthorizeAndTokenMongo Tests", () => {
         const reuseResult = await request(server.getApplication()).post("/mongo/oauth/token").send({
             grant_type: "refresh_token",
             refresh_token: firstRefreshToken,
-            client_id: client.clientId,
+            client_id: client.uid,
         });
         expect(reuseResult.status).toBe(400);
         expect(reuseResult.body.error).toBe("invalid_grant");
@@ -308,7 +306,7 @@ describe("Route:OAuthAuthorizeAndTokenMongo Tests", () => {
         const secondRefreshAfterTheft = await request(server.getApplication()).post("/mongo/oauth/token").send({
             grant_type: "refresh_token",
             refresh_token: secondRefreshToken,
-            client_id: client.clientId,
+            client_id: client.uid,
         });
         expect(secondRefreshAfterTheft.status).toBe(400);
         expect(secondRefreshAfterTheft.body.error).toBe("invalid_grant");
@@ -320,7 +318,6 @@ describe("Route:OAuthAuthorizeAndTokenMongo Tests", () => {
         const clientSecretHash = await argon2.hash("client-secret-value");
         const client = await clientRepo.save(
             new ClientMongo({
-                clientId: "web-app-1",
                 clientSecretHash,
                 clientType: ClientType.CONFIDENTIAL,
                 clientName: "Web App",
@@ -339,7 +336,7 @@ describe("Route:OAuthAuthorizeAndTokenMongo Tests", () => {
         const firstAuth = await testAgent.get(
             withQuery("/mongo/oauth/authorize", {
                 response_type: "code",
-                client_id: client.clientId,
+                client_id: client.uid,
                 redirect_uri: "https://app.example.com/callback",
                 scope: "profile email",
                 state: "abc",
@@ -364,7 +361,7 @@ describe("Route:OAuthAuthorizeAndTokenMongo Tests", () => {
             grant_type: "authorization_code",
             code,
             redirect_uri: "https://app.example.com/callback",
-            client_id: client.clientId,
+            client_id: client.uid,
             client_secret: "client-secret-value",
         });
         expect(tokenResult.status).toBe(200);
@@ -374,7 +371,7 @@ describe("Route:OAuthAuthorizeAndTokenMongo Tests", () => {
         const secondAuth = await testAgent.get(
             withQuery("/mongo/oauth/authorize", {
                 response_type: "code",
-                client_id: client.clientId,
+                client_id: client.uid,
                 redirect_uri: "https://app.example.com/callback",
                 scope: "profile email",
             }),
@@ -386,7 +383,6 @@ describe("Route:OAuthAuthorizeAndTokenMongo Tests", () => {
     it("Returns loginRequired when no one is authenticated.", async () => {
         const client = await clientRepo.save(
             new ClientMongo({
-                clientId: "app-1",
                 clientType: ClientType.PUBLIC,
                 clientName: "App",
                 redirectUris: ["app://callback"],
@@ -402,7 +398,7 @@ describe("Route:OAuthAuthorizeAndTokenMongo Tests", () => {
         const result = await request(server.getApplication()).get(
             withQuery("/mongo/oauth/authorize", {
                 response_type: "code",
-                client_id: client.clientId,
+                client_id: client.uid,
                 redirect_uri: "app://callback",
             }),
         );
@@ -414,7 +410,6 @@ describe("Route:OAuthAuthorizeAndTokenMongo Tests", () => {
         const clientSecretHash = await argon2.hash("service-secret-value");
         const client = await clientRepo.save(
             new ClientMongo({
-                clientId: "service-1",
                 clientSecretHash,
                 clientType: ClientType.CONFIDENTIAL,
                 clientName: "Backend Service",
@@ -431,7 +426,7 @@ describe("Route:OAuthAuthorizeAndTokenMongo Tests", () => {
         const tokenResult = await request(server.getApplication()).post("/mongo/oauth/token").send({
             grant_type: "client_credentials",
             scope: "reports:read",
-            client_id: client.clientId,
+            client_id: client.uid,
             client_secret: "service-secret-value",
         });
 
@@ -441,14 +436,13 @@ describe("Route:OAuthAuthorizeAndTokenMongo Tests", () => {
         expect(tokenResult.body.refresh_token).toBeUndefined();
 
         const claims = await verifyAccessToken(tokenResult.body.access_token);
-        expect(claims.sub).toBe(client.clientId);
-        expect(claims.aud).toBe(client.clientId);
+        expect(claims.sub).toBe(client.uid);
+        expect(claims.aud).toBe(client.uid);
         expect(claims.scope).toBe("reports:read");
 
         // A public client can never use this grant, regardless of secret.
         const publicClient = await clientRepo.save(
             new ClientMongo({
-                clientId: "mobile-app-3",
                 clientType: ClientType.PUBLIC,
                 clientName: "Mobile App",
                 redirectUris: ["app://callback"],
@@ -462,7 +456,7 @@ describe("Route:OAuthAuthorizeAndTokenMongo Tests", () => {
         );
         const rejected = await request(server.getApplication()).post("/mongo/oauth/token").send({
             grant_type: "client_credentials",
-            client_id: publicClient.clientId,
+            client_id: publicClient.uid,
         });
         expect(rejected.status).toBe(400);
         expect(rejected.body.error).toBe("unauthorized_client");

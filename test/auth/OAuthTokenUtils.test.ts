@@ -54,7 +54,6 @@ const client: Client = {
     dateCreated: new Date(),
     dateModified: new Date(),
     version: 0,
-    clientId: "abc123",
     clientType: ClientType.CONFIDENTIAL,
     clientName: "Test App",
     redirectUris: ["https://app.example.com/callback"],
@@ -80,22 +79,22 @@ describe("OAuthTokenUtils Tests", () => {
             expect(decoded.header.alg).toBe("RS256");
             expect(decoded.header.kid).toBeDefined();
             expect(decoded.payload.sub).toBe("user-1");
-            expect(decoded.payload.aud).toBe("abc123");
-            expect(decoded.payload.azp).toBe("abc123");
-            expect(decoded.payload.client_id).toBe("abc123");
+            expect(decoded.payload.aud).toBe(client.uid);
+            expect(decoded.payload.azp).toBe(client.uid);
+            expect(decoded.payload.client_id).toBe(client.uid);
             expect(decoded.payload.scope).toBe("openid profile");
             expect(decoded.payload.jti).toBe(jti);
             expect(decoded.payload.iss).toBe("https://auth.example.com");
         });
 
-        it("Uses the client's clientId as sub when no user is provided (client_credentials).", async () => {
+        it("Uses the client's uid as sub when no user is provided (client_credentials).", async () => {
             const utils = makeOAuthTokenUtils();
 
             const { token } = await utils.createAccessToken(client, undefined, ["profile"]);
 
             const decoded = jwt.decode(token) as any;
-            expect(decoded.sub).toBe("abc123");
-            expect(decoded.aud).toBe("abc123");
+            expect(decoded.sub).toBe(client.uid);
+            expect(decoded.aud).toBe(client.uid);
             expect(decoded.scope).toBe("profile");
         });
 
@@ -141,8 +140,8 @@ describe("OAuthTokenUtils Tests", () => {
 
             const decoded = jwt.decode(token) as any;
             expect(decoded.sub).toBe("user-1");
-            expect(decoded.aud).toBe("abc123");
-            expect(decoded.azp).toBe("abc123");
+            expect(decoded.aud).toBe(client.uid);
+            expect(decoded.azp).toBe(client.uid);
             expect(decoded.nonce).toBe("nonce-abc");
             expect(decoded.auth_time).toBeTypeOf("number");
             expect(decoded.iss).toBe("https://auth.example.com");
@@ -210,8 +209,8 @@ describe("OAuthTokenUtils Tests", () => {
             const claims = await utils.verifyAccessToken(token);
 
             expect(claims.sub).toBe("user-1");
-            expect(claims.aud).toBe("abc123");
-            expect(claims.client_id).toBe("abc123");
+            expect(claims.aud).toBe(client.uid);
+            expect(claims.client_id).toBe(client.uid);
             expect(claims.scope).toBe("openid profile");
             expect(claims.jti).toBe(jti);
             expect(claims.iss).toBe("https://auth.example.com");

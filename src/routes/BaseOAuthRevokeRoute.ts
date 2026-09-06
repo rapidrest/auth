@@ -109,7 +109,7 @@ export abstract class BaseOAuthRevokeRoute<C extends Client, R extends OAuthRefr
      */
     private async tryRevokeRefreshToken(token: string, client: Client): Promise<boolean> {
         const refreshToken = await this.refreshTokenRepo!.findOne(hashOpaqueToken(token), { ignoreACL: true });
-        if (!refreshToken || refreshToken.clientId !== client.clientId || refreshToken.revoked) {
+        if (!refreshToken || refreshToken.clientId !== client.uid || refreshToken.revoked) {
             return false;
         }
 
@@ -127,7 +127,7 @@ export abstract class BaseOAuthRevokeRoute<C extends Client, R extends OAuthRefr
      */
     private async tryRevokeAccessToken(token: string, client: Client): Promise<boolean> {
         const claims = await this.oauthTokenUtils!.verifyAccessToken(token);
-        if (!claims || claims.client_id !== client.clientId || typeof claims.jti !== "string") {
+        if (!claims || claims.client_id !== client.uid || typeof claims.jti !== "string") {
             return false;
         }
 

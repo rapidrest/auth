@@ -7,7 +7,7 @@ import { ObjectDecorators } from "@rapidrest/core";
 import { Client, ClientType, TokenEndpointAuthMethod } from "../types.js";
 
 const { Description } = DocDecorators;
-const { DataStore, Identifier, Protect } = ModelDecorators;
+const { DataStore, Protect } = ModelDecorators;
 const { Nullable } = ObjectDecorators;
 const { Column, Entity, Index } = PersistenceDecorators;
 
@@ -37,11 +37,6 @@ const { Column, Entity, Index } = PersistenceDecorators;
     true,
 )
 export class ClientMongo extends BaseMongoEntity implements Client {
-    @Column()
-    @Identifier
-    @Index("clientId", { unique: true })
-    public clientId: string = "";
-
     @Column()
     @Nullable
     public clientSecretHash?: string;
@@ -126,7 +121,6 @@ export class ClientMongo extends BaseMongoEntity implements Client {
         super(other);
 
         if (other) {
-            this.clientId = other.clientId !== undefined ? other.clientId : this.clientId;
             this.clientSecretHash = other.clientSecretHash !== undefined ? other.clientSecretHash : this.clientSecretHash;
             this.clientType = other.clientType !== undefined ? other.clientType : this.clientType;
             this.clientName = other.clientName !== undefined ? other.clientName : this.clientName;
