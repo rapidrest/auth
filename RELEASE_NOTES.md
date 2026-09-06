@@ -1,6 +1,6 @@
 # Release Notes
 
-## Unreleased
+## v2.0.0-beta.3
 
 `2.0.0` is still in pre-release (`2.0.0-beta.x`). Everything toward it is condensed into this single
 listing rather than split per beta tag — it will be finalized as `2.0.0` once officially tagged.
