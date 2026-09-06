@@ -63,6 +63,63 @@ Keep entries terse — this is a reference, not a transcript.
 
 ## Session Log
 
+### 2026-09-06 (latest) — `RateLimiter`'s Redis-backed `INCREX` call had no fallback, breaking login outright on any Redis older than 8.8
+
+Traced from a downstream `auth-server` bug report: JP hit a real login failure while testing OAuth
+locally (`yarn dev`, which boots a real (if ephemeral) Redis via the `cli` repo's `redis-memory-server`
+integration). Once a separate logging bug (masking the real error message - see `auth-server`'s own
+`.claude/NOTES.md`, same date, for that fix) was resolved, the real error surfaced: `ERR unknown
+command 'INCREX', with args beginning with: 'auth:ratelimit:admin' 'EX' '300' 'ENX'`.
+
+**Root cause, confirmed against Redis's own docs, not guessed**: `INCREX` is a **Redis 8.8+** command
+(`since: "8.8.0"` per `redis.io/commands/increx`) - and per that same page's own compatibility table,
+it isn't supported yet on **Redis Software or Redis Cloud either**, only vanilla open-source Redis
+8.8+. `RateLimiter.incrementRedis()` (see the 2026-08-22 entry below - this is the code that entry's
+"reverted to an atomic Redis `INCREX`-based implementation" refers to) called it unconditionally, with
+no fallback and no version/capability check. On Windows, `auth-server`'s `yarn dev` doesn't run real
+Redis (no official Windows build) - it downloads Memurai via `redis-memory-server`, and the locally
+cached Memurai 4.2.3 is "on par with Redis 7.4.9" (confirmed via its own `Release-Notes.txt` and
+`memurai.exe --version`); a Redis-8-compatible Memurai build only exists as a release candidate on
+Memurai's own site, not their stable channel. **This is not just a Windows-dev-convenience gap**: since
+even Redis's own commercial Cloud/Software offerings don't support `INCREX` yet, essentially any real
+production deployment of this framework backed by a managed or not-bleeding-edge Redis would hit this
+exact "unknown command" `ErrorReply` on every single rate-limited request (login, MFA, OTP, TOTP) -
+not a degraded rate limiter, a hard 500 on authentication itself.
+
+**Fixed**: `RateLimiter.incrementRedis()` now catches specifically an `ErrorReply` whose message
+matches `/unknown command/i` (any other error - a real connectivity failure, a malformed argument -
+still propagates unchanged) and falls back to the existing in-memory counter for the rest of the
+process, logging one warning on the transition (not per-request) via the newly-added `@Logger`-injected
+`this.logger`. A `redisIncrexUnsupported` flag remembers the fallback so subsequent calls skip straight
+to memory instead of paying for (and logging) a failed round trip every time. **Deliberate, documented
+tradeoff**: falling back means the per-identifier/per-IP counters stop being atomic/shared across
+multiple server instances pointed at the same Redis for as long as that process runs (each instance
+falls back independently and counts only its own local attempts) - a real regression from the
+cross-instance guarantee `INCREX` exists for, but a working non-atomic limiter beats every login
+request 500ing outright. Did **not** touch the `INCREX`-based happy path itself or revert to a
+Lua-script/multi-command approach - that was a deliberate, already-reviewed design choice (see
+2026-08-22 below), not something to re-litigate as a side effect of adding a compatibility fallback.
+Four new tests added to `test/auth/RateLimiter.test.ts` (`INCREX unsupported by the connected Redis
+server` describe block): falls back instead of throwing, logs the warning exactly once, stops calling
+Redis on subsequent attempts once the fallback is latched, and does not swallow a genuine unrelated
+Redis error. `yarn build` clean; `test/auth/RateLimiter.test.ts` 33/33 passing.
+
+**Full-suite note**: a full `vitest run` on `main` (both with and without this fix, confirmed via
+`git stash`) has 6-7 test files fail/flake with `TypeError: Cannot read properties of undefined
+(reading 'fqn'/'name')` inside `@rapidrest/core`'s `ObjectFactory.register()`/`ModelRoute.ts`, or
+otherwise-passing route tests returning `404` instead of their expected status - reproduces identically
+with this change stashed out, and the exact set/count of failures varies between runs of the *same*
+unchanged code. This is pre-existing parallel-worker flakiness (many `Server` instances booting
+concurrently across vitest workers, plausibly a port or shared in-process state collision), not a
+regression from this change or anything already investigated this session - worth a dedicated look
+some other time, but out of scope here.
+
+**Not published** - per the version standing decision, left for JP to version/publish `auth` himself.
+Propagated locally into `auth-server/node_modules/@rapidrest/auth/dist/{lib/auth/RateLimiter.js(.map),
+types/auth/RateLimiter.d.ts}` only (confirmed via `diff -rq` against a fresh `auth` build that nothing
+else in `dist/` had drifted) so `auth-server`'s local `yarn dev` picks up the fix immediately - reverts
+on a clean `yarn install`, bump the real `@rapidrest/auth` constraint once published.
+
 ### 2026-09-06 — `Client.clientId` removed entirely; `Client.uid` is now the OAuth `client_id`
 
 While building a real end-to-end integration test in the downstream `auth-server` repo (register a

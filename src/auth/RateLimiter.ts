@@ -4,10 +4,10 @@
 ////////////////////////////////////////////////////////////////////////////////
 import { ApiError, EventUtils, MemoryStore, ObjectDecorators } from "@rapidrest/core";
 import { ApiErrors, ConnectionManager, HttpRequest, NetUtils } from "@rapidrest/service-core";
-import type { RedisClientType } from "redis";
+import { ErrorReply, type RedisClientType } from "redis";
 import { AuthEventType } from "./events.js";
 
-const { Config, Inject } = ObjectDecorators;
+const { Config, Inject, Logger } = ObjectDecorators;
 
 const CACHE_KEY_PREFIX = "auth:ratelimit";
 
@@ -63,9 +63,23 @@ export class RateLimiter {
     @Inject(ConnectionManager)
     private connMgr?: ConnectionManager;
 
-    /** In-memory fallback store, used only when no `cache` connection is configured. */
+    /** In-memory fallback store, used both when no `cache` connection is configured and when the connected
+     * Redis server is too old to support `INCREX` (see `redisIncrexUnsupported` below). */
     @Inject(MemoryStore)
     private readonly memoryStore: MemoryStore = new MemoryStore();
+
+    @Logger
+    protected logger: any;
+
+    /** Set once `incrementRedis()` learns the connected server rejects `INCREX` as unknown (`INCREX` is a
+     * Redis 8.8+ command - not yet supported by Redis Software, Redis Cloud, or any Redis-protocol-compatible
+     * server that hasn't caught up, e.g. Memurai on Windows) - subsequent calls skip straight to the in-memory
+     * fallback instead of paying for (and logging) a failed round trip on every single request. This does mean
+     * the per-identifier/per-IP counters stop being atomic across multiple server instances sharing one Redis
+     * for as long as this process runs, which is a real, deliberate degradation - see the class doc comment -
+     * but a working, non-atomic rate limiter is better than every credential-verification request 500ing.
+     */
+    private redisIncrexUnsupported = false;
 
     private get cacheClient(): RedisClientType | undefined {
         return this.connMgr?.connections.get("cache") as RedisClientType | undefined;
@@ -128,9 +142,10 @@ export class RateLimiter {
         identifier: string,
         layer: "identifier" | "ip",
     ): Promise<void> {
-        const count: number = this.cacheClient
-            ? await this.incrementRedis(this.cacheClient, key, windowSeconds)
-            : this.incrementMemory(key, windowSeconds);
+        const count: number =
+            this.cacheClient && !this.redisIncrexUnsupported
+                ? await this.incrementRedis(this.cacheClient, key, windowSeconds)
+                : this.incrementMemory(key, windowSeconds);
 
         if (count > maxAttempts) {
             // Only the request that actually crosses the threshold records the event - `count` keeps
@@ -151,8 +166,28 @@ export class RateLimiter {
         // or (depending on how the window is otherwise consumed) could keep the window sliding indefinitely.
         // This must match `incrementMemory()` below, which anchors the same way (the TTL passed to `save()` is
         // only set once, at creation, and is never refreshed on subsequent increments either).
-        const [value] = await client.increx(key, { expiration: { type: "EX", value: windowSeconds, ENX: true } });
-        return Number(value);
+        try {
+            const [value] = await client.increx(key, { expiration: { type: "EX", value: windowSeconds, ENX: true } });
+            return Number(value);
+        } catch (err) {
+            // `INCREX` is a Redis 8.8+ command - not yet supported by Redis Software, Redis Cloud, or any
+            // Redis-protocol-compatible server that hasn't caught up (e.g. Memurai on Windows, still on the
+            // Redis 7.4 command set at the time this comment was written). The server reports this the same
+            // way it reports any unrecognized command name: an `ErrorReply` whose message starts with "ERR
+            // unknown command". Anything else (a real connectivity failure, a malformed argument, etc.) is a
+            // genuine error and must keep propagating rather than silently degrading rate limiting.
+            if (err instanceof ErrorReply && /unknown command/i.test(err.message)) {
+                this.redisIncrexUnsupported = true;
+                this.logger?.warn?.(
+                    "Redis rejected INCREX as an unknown command (requires Redis 8.8+) - RateLimiter is " +
+                        "falling back to a per-instance in-memory counter for the rest of this process. Attempt " +
+                        "counts will no longer be shared across server instances until Redis is upgraded and " +
+                        "the process is restarted.",
+                );
+                return this.incrementMemory(key, windowSeconds);
+            }
+            throw err;
+        }
     }
 
     private incrementMemory(key: string, windowSeconds: number): number {

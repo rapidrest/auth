@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: MPL-2.0
 ///////////////////////////////////////////////////////////////////////////////
 import { ApiError, EventUtils } from "@rapidrest/core";
+import { ErrorReply } from "redis";
 import { AuthEventType } from "../../src/auth/events.js";
 import { RateLimiter } from "../../src/auth/RateLimiter.js";
 
@@ -487,6 +488,70 @@ describe("RateLimiter Tests", () => {
 
             expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(5);
             expect(results.filter((r) => r.status === "rejected")).toHaveLength(15);
+        });
+    });
+
+    // Regression: `INCREX` is a Redis 8.8+ command, not yet supported by Redis Software, Redis Cloud, or any
+    // Redis-protocol-compatible server that hasn't caught up (e.g. Memurai on Windows). Before this fallback
+    // existed, the server's "ERR unknown command 'INCREX'" `ErrorReply` propagated straight out of
+    // `checkAndIncrement()` uncaught - a real 500 on every single credential-verification request (login, MFA,
+    // OTP, TOTP) for any deployment whose Redis doesn't yet support it, not just a disabled rate limiter.
+    describe("INCREX unsupported by the connected Redis server", () => {
+        function makeUnknownCommandClient(): { increx: ReturnType<typeof vi.fn> } {
+            const increx = vi.fn(async () => {
+                throw new ErrorReply("ERR unknown command 'INCREX', with args beginning with: 'auth:ratelimit:user-1' 'EX'");
+            });
+            return { increx };
+        }
+
+        it("Falls back to the in-memory counter instead of throwing when Redis rejects INCREX as unknown.", async () => {
+            const client = makeUnknownCommandClient();
+            const limiter = new RateLimiter();
+            (limiter as any).connMgr = makeConnMgrWithCache(client);
+            (limiter as any).config = { enabled: true, maxAttempts: 1, windowSeconds: 300 };
+
+            await expect(limiter.checkAndIncrement("user-1")).resolves.toBeUndefined();
+            await expect(limiter.checkAndIncrement("user-1")).rejects.toThrow(/Too many attempts/);
+        });
+
+        it("Logs a warning the first time it falls back.", async () => {
+            const client = makeUnknownCommandClient();
+            const limiter = new RateLimiter();
+            (limiter as any).connMgr = makeConnMgrWithCache(client);
+            (limiter as any).config = { enabled: true, maxAttempts: 5, windowSeconds: 300 };
+            const warn = vi.fn();
+            (limiter as any).logger = { warn };
+
+            await limiter.checkAndIncrement("user-1");
+
+            expect(warn).toHaveBeenCalledTimes(1);
+            expect(warn.mock.calls[0][0]).toMatch(/INCREX/);
+        });
+
+        it("Stops calling Redis on subsequent attempts once the fallback has kicked in.", async () => {
+            const client = makeUnknownCommandClient();
+            const limiter = new RateLimiter();
+            (limiter as any).connMgr = makeConnMgrWithCache(client);
+            (limiter as any).config = { enabled: true, maxAttempts: 5, windowSeconds: 300 };
+
+            await limiter.checkAndIncrement("user-1");
+            expect(client.increx).toHaveBeenCalledTimes(1);
+
+            await limiter.checkAndIncrement("user-1");
+            await limiter.checkAndIncrement("user-1");
+
+            // Still only the one (failed) call from the very first attempt - every attempt after that used
+            // the in-memory fallback directly rather than paying for another round trip to Redis.
+            expect(client.increx).toHaveBeenCalledTimes(1);
+        });
+
+        it("Does not swallow a genuine Redis error unrelated to INCREX support.", async () => {
+            const client = { increx: vi.fn(async () => { throw new Error("connection reset by peer"); }) };
+            const limiter = new RateLimiter();
+            (limiter as any).connMgr = makeConnMgrWithCache(client);
+            (limiter as any).config = { enabled: true, maxAttempts: 5, windowSeconds: 300 };
+
+            await expect(limiter.checkAndIncrement("user-1")).rejects.toThrow(/connection reset by peer/);
         });
     });
 });
