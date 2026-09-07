@@ -362,6 +362,50 @@ describe("TokenUtils Tests", () => {
 
             await expect(tokenUtils.createAuthResult(user, [])).resolves.toBeDefined();
         });
+
+        // Regression coverage for impersonation support: `createAuthResult(..., impersonation: true)` must
+        // not issue a refresh token, touch the caller's session, or record a SESSION_CREATED event - all of
+        // which would either overwrite the impersonator's own real session state or create a durable
+        // credential (a refresh token) for a session that's meant to be a transient, cookie-only overlay.
+        describe("impersonation", () => {
+            it("Returns an empty refresh token instead of a signed one.", async () => {
+                const tokenUtils = makeTokenUtils();
+
+                const result = await tokenUtils.createAuthResult(user, [], undefined, undefined, false, true);
+
+                expect(result.refresh).toBe("");
+                expect(typeof result.token).toBe("string");
+            });
+
+            it("Sets only the access cookie, not a refresh cookie, when cookie issuance is enabled.", async () => {
+                const tokenUtils = makeTokenUtils();
+                (tokenUtils as any).cookieConfig = { enabled: true, access: { name: "jwt" }, refresh: { name: "refresh" } };
+                const res = makeRes();
+
+                const result = await tokenUtils.createAuthResult(user, [], undefined, res, false, true);
+
+                expect(res.appendHeader).toHaveBeenCalledTimes(1);
+                expect(res.appendHeader).toHaveBeenCalledWith("Set-Cookie", expect.stringContaining(`jwt=${result.token}`));
+            });
+
+            it("Does not touch the session, even though one is present.", async () => {
+                const tokenUtils = makeTokenUtils();
+                const req = makeReq({ session: { userUid: "someone-else", lastLogin: 123 } });
+
+                await tokenUtils.createAuthResult(user, [], req, undefined, false, true);
+
+                expect(req.session).toEqual({ userUid: "someone-else", lastLogin: 123 });
+            });
+
+            it("Does not record a SESSION_CREATED event.", async () => {
+                const tokenUtils = makeTokenUtils();
+                const spy = vi.spyOn(EventUtils, "record").mockResolvedValue(undefined);
+
+                await tokenUtils.createAuthResult(user, [], makeReq(), undefined, false, true);
+
+                expect(spy).not.toHaveBeenCalled();
+            });
+        });
     });
 
     describe("clearToken", () => {

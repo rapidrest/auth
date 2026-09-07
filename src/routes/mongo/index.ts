@@ -21,3 +21,4 @@ export * from "./BaseProfileRouteMongo.js";
 export * from "./BaseRegistrationRouteMongo.js";
 export * from "./BaseSecretRouteMongo.js";
 export * from "./BaseUserRouteMongo.js";
+export * from "./BaseImpersonationRouteMongo.js";

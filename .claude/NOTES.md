@@ -63,7 +63,44 @@ Keep entries terse — this is a reference, not a transcript.
 
 ## Session Log
 
-### 2026-09-06 (latest) — `RateLimiter`'s Redis-backed `INCREX` call had no fallback, breaking login outright on any Redis older than 8.8
+### 2026-09-06 (latest) — full test coverage added for the new BaseImpersonationRoute ("login as user")
+
+JP added `BaseImpersonationRoute` (+ SQL/Mongo bindings) and a `TokenUtils.createAuthResult()`
+`impersonation` parameter himself; this session added the full 3-tier test suite for it and found two
+real bugs along the way — exactly the value of the real-server integration tier over mocked unit tests.
+
+- **Real bug #1 (fixed by this session, approved by JP): `impersonate()`'s target-user lookup had no
+  ACL bypass.** `this.userRepo?.findOne(body.userUid)` was called with no `options` at all, so
+  `RepoUtils.findOne()`'s ACL check ran with `options.user` undefined - deny-by-default - meaning
+  impersonation could never succeed against a real ACL-enabled deployment, regardless of the caller's
+  actual trusted role. The isolated unit tests (mocked `userRepo.findOne`) couldn't see this; only the
+  real-server integration test, which exercises the real `RepoUtils` permission path, caught it. Fixed
+  by adding `{ ignoreACL: true }` - the caller is already authorized by `@RequiresTrustedRole()` at the
+  route level, so this internal lookup is exempt from the *target's* own ACL by design.
+- **Real bug #2 (found by this session, fixed by JP directly): `stopImpersonating()` was gated by
+  `@RequiresTrustedRole()` too, making it unreachable once impersonation started.** By the time you'd
+  call it, the caller's active `jwt` cookie has already been overwritten with the impersonated target's
+  own (non-trusted) token - so the trusted-role check on the *stop* endpoint always failed. Fixed by
+  removing `@RequiresTrustedRole()` from `stopImpersonating()`: it stays behind `@Auth(["jwt"])` (some
+  valid session still required), but authorization is really just "do you possess a genuine, signed
+  `jwt_impersonator` cookie" - which only a prior, real, trusted-role-gated `impersonate()` call ever
+  sets. Matches the class's own doc comment ("if one is present").
+- **Test structure**: `test/routes/BaseImpersonationRoute.test.ts` (16 isolated unit tests, mocked
+  `userRepo`/`tokenUtils`), `test/auth/TokenUtils.test.ts`'s new `impersonation` describe block (4
+  tests: empty refresh token, access-cookie-only, session untouched, no `SESSION_CREATED` event), and
+  `test/routes/{sql,mongo}/ImpersonationRoute.test.ts` (6 real-server tests each) - the latter drive the
+  actual login -> elevate -> impersonate -> stop flow purely via cookies through a real `agent()`, no
+  Authorization header at all for the impersonate/stop calls, proving the cookie-only design actually
+  works end-to-end. New `test/server-{sql,mongo}/routes/ImpersonationRoute.ts` mount at `/{sql,mongo}/
+  admin`, matching the class doc comment's own `@ApiRoute("admin")` example.
+- **`yarn build` clean; all impersonation-specific tests pass reliably across repeated runs.** A full
+  `yarn test:prod` run showed the known `ObjectFactory`/`ClassLoader` flake (see
+  [[project_rapidrest_core_sibling]]) at an unusually high rate this session - see that memory file's
+  latest entry for the investigation (a stray leftover sqlite file was ruled out; suspected
+  session-accumulated environmental strain from a very long run of test invocations, not a real
+  regression). None of the flaking files were touched by this work.
+
+### 2026-09-06 — `RateLimiter`'s Redis-backed `INCREX` call had no fallback, breaking login outright on any Redis older than 8.8
 
 Traced from a downstream `auth-server` bug report: JP hit a real login failure while testing OAuth
 locally (`yarn dev`, which boots a real (if ephemeral) Redis via the `cli` repo's `redis-memory-server`

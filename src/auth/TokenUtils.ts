@@ -189,6 +189,8 @@ export class TokenUtils {
      * @param req The original request.
      * @param res The response to set the auth cookie for (if desired).
      * @param elevated Set to `true` to create an elevated access token that includes trusted roles. Default is `false`.
+     * @param impersonation Set to `true` to indicate that the token/session is to impersonate another user and the
+     * existing session shouldn't be altered. Default is `false`.
      */
     public async createAuthResult(
         user: JWTUser,
@@ -196,19 +198,23 @@ export class TokenUtils {
         req?: HttpRequest,
         res?: HttpResponse,
         elevated: boolean = false,
+        impersonation: boolean = false,
     ): Promise<AuthResult> {
-        const refresh: string = await this.createRefreshToken(user, req);
+        const refresh: string = impersonation ? "" : await this.createRefreshToken(user, req);
         const token: string = await this.createAccessToken(user, scopes, elevated);
 
         if (res && this.cookieConfig?.enabled) {
             res.appendHeader("Set-Cookie", this.buildCookie(token, this.cookieConfig.access));
-            res.appendHeader("Set-Cookie", this.buildCookie(refresh, this.cookieConfig.refresh));
+            if (refresh) {
+                res.appendHeader("Set-Cookie", this.buildCookie(refresh, this.cookieConfig.refresh));
+            }
         }
 
         const ip: string | undefined = req ? NetUtils.getIPAddress(req, this.trustedProxies) : undefined;
 
-        // If sessions are available, store some useful information about the user
-        if (req?.session) {
+        // If sessions are available, store some useful information about the user.
+        // We do not touch the session when impersonating another user.
+        if (req?.session && !impersonation) {
             const now = Date.now();
             req.session.ip = ip;
             req.session.lastAccess = now;
@@ -219,14 +225,16 @@ export class TokenUtils {
             req.session.userUid = user.uid;
         }
 
-        EventUtils.record({
-            type: AuthEventType.SESSION_CREATED,
-            userUid: user.uid,
-            ip,
-            path: req?.path,
-            elevated,
-            scopes,
-        }).catch(() => undefined);
+        if (!impersonation) {
+            EventUtils.record({
+                type: AuthEventType.SESSION_CREATED,
+                userUid: user.uid,
+                ip,
+                path: req?.path,
+                elevated,
+                scopes,
+            }).catch(() => undefined);
+        }
 
         return {
             refresh,

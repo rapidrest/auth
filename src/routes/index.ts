@@ -24,3 +24,4 @@ export * from "./BaseRegistrationRoute.js";
 export * from "./BaseSecretRoute.js";
 export * from "./BaseUserRoute.js";
 export * from "./UserUtils.js";
+export * from "./BaseImpersonationRoute.js";
