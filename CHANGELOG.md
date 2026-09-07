@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0-beta.4] - 2026-09-07
+
+### Added
+- Added new user impersonation feature
+
+### Changed
+- RateLimiter now gracefully falls back to in-memory incrementor when redis cache server does not support the INCREX command
+- Preparing release_notes for release
+
 ## [2.0.0-beta.3] - 2026-09-06
 
 ### Added
@@ -101,7 +110,8 @@ tagged.
 - `PasskeyStrategy` - WebAuthn based passkey authentication
 - `TOTPStrategy` - RFC 6238 Time-Based One Time Password authentication (e.g. Google Authenticator, etc.)
 
-[Unreleased]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.3...HEAD
+[Unreleased]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.4...HEAD
+[2.0.0-beta.4]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.3...v2.0.0-beta.4
 [2.0.0-beta.3]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.2...v2.0.0-beta.3
 [2.0.0-beta.2]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.1...v2.0.0-beta.2
 [1.3.0]: https://github.com/rapidrest/auth/compare/v1.2.0...v1.3.0
