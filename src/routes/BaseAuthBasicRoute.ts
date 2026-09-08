@@ -11,10 +11,10 @@ import {
     AuthMiddleware,
     ObjectFactory,
     HttpRequest,
+    RateLimiter,
 } from "@rapidrest/service-core";
 import { Alias, AuthResult, Secret, SecretType, User } from "../models/types.js";
 import { BasicStrategy, BasicStrategyOptions } from "../auth/BasicStrategy.js";
-import { RateLimiter } from "../auth/RateLimiter.js";
 import { importArgon2, verifyDummyPassword } from "../auth/shared.js";
 import { TokenUtils } from "../auth/TokenUtils.js";
 import { UserUtils } from "./UserUtils.js";

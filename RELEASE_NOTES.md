@@ -17,6 +17,18 @@ listing rather than split per beta tag — it will be finalized as `2.0.0` once 
   * `BaseOAuthClientRoute` — owner/admin CRUD for registering and managing OAuth `Client`s, including
     one-time secret reveal and secret regeneration. A non-admin caller can register and fully manage
     their own client; an admin can manage any client.
+* Endpoint-wide rate limiting, via `@rapidrest/service-core`'s new `@RateLimit()` route decorator, on
+  routes with no natural per-caller identifier to key the existing identifier-based `RateLimiter` on:
+  OIDC discovery metadata, JWKS, client secret regeneration, and user impersonation.
+
+### Breaking Changes
+
+* `RateLimiter` moved to `@rapidrest/service-core` — it is a general-purpose framework utility, not an
+  auth-specific one. Behavior is unchanged, but the names it keys on are no longer auth-namespaced:
+  * Config path: `auth:rateLimit` → `rateLimit`
+  * Cache keys: `auth:ratelimit:*` → `ratelimit:*`
+  * Event type: `auth.ratelimit.exceeded` → `ratelimit.exceeded` (`AuthEventType.RATELIMIT_EXCEEDED`
+    is removed; use `@rapidrest/service-core`'s `RATELIMIT_EXCEEDED_EVENT`)
 
 ## v1.3.0
 
@@ -59,7 +71,7 @@ listing rather than split per beta tag — it will be finalized as `2.0.0` once 
 
 ### Security Features
 
-* Rate limiting on every credential-verification endpoint, layered per-identifier and per-source-IP (reverse-proxy aware)
+* Rate limiting on every credential-verification endpoint, layered per-identifier and per-source-IP (reverse-proxy aware) — via `@rapidrest/service-core`'s `RateLimiter`
 * MFA recovery/backup codes as a first-class secondary authentication method
 * Account elevation (`@RequiresElevation`) for step-up re-verification before sensitive actions
 * Session revocation ("log out everywhere") that invalidates every outstanding refresh token for an account

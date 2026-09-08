@@ -25,10 +25,4 @@ export enum AuthEventType {
     MFA_ENROLLED = "auth.mfa.enrolled",
     /** A secondary-auth-capable secret was deleted. */
     MFA_REMOVED = "auth.mfa.removed",
-    /**
-     * A rate limit was exceeded (either the per-identifier or the per-source-IP layer - see `layer` on the
-     * event). A brute-force/abuse signal covering every rate-limited route from one call site, rather than
-     * instrumenting each strategy's individual "wrong password"/"invalid code" branches.
-     */
-    RATELIMIT_EXCEEDED = "auth.ratelimit.exceeded",
 }

@@ -10,13 +10,13 @@ import {
     HttpRequest,
     NetUtils,
     ObjectFactory,
+    RateLimiter,
     RepoUtils,
     RouteDecorators,
 } from "@rapidrest/service-core";
 import { Alias, Profile, Secret, User } from "../models/types.js";
 import { AuthEventType } from "../auth/events.js";
 import { TokenUtils } from "../auth/TokenUtils.js";
-import { RateLimiter } from "../auth/RateLimiter.js";
 
 const { Config, Init, Inject, Logger } = ObjectDecorators;
 const { Summary, Description, Returns } = DocDecorators;

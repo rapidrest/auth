@@ -17,7 +17,7 @@ import { Client, ClientType } from "../models/types.js";
 import { importArgon2 } from "../auth/shared.js";
 
 const { Config } = ObjectDecorators;
-const { Auth, Param, Post, Query, Request, RequiresElevation, Response, User } = RouteDecorators;
+const { Auth, Param, Post, Query, RateLimit, Request, RequiresElevation, Response, User } = RouteDecorators;
 
 /**
  * Owner/admin CRUD for `Client`, the registered OAuth 2.0 / OpenID Connect applications this authorization
@@ -232,6 +232,11 @@ export abstract class BaseOAuthClientRoute<T extends Client> extends CRUDRoute<T
     @Auth(["jwt"])
     @RequiresElevation(60)
     @Post("/:id/regenerate-secret")
+    // `req.path` carries the real `:id`, so this throttles regenerations of *this specific client's* secret
+    // (globally, across whoever has access to it) rather than the endpoint as a whole - a caller looping
+    // this call would otherwise repeatedly invalidate the client's live secret out from under it, a
+    // self-inflicted denial of service this operation has no other guard against.
+    @RateLimit()
     public async regenerateSecret(@Param("id") id: string, @User user?: JWTUser): Promise<{ clientSecret: string }> {
         if (!this.repoUtils) {
             throw new ApiError(ApiErrors.INTERNAL_ERROR, 500, ApiErrorMessages.INTERNAL_ERROR);

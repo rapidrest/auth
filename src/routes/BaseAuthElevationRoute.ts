@@ -13,6 +13,7 @@ import {
     ObjectFactory,
     HttpRequest,
     NetUtils,
+    RateLimiter,
 } from "@rapidrest/service-core";
 import { Alias, AliasType, AuthResult, Secret, SecretType, User } from "../models/types.js";
 import { MFAMethod, MFAMethodType } from "../auth/MFAStrategy.js";
@@ -25,7 +26,6 @@ import {
     TOTPSecret,
 } from "../auth/types.js";
 import { AuthEventType } from "../auth/events.js";
-import { RateLimiter } from "../auth/RateLimiter.js";
 import {
     generateOTP,
     generatePasskeyChallenge,

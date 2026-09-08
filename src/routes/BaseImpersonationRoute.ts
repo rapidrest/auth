@@ -17,7 +17,7 @@ import { AuthResult, User } from "../models/types.js";
 import { TokenUtils } from "../auth/TokenUtils.js";
 const { Description, Returns, Summary } = DocDecorators;
 const { Config, Init, Inject, Logger } = ObjectDecorators;
-const { Auth, Get, Post, Request, RequiresTrustedRole, Response } = RouteDecorators;
+const { Auth, Get, Post, RateLimit, Request, RequiresTrustedRole, Response } = RouteDecorators;
 const AuthUser = RouteDecorators.User;
 
 /** Matches `JWTStrategyOptions.cookieName`'s hardcoded default — see `JWTStrategy.ts`. */
@@ -100,6 +100,12 @@ export abstract class BaseImpersonationRoute<U extends User> {
     @Auth(["jwt"])
     @Post("/impersonate")
     @RequiresTrustedRole()
+    // Fixed path, shared across every caller - deliberately global rather than per-target-user: an attacker
+    // wielding a compromised trusted token would rotate `body.userUid` on every request, which a
+    // per-identifier counter keyed on the target can't catch (each target looks like a first attempt). This
+    // endpoint's own population is small (trusted-role holders only) and legitimately rare, so a shared cap
+    // is the right fit, unlike a high-traffic identity endpoint where it would throttle unrelated callers.
+    @RateLimit()
     public async impersonate(
         body: ImpersonateInput,
         @Request req: HttpRequest,

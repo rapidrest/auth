@@ -3,11 +3,10 @@
 // SPDX-License-Identifier: MPL-2.0
 ///////////////////////////////////////////////////////////////////////////////
 import { ObjectDecorators } from "@rapidrest/core";
-import { RouteDecorators, DocDecorators, HttpRequest, RepoUtils, ObjectFactory } from "@rapidrest/service-core";
+import { RouteDecorators, DocDecorators, HttpRequest, RepoUtils, ObjectFactory, RateLimiter } from "@rapidrest/service-core";
 import { Alias, AliasType, Secret, SecretType, User } from "../models/types.js";
 import { obfuscateContact } from "../auth/shared.js";
 import { OTPContactType } from "../auth/types.js";
-import { RateLimiter } from "../auth/RateLimiter.js";
 import { UserUtils } from "./UserUtils.js";
 
 const { Init, Inject } = ObjectDecorators;

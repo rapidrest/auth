@@ -10,7 +10,7 @@ import { SigningKeyUtils } from "../auth/SigningKeyUtils.js";
 
 const { Init } = ObjectDecorators;
 const { Summary, Description, Returns } = DocDecorators;
-const { Get, Response } = RouteDecorators;
+const { Get, RateLimit, Response } = RouteDecorators;
 
 /**
  * Serves this authorization server's public JSON Web Key Set (RFC 7517) at whatever path a subclass
@@ -66,6 +66,11 @@ export abstract class BaseOAuthJwksRoute<K extends SigningKey> {
     )
     @Returns([Object])
     @Get()
+    // Public and unauthenticated, like `BaseOAuthDiscoveryRoute.discovery()` - see its identical
+    // `@RateLimit()` above for why an endpoint-wide cap (rather than a per-identifier one) is the right
+    // shape here. Worth it more than discovery's, per this class's own doc comment: a JWKS endpoint is
+    // typically polled far more often, and unlike discovery this handler does a real repo read per call.
+    @RateLimit()
     public async jwks(@Response res: HttpResponse): Promise<{ keys: any[] }> {
         if (!this.signingKeyUtils) {
             throw new Error("signingKeyUtils is not set.");

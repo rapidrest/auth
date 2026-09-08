@@ -20,15 +20,18 @@ Keep entries terse — this is a reference, not a transcript.
   races with no concrete external trigger path. Every finding should be able to name the actual
   HTTP route/method or WS message type that reaches the code in question.
 
+- **Commit discipline.** Don't `git commit` unless explicitly asked for *that specific piece of
+  work*. An autonomous-execution/"commit as you go" approval given for one approved plan (e.g. via
+  plan mode) is scoped to that plan only — it does not carry forward to later, separate requests in
+  the same session, even ones that look similar in kind (a follow-up review-and-fix pass, a
+  refactor, a new feature), and even after a full review-and-fix cycle with passing tests. Default
+  to leaving changes staged/unstaged and saying so; only commit automatically within the exact
+  scope of a plan that was explicitly approved as autonomous. If unsure whether new work falls
+  inside that scope, treat it as outside and ask.
+  
 - **Commit message style: concise, one line per task/bug/feature — no verbose prose.** A commit
-  message is a short list of one-line bullets, one per item. Never a paragraph explaining what was
-  done or why for any single item — that belongs in the diff/code comments/NOTES.md, not the commit
-  message. This mirrors JP's standing convention across his other repos.
-
-- **Commit discipline.** Don't `git commit` unless explicitly asked, even after a full
-  review-and-fix cycle with passing tests. Leave changes staged/unstaged and say so. Approval for
-  one task/phase (e.g. a plan step that says "implement, test, and commit") does NOT carry over to
-  later, separate asks in the same session — re-check per commit, every time.
+  message is a short list of one-line bullets, one per item. This mirrors JP's standing convention
+  across his other repos.
 
 - **Documentation ownership.** Full documentation lives at rapidrest.dev, not in this repo.
   `README.md`/`RELEASE_NOTES.md` stay as terse, scannable bullet-list feature indexes (strategy/
@@ -63,7 +66,96 @@ Keep entries terse — this is a reference, not a transcript.
 
 ## Session Log
 
-### 2026-09-06 (latest) — full test coverage added for the new BaseImpersonationRoute ("login as user")
+### 2026-09-08 (latest) — Adopted `@rapidrest/service-core`'s new `@RateLimit()` route decorator
+
+Follow-on to the `RateLimiter` move below: JP added `@RateLimit()` directly to `@rapidrest/service-core`
+(`RouteDecorators.ts` + `RouteUtils.checkRateLimiter()`) — a method/class-level decorator that throttles a
+route via `RateLimiter.checkAndIncrement()`, keyed on the literal `` `${req.method} ${req.path}` `` of the
+request. Full design/tradeoff writeup lives in service-core's own NOTES.md (2026-09-08 entry); the short
+version: `req.path` includes real resource ids, so this is per-resource for a parameterized route but a
+single identifier **shared by every caller** for a fixed-path route — safe only where that global sharing is
+actually the intended shape, not a substitute for the existing per-identifier `checkAndIncrement()` calls.
+
+- **Applied `@RateLimit()` to four routes, chosen specifically because none of them fit the existing
+  per-identifier scheme**, not as a blanket sweep:
+  - `BaseOAuthDiscoveryRoute.discovery()` / `BaseOAuthJwksRoute.jwks()` — public, unauthenticated, no
+    identifier available at all (no username/client_id/user-uid in the request). `jwks()` additionally
+    does a real repo read per call, unlike discovery's static-ish response.
+  - `BaseOAuthClientRoute.regenerateSecret()` — `POST /clients/:id/regenerate-secret`; `req.path` carries
+    the real `:id`, so this is effectively per-client, protecting against a caller looping the call and
+    repeatedly invalidating that client's live secret out from under it (a self-inflicted DoS this
+    operation had no other guard against).
+  - `BaseImpersonationRoute.impersonate()` — fixed path, deliberately global despite that: an attacker
+    with a compromised trusted-role token would rotate the *target* `userUid` on every request, which a
+    counter keyed on the target (the natural per-identifier choice) structurally cannot catch. The
+    endpoint's real population (trusted-role holders) is small and legitimately low-volume, so a shared
+    cap is a correct fit here in a way it wouldn't be for a public identity endpoint.
+- **Deliberately did NOT touch any of the existing manual `checkAndIncrement(identifier, req)` call
+  sites** (Basic/MFA/OTP/TOTP/FIDO2/Passkey/Discover/Elevation auth routes, alias/profile/registration
+  contact verification, the three OAuth token/introspect/revoke routes). Swapping any of those to
+  `@RateLimit()` would replace a narrow, correct per-identity throttle with one shared bucket for the
+  entire caller population at the *same* default config (5 attempts/300s) — the 6th unrelated legitimate
+  login anywhere in the deployment within a window would 429, not just an attacker. Also skipped
+  `BaseAuthRefreshRoute`/`BaseOAuthAuthorizeRoute`/`BaseOAuthUserInfoRoute` even though they have no
+  current rate limiting either: all three are realistically high-traffic for any live deployment (session
+  refresh, OAuth login, RP profile fetch), so a shared 5/300 cap there would false-positive under normal
+  load, not just abuse — a materially different risk profile from the four picked above, which are all
+  either genuinely rare (impersonation, secret regeneration) or cacheable/low-value-per-hit (discovery,
+  jwks).
+- Verified via full typecheck + lint + the 4 routes' own unit tests + the full 47-file/1368-test unit
+  suite (integration tier still red, unrelated — see below) after rebuilding and overlaying service-core's
+  dist into this repo's `node_modules` (same unpublished-dependency situation as the `RateLimiter` move).
+- **Update once JP published: `@rapidrest/service-core@1.7.0`'s `checkRateLimiter()` middleware never
+  called `next()`** — confirmed directly against the real npm tarball, not just source: any route carrying
+  `@RateLimit()` would hang before reaching its handler, even on the success path (no limit exceeded).
+  JP fixed and published `1.7.1` same-day; re-verified the fix against that real published tarball too
+  (`try`/`catch` around `checkAndIncrement()`, `next()` on success / `next(err)` on throw) before bumping
+  this repo off the temporary `node_modules` overlay to a real `yarn install`. Both `package.json` ranges
+  now read `^1.7.1` (peer was still `^1.7.0` — bumped since `1.7.0` alone is functionally broken for any
+  consumer of `@RateLimit()`, not just untested).
+
+### 2026-09-08 — `RateLimiter` moved out to `@rapidrest/service-core`
+
+JP's call: the rate limiter is a general framework utility, not an auth concern. Moved wholesale to
+`@rapidrest/service-core` (`src/RateLimiter.ts` + `test/RateLimiter.test.ts`, all 33 tests ported and
+passing there), and this repo now imports it from the package.
+
+- **Clean break on naming, chosen deliberately over a compat shim** (JP picked this when asked): the
+  class is no longer auth-namespaced. `auth:rateLimit` → `rateLimit` (config path), `auth:ratelimit:*`
+  → `ratelimit:*` (cache keys), `auth.ratelimit.exceeded` → `ratelimit.exceeded` (event). The event
+  type is now `@rapidrest/service-core`'s exported `RATELIMIT_EXCEEDED_EVENT` const;
+  `AuthEventType.RATELIMIT_EXCEEDED` was deleted. Documented under a new `### Breaking Changes`
+  heading in `RELEASE_NOTES.md`'s `v2.0.0-beta.4` section.
+- **No re-export from this library** (also JP's call). `RateLimiter` was never in `src/auth/index.js`
+  anyway, so it was already package-private — downstream code must import it from
+  `@rapidrest/service-core`. The 15 route classes that `@Inject(RateLimiter)` now import it from there.
+- **Do not reintroduce an auth-side subclass to re-namespace it.** Two dead ends found while designing
+  this, both worth not rediscovering:
+  - Re-declaring `@Config("auth:rateLimit")` on a subclass property does **not** override the base's
+    `@Config`. `ObjectFactory._getOrBuildMetadata()` walks the *whole* prototype chain and `push`es
+    every match, then `initialize()` assigns them in collection order — subclass first, base last — so
+    the **base** path wins and silently clobbers the override.
+  - Two classes both named `RateLimiter` (base in service-core, subclass here) collide in the factory
+    registry: instances are keyed `` `${className}:${name}` `` off `_fqn || constructor.name`, so both
+    would fight over `RateLimiter:default`. A subclass would have to be renamed.
+  If per-consumer namespacing is ever actually needed, the supported route is
+  `@Inject(RateLimiter, { name: "...", args: [...] })` — `InstanceOptions` carries both.
+- **`@rapidrest/service-core` dep bumped to `^1.7.0`** (peer + dev). That version does not exist yet —
+  service-core is at `1.6.0` and the move is unreleased, so `yarn install` here will not resolve until
+  JP publishes it. Verified locally by overlaying the freshly-built `dist/lib/RateLimiter.js` +
+  `dist/types/RateLimiter.d.ts` (and the index export line) into `node_modules/@rapidrest/service-core`.
+- **`yarn build` + lint clean; 788 tests across the 22 affected unit-test files pass.**
+- **Pre-existing, unrelated: the entire real-server integration tier is red on `main`.** All 42
+  `test/routes/{sql,mongo}/*.test.ts` files fail — every route 404s and
+  `BackgroundServiceManager` logs `Failed to start service: DefaultAccountsSQL`. This is **not** the
+  known multi-file `ObjectFactory`/`ClassLoader` flake: it reproduces for a single file run in
+  isolation. Confirmed pre-existing by stashing this session's changes and re-running the full suite —
+  identical 42-file failure set before and after (`comm` diff of the two junit runs was empty; only the
+  test *count* moved, 417 → 380, because the 33 RateLimiter tests left this repo). Most likely the
+  unpublished `@rapidrest/core` `ClassLoader` fix, since this repo's installed `@rapidrest/core` is
+  `5.2.0` and `@rapidrest/service-core` is `1.3.0`. Left untouched — out of scope for the port.
+
+### 2026-09-06 — full test coverage added for the new BaseImpersonationRoute ("login as user")
 
 JP added `BaseImpersonationRoute` (+ SQL/Mongo bindings) and a `TokenUtils.createAuthResult()`
 `impersonation` parameter himself; this session added the full 3-tier test suite for it and found two

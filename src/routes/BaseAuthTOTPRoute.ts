@@ -12,10 +12,10 @@ import {
     AuthMiddleware,
     ObjectFactory,
     HttpRequest,
+    RateLimiter,
 } from "@rapidrest/service-core";
 import { Alias, AuthResult, Secret, SecretType, User } from "../models/types.js";
 import { TOTPStrategy, TOTPStrategyOptions } from "../auth/TOTPStrategy.js";
-import { RateLimiter } from "../auth/RateLimiter.js";
 import { TOTPConfig, TOTPSecret } from "../auth/types.js";
 import { TokenUtils } from "../auth/TokenUtils.js";
 import { UserUtils } from "./UserUtils.js";

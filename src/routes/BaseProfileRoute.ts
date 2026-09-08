@@ -8,13 +8,13 @@ import {
     CRUDRoute,
     DocDecorators,
     HttpRequest,
+    RateLimiter,
     RouteDecorators,
     UpdateObject,
 } from "@rapidrest/service-core";
 import { Contact, ContactType, Profile } from "../models/types.js";
 import { ApiError, JWTUser, MessagingUtils, ObjectDecorators, UserUtils } from "@rapidrest/core";
 import { generateOTP, verifyOTP } from "../auth/shared.js";
-import { RateLimiter } from "../auth/RateLimiter.js";
 
 const { Config, Inject, Logger } = ObjectDecorators;
 const { Description, Returns, Summary } = DocDecorators;

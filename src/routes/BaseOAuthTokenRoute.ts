@@ -4,13 +4,12 @@
 ///////////////////////////////////////////////////////////////////////////////
 import "reflect-metadata";
 import { JWTUser, ObjectDecorators } from "@rapidrest/core";
-import { DocDecorators, HttpRequest, HttpResponse, ObjectFactory, RepoUtils, RouteDecorators } from "@rapidrest/service-core";
+import { DocDecorators, HttpRequest, HttpResponse, ObjectFactory, RateLimiter, RepoUtils, RouteDecorators } from "@rapidrest/service-core";
 import { AuthorizationCode, Client, ClientType, OAuthRefreshToken, SigningKey } from "../models/types.js";
 import { ClientAuthUtils } from "../auth/ClientAuthUtils.js";
 import { OAuthError, toOAuthError } from "../auth/OAuthError.js";
 import { OAuthTokenUtils } from "../auth/OAuthTokenUtils.js";
 import { SigningKeyUtils } from "../auth/SigningKeyUtils.js";
-import { RateLimiter } from "../auth/RateLimiter.js";
 import { getRequestData, hashOpaqueToken, verifyPkce } from "../auth/shared.js";
 
 export { OAuthError } from "../auth/OAuthError.js";

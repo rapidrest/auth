@@ -8,7 +8,7 @@ import { DocDecorators, HttpResponse, ObjectFactory, RouteDecorators } from "@ra
 
 const { Config, Init } = ObjectDecorators;
 const { Summary, Description, Returns } = DocDecorators;
-const { Get, Response } = RouteDecorators;
+const { Get, RateLimit, Response } = RouteDecorators;
 
 /**
  * The absolute, final URLs of this deployment's other OAuth/OIDC endpoints — the one piece of information
@@ -79,6 +79,12 @@ export abstract class BaseOAuthDiscoveryRoute {
     )
     @Returns([Object])
     @Get()
+    // Public, unauthenticated, and has no natural per-caller identifier to key a `RateLimiter` on - unlike
+    // every other rate-limited route in this library, which throttles per claimed identity. A shared,
+    // endpoint-wide cap is the correct shape here instead: legitimate traffic is a handful of fetches (each
+    // cached for an hour, see the `Cache-Control` header below), so a blunt volumetric flood is the only
+    // thing this actually needs to catch.
+    @RateLimit()
     public async discovery(@Response res: HttpResponse): Promise<any> {
         res.setHeader("Cache-Control", "public, max-age=3600");
 

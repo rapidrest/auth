@@ -26,7 +26,7 @@ For complete documentation please visit [RapidREST.dev](https://rapidrest.dev).
 
 ### Security Features
 
-* Rate limiting on every credential-verification endpoint, layered per-identifier and per-source-IP (reverse-proxy aware)
+* Rate limiting on every credential-verification endpoint, layered per-identifier and per-source-IP (reverse-proxy aware) — via `@rapidrest/service-core`'s `RateLimiter`
 * MFA recovery/backup codes as a first-class secondary authentication method
 * Account elevation (`@RequiresElevation`) for step-up re-verification before sensitive actions
 * Session revocation ("log out everywhere") that invalidates every outstanding refresh token for an account
