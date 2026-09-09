@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0-beta.6] - 2026-09-09
+
+### Changed
+- Upgraded @rapirest/service-core dep
+
 ## [2.0.0-beta.5] - 2026-09-09
 
 ### Changed
@@ -124,7 +129,8 @@ tagged.
 - `PasskeyStrategy` - WebAuthn based passkey authentication
 - `TOTPStrategy` - RFC 6238 Time-Based One Time Password authentication (e.g. Google Authenticator, etc.)
 
-[Unreleased]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.5...HEAD
+[Unreleased]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.6...HEAD
+[2.0.0-beta.6]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.5...v2.0.0-beta.6
 [2.0.0-beta.5]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.4...v2.0.0-beta.5
 [2.0.0-beta.4]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.3...v2.0.0-beta.4
 [2.0.0-beta.3]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.2...v2.0.0-beta.3
