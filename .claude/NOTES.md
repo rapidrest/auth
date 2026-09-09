@@ -66,7 +66,63 @@ Keep entries terse — this is a reference, not a transcript.
 
 ## Session Log
 
-### 2026-09-08 (latest) — Adopted `@rapidrest/service-core`'s new `@RateLimit()` route decorator
+### 2026-09-08 (latest) — Integration tier fixed: a session-local zombie process, plus a real root-caused `@rapidrest/core` bug
+
+Asked to "fix the integration-tier failures" (the 42-file red state documented in the session below).
+Found and fixed two entirely separate things - **no changes needed in this repo for either**:
+
+1. **A leftover zombie `node.exe` process (a prior `vitest` worker from earlier in this same session that
+   never got torn down) was squatting on port 3000**, silently absorbing every integration test's real HTTP
+   requests instead of that test's own freshly-started `Server` (whose own `listen()` on the same fixed
+   port - `Server.ts` defaults to `3000` when `config.get("port")` is unset, which `test/config.ts` never
+   sets - was failing to bind, but `Server.ts` logs "Listening on ...3000..." unconditionally regardless of
+   whether `app.listen()` actually succeeded, so nothing here surfaced the real cause). Every request landed
+   on the zombie's own already-torn-down routes, hence a 404 on literally everything, indistinguishable at
+   the assertion level from a real routing failure. `netstat -ano | grep :3000` + `Stop-Process` fixed it
+   instantly - went from 0/42 integration files passing to 49/56 (all `test/routes/{sql,mongo}` files, once
+   counted alongside the OAuth `1-assertion` smoke files not in that original 42 count). **Lesson: if a
+   from-scratch, freshly-checked-out-repo integration run 404s on literally everything including routes
+   confirmed present in the startup log, check `netstat` for something already squatting on the server's
+   port before suspecting the router/framework** - this reproduces identically whether the zombie is truly
+   stale or is itself a previous integration test's own leftover process.
+2. **The remaining ~7 files (the actual, long-documented "ObjectFactory/ClassLoader flake" - see
+   [[project_rapidrest_core_sibling]]) got a real root cause and fix, in `@rapidrest/core`, not here.**
+   `ClassLoader.load()` processed a directory's sibling files *concurrently* via `Promise.all`, each one
+   independently `import()`-ing its own module. Two sibling route files that both (directly or indirectly)
+   import the same not-yet-loaded module (here: `TokenUtils`, imported by both `BaseUserRoute.ts` and
+   `BaseImpersonationRoute.ts`) raced to trigger its first evaluation; the loser saw the shared class export
+   as `undefined`, then handed that to `ObjectFactory.register()`, which throws reading `.fqn` off it -
+   exactly the signature documented in the linked memory across a dozen prior sightings, now reproduced
+   deterministically (confirmed 3/3) for a single file (`test/routes/sql/UserRoute.test.ts`) run completely
+   alone - the "needs 2+ `Server.start()`s in one process" framing in that memory undersold it: it only takes
+   2+ sibling files in the same directory scan, which a single `Server.start()`'s own route directory
+   already has plenty of. Root-caused precisely by adding one-off debug logging to `ObjectFactory.initialize()`
+   (`core/src/ObjectFactory.ts`) and `BaseUserRoute.ts` confirming `TokenUtils` really was `undefined` at
+   import time, then `npx madge --circular src/` ruling out a real circular dependency in this repo's own
+   source - the race is in `@rapidrest/core`'s loader, not anything here. Fixed there by loading directory
+   entries sequentially instead of via `Promise.all` (order doesn't affect the resulting class map, so this
+   is a cold-start-time cost only, not a behavior change) - full `@rapidrest/core` suite still green, its own
+   `ClassLoader.test.ts` still green, and **4 consecutive full runs of this repo's entire integration tier
+   (`test/routes/sql` + `test/routes/mongo`, 56 files) all passed 56/56**, plus one complete `yarn test:prod`
+   equivalent run of the whole 103-file suite (1863/1864, 1 pre-existing deliberate `it.skip`). Verified
+   locally by rebuilding `@rapidrest/core` and overlaying its `dist` into this repo's `node_modules` (same
+   technique as the `RateLimiter`/`@RateLimit` work below), then flagged to the user rather than committed
+   unasked, per standing commit-approval convention. JP committed and published it as `@rapidrest/core@5.2.2`
+   same-day (also republished `@rapidrest/service-core@1.7.2`, no functional change noted). This repo's
+   devDependencies were re-verified against the real published packages (not the local overlay) via a
+   genuine `yarn install`, then re-ran the same checks: full `tsc`/lint clean, 3 more consecutive full
+   103-file suite runs all green (1863/1864 - the same 7 total clean runs now span both the local-overlay
+   and real-published verification passes).
+- **Coverage gap found and fixed (follow-up, same session):** the full coverage-gated `yarn test:prod`
+  surfaced a pre-existing, unrelated 99.97%-lines shortfall - `src/auth/shared.ts`'s `verifyPkce()`'s
+  `PKCE_VERIFIER_PATTERN.test(verifier)` early-return-false guard (a malformed/wrong-length/wrong-charset
+  `code_verifier`) had no test hitting it. `test/routes/BaseOAuthTokenRoute.test.ts` covered "missing" and
+  "well-formed but doesn't match the challenge" but not "doesn't even match the RFC 7636 shape" - a
+  genuinely distinct code path (returns `false` before ever reaching the hash/compare). Added one sibling
+  test alongside the existing two, asserting the same externally-observable `invalid_grant` outcome (the
+  three failure modes aren't meant to be distinguishable to the caller). **Confirmed with two consecutive
+  full `yarn test:prod` runs, both exit 0: 103/103 files, 1864/1864 tests (1 pre-existing deliberate skip),
+  100% statements/functions/lines, 95.59% branches (≥95% threshold).**
 
 Follow-on to the `RateLimiter` move below: JP added `@RateLimit()` directly to `@rapidrest/service-core`
 (`RouteDecorators.ts` + `RouteUtils.checkRateLimiter()`) — a method/class-level decorator that throttles a

@@ -408,6 +408,35 @@ describe("BaseOAuthTokenRoute Tests", () => {
                 expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ error: "invalid_grant" }));
             });
 
+            // Regression/coverage: distinct from the "does not match" case above, which sends a well-formed
+            // (43+ char, valid-charset) verifier that simply doesn't hash/compare to the recorded challenge -
+            // this instead never reaches that comparison at all, since `verifyPkce()`'s own RFC 7636 shape
+            // check (`PKCE_VERIFIER_PATTERN`) rejects a too-short verifier up front. Both must independently
+            // fail the same way from the caller's perspective (`invalid_grant`, no distinguishing detail),
+            // so this isn't reachable by any different assertion - it exists to cover that early-return
+            // branch, which nothing else in this suite happens to exercise.
+            it("Fails with invalid_grant when code_verifier does not meet the RFC 7636 shape requirements.", async () => {
+                const { route, authorizationCodeRepo } = makeRoute();
+                const raw = "raw-code-1";
+                authorizationCodeRepo._store.set(
+                    hashOpaqueToken(raw),
+                    makeAuthCode({ codeChallenge: "challenge-1", codeChallengeMethod: "plain" }),
+                );
+                const res = makeResponse();
+                await route.token(
+                    makeRequest({
+                        body: {
+                            grant_type: "authorization_code",
+                            code: raw,
+                            redirect_uri: "https://app.example.com/callback",
+                            code_verifier: "too-short",
+                        },
+                    }),
+                    res,
+                );
+                expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ error: "invalid_grant" }));
+            });
+
             it("Succeeds with a matching plain code_verifier.", async () => {
                 const { route, authorizationCodeRepo } = makeRoute();
                 const raw = "raw-code-1";
