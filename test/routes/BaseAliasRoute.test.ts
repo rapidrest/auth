@@ -516,7 +516,7 @@ describe("BaseAliasRoute Tests", () => {
 
             await (route as any).sendVerificationCode(alias, req);
 
-            expect(checkAndIncrement).toHaveBeenCalledWith("user@example.com", req);
+            expect(checkAndIncrement).toHaveBeenCalledWith("user@example.com", undefined, req);
             expect(sendEmail).toHaveBeenCalledWith(
                 "verify-contact-otp",
                 { totp: expect.any(String) },
@@ -670,7 +670,7 @@ describe("BaseAliasRoute Tests", () => {
                 route.verifyContact("alias-1", { token: "000000" }, req, { uid: "user-1" } as any),
             ).rejects.toThrow(/invalid or expired/i);
 
-            expect(checkAndIncrement).toHaveBeenCalledWith("new@example.com", req);
+            expect(checkAndIncrement).toHaveBeenCalledWith("new@example.com", undefined, req);
         });
 
         it("Propagates the rate limiter's error and does not attempt verification.", async () => {

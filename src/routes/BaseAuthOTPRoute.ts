@@ -111,7 +111,7 @@ export abstract class BaseAuthOTPRoute<U extends User, A extends Alias, S extend
 
         const options: OTPStrategyOptions = new OTPStrategyOptions();
         options.checkRateLimit = (identifier: string, req: HttpRequest) =>
-            this.rateLimiter!.checkAndIncrement(identifier, req);
+            this.rateLimiter!.checkAndIncrement(identifier, undefined, req);
         options.getContact = this.getContact.bind(this);
         options.getContacts = this.getContacts.bind(this);
         options.getUser = this.getUser.bind(this);

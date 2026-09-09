@@ -120,7 +120,7 @@ export abstract class BaseAuthFIDO2Route<U extends User, A extends Alias, S exte
 
         const options: FIDO2StrategyOptions = new FIDO2StrategyOptions(this.fido2Config);
         options.checkRateLimit = (identifier: string, req: HttpRequest) =>
-            this.rateLimiter!.checkAndIncrement(identifier, req);
+            this.rateLimiter!.checkAndIncrement(identifier, undefined, req);
         options.getCredentialById = this.getCredentialById.bind(this);
         options.getCredentials = this.getCredentials.bind(this);
         options.updateCredentialCounter = this.updateCredentialCounter.bind(this);

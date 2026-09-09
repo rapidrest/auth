@@ -84,7 +84,7 @@ export abstract class BaseAuthBasicRoute<U extends User, S extends Secret, A ext
 
         const options: BasicStrategyOptions = new BasicStrategyOptions();
         options.checkRateLimit = (identifier: string, req: HttpRequest) =>
-            this.rateLimiter!.checkAndIncrement(identifier, req);
+            this.rateLimiter!.checkAndIncrement(identifier, undefined, req);
         options.verify = async (name: string, password: string): Promise<JWTUser | undefined> => {
             if (!this.secretRepo) {
                 throw new Error("Secret repository not set.");

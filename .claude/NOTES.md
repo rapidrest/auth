@@ -146,7 +146,7 @@ actually the intended shape, not a substitute for the existing per-identifier `c
     counter keyed on the target (the natural per-identifier choice) structurally cannot catch. The
     endpoint's real population (trusted-role holders) is small and legitimately low-volume, so a shared
     cap is a correct fit here in a way it wouldn't be for a public identity endpoint.
-- **Deliberately did NOT touch any of the existing manual `checkAndIncrement(identifier, req)` call
+- **Deliberately did NOT touch any of the existing manual `checkAndIncrement(identifier, undefined, req)` call
   sites** (Basic/MFA/OTP/TOTP/FIDO2/Passkey/Discover/Elevation auth routes, alias/profile/registration
   contact verification, the three OAuth token/introspect/revoke routes). Swapping any of those to
   `@RateLimit()` would replace a narrow, correct per-identity throttle with one shared bucket for the

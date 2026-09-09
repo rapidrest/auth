@@ -222,7 +222,7 @@ export abstract class BaseAuthElevationRoute<U extends User, S extends Secret, A
             // Keyed on the already-authenticated caller's own uid, not anything client-supplied — unlike
             // login-time rate limiting, this key is fully trustworthy since the caller is already
             // authenticated, so there's no risk of an attacker bucketing an innocent uid.
-            await this.rateLimiter.checkAndIncrement(`elevate:${user.uid}`, req);
+            await this.rateLimiter.checkAndIncrement(`elevate:${user.uid}`, undefined, req);
         }
 
         // Never trust a client-supplied `id` here — every method below is scoped to the identity already

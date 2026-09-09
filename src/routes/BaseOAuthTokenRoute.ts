@@ -348,7 +348,7 @@ export abstract class BaseOAuthTokenRoute<C extends Client, A extends Authorizat
         const { payload } = getRequestData(req, "");
 
         try {
-            await this.rateLimiter?.checkAndIncrement(`oauth_token:${payload?.client_id ?? "unknown"}`, req);
+            await this.rateLimiter?.checkAndIncrement(`oauth_token:${payload?.client_id ?? "unknown"}`, undefined, req);
 
             let result: any;
             switch (payload?.grant_type) {

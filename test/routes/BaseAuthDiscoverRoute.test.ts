@@ -116,7 +116,7 @@ describe("BaseAuthDiscoverRoute Tests", () => {
 
             await route.discover("someone@example.com", {} as any);
 
-            expect(checkAndIncrement).toHaveBeenCalledWith("someone@example.com", {});
+            expect(checkAndIncrement).toHaveBeenCalledWith("someone@example.com", undefined, {});
         });
 
         it("Propagates a rate-limit rejection (429) rather than swallowing it into the equalized result.", async () => {

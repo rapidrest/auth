@@ -239,7 +239,7 @@ export abstract class BaseAliasRoute<T extends Alias> extends CRUDRoute<T> {
             return;
         }
 
-        await this.rateLimiter?.checkAndIncrement(alias.alias, req);
+        await this.rateLimiter?.checkAndIncrement(alias.alias, undefined, req);
         const token = await generateOTP(req, { id: alias.alias });
 
         if (alias.type === AliasType.EMAIL) {
@@ -311,7 +311,7 @@ export abstract class BaseAliasRoute<T extends Alias> extends CRUDRoute<T> {
             throw new ApiError(ApiErrors.NOT_FOUND, 404, ApiErrorMessages.NOT_FOUND);
         }
 
-        await this.rateLimiter?.checkAndIncrement(alias.alias, req);
+        await this.rateLimiter?.checkAndIncrement(alias.alias, undefined, req);
 
         let valid = false;
         try {

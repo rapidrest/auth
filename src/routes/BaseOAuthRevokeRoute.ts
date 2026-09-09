@@ -151,7 +151,11 @@ export abstract class BaseOAuthRevokeRoute<C extends Client, R extends OAuthRefr
         const { payload } = getRequestData(req, "");
 
         try {
-            await this.rateLimiter?.checkAndIncrement(`oauth_revoke:${payload?.client_id ?? "unknown"}`, req);
+            await this.rateLimiter?.checkAndIncrement(
+                `oauth_revoke:${payload?.client_id ?? "unknown"}`,
+                undefined,
+                req,
+            );
 
             const client: Client = await this.clientAuthUtils!.authenticateClient(req);
 

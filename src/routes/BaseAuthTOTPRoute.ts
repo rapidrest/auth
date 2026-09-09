@@ -98,7 +98,7 @@ export abstract class BaseAuthTOTPRoute<U extends User, A extends Alias, S exten
 
         const options: TOTPStrategyOptions = new TOTPStrategyOptions();
         options.checkRateLimit = (identifier: string, req: HttpRequest) =>
-            this.rateLimiter!.checkAndIncrement(identifier, req);
+            this.rateLimiter!.checkAndIncrement(identifier, undefined, req);
         options.encryptionKey = this.totpConfig.encryption_key;
         options.getSecrets = this.getSecrets.bind(this);
         options.getUser = this.getUser.bind(this);

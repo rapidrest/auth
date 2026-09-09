@@ -261,7 +261,7 @@ describe("BaseRegistrationRoute Tests", () => {
 
             await (route as any).start({ email: "user@example.com" }, req);
 
-            expect(checkAndIncrement).toHaveBeenCalledWith("user@example.com", req);
+            expect(checkAndIncrement).toHaveBeenCalledWith("user@example.com", undefined, req);
         });
 
         it("Rate-limits by the phone number before sending an OTP.", async () => {
@@ -275,7 +275,7 @@ describe("BaseRegistrationRoute Tests", () => {
 
             await (route as any).start({ phone: "+14155552671" }, req);
 
-            expect(checkAndIncrement).toHaveBeenCalledWith("+14155552671", req);
+            expect(checkAndIncrement).toHaveBeenCalledWith("+14155552671", undefined, req);
         });
 
         it("Propagates the rate limiter's error and does not send an OTP once the limit is exceeded.", async () => {
@@ -310,7 +310,7 @@ describe("BaseRegistrationRoute Tests", () => {
 
             await (route as any).start({ email: "user@example.com" }, req);
 
-            expect(checkAndIncrement).toHaveBeenCalledWith("user@example.com", req);
+            expect(checkAndIncrement).toHaveBeenCalledWith("user@example.com", undefined, req);
             expect(sendEmail).not.toHaveBeenCalled();
         });
 
@@ -326,7 +326,7 @@ describe("BaseRegistrationRoute Tests", () => {
 
             await (route as any).start({ phone: "+14155552671" }, req);
 
-            expect(checkAndIncrement).toHaveBeenCalledWith("+14155552671", req);
+            expect(checkAndIncrement).toHaveBeenCalledWith("+14155552671", undefined, req);
             expect(sendSMS).not.toHaveBeenCalled();
         });
 
@@ -438,7 +438,7 @@ describe("BaseRegistrationRoute Tests", () => {
                 (route as any).verify({ email: "user@example.com", token: "000000" }, req),
             ).rejects.toThrow(/verification code is invalid or has expired/);
 
-            expect(checkAndIncrement).toHaveBeenCalledWith("user@example.com", req);
+            expect(checkAndIncrement).toHaveBeenCalledWith("user@example.com", undefined, req);
         });
 
         it("Propagates the rate limiter's error and does not consume the OTP.", async () => {

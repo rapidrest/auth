@@ -118,7 +118,7 @@ export abstract class BaseAuthDiscoverRoute<U extends User, A extends Alias, S e
             return EMPTY_RESULT;
         }
 
-        await this.rateLimiter?.checkAndIncrement(id, req);
+        await this.rateLimiter?.checkAndIncrement(id, undefined, req);
 
         try {
             const user: U | undefined = await this.userUtils?.lookup(id);

@@ -140,7 +140,7 @@ export abstract class BaseAuthMFARoute<U extends User, S extends Secret, A exten
 
         const options: MFAStrategyOptions = new MFAStrategyOptions();
         options.checkRateLimit = (identifier: string, req: HttpRequest) =>
-            this.rateLimiter!.checkAndIncrement(identifier, req);
+            this.rateLimiter!.checkAndIncrement(identifier, undefined, req);
         options.consumeRecoveryCode = this.consumeRecoveryCode.bind(this);
         options.encryptionKey = this.totpConfig.encryption_key;
         options.fidoConfig = this.fido2Config;

@@ -131,7 +131,7 @@ export abstract class BaseRegistrationRoute<U extends User, A extends Alias> {
             // existing identifier and a non-existing one are throttled identically — otherwise the two
             // branches are distinguishable by request-rate tolerance alone, defeating the point of the
             // identical `{}` response used for both.
-            await this.rateLimiter?.checkAndIncrement(email, req);
+            await this.rateLimiter?.checkAndIncrement(email, undefined, req);
 
             const existing = await this.aliasRepo.find(
                 {
@@ -156,7 +156,7 @@ export abstract class BaseRegistrationRoute<U extends User, A extends Alias> {
         } else if (phone) {
             // See the email branch above for why this runs unconditionally, before the "already
             // registered" check.
-            await this.rateLimiter?.checkAndIncrement(phone, req);
+            await this.rateLimiter?.checkAndIncrement(phone, undefined, req);
 
             const existing = await this.aliasRepo.find(
                 {
@@ -210,7 +210,7 @@ export abstract class BaseRegistrationRoute<U extends User, A extends Alias> {
             throw new ApiError(ApiErrors.INVALID_REQUEST, 400, "An id and verification code are required.");
         }
 
-        await this.rateLimiter?.checkAndIncrement(id, req);
+        await this.rateLimiter?.checkAndIncrement(id, undefined, req);
 
         let valid: boolean;
         try {

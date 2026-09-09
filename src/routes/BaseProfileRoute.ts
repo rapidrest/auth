@@ -233,7 +233,7 @@ export abstract class BaseProfileRoute<T extends Profile> extends CRUDRoute<T> {
             return;
         }
 
-        await this.rateLimiter?.checkAndIncrement(contact.contact, req);
+        await this.rateLimiter?.checkAndIncrement(contact.contact, undefined, req);
         const token = await generateOTP(req, { id: contact.contact });
 
         if (contact.type === ContactType.EMAIL) {
@@ -343,7 +343,7 @@ export abstract class BaseProfileRoute<T extends Profile> extends CRUDRoute<T> {
             throw new ApiError(ApiErrors.NOT_FOUND, 404, "No such contact on this Profile.");
         }
 
-        await this.rateLimiter?.checkAndIncrement(contact, req);
+        await this.rateLimiter?.checkAndIncrement(contact, undefined, req);
 
         let valid = false;
         try {

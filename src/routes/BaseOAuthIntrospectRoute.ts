@@ -159,7 +159,11 @@ export abstract class BaseOAuthIntrospectRoute<C extends Client, R extends OAuth
         const { payload } = getRequestData(req, "");
 
         try {
-            await this.rateLimiter?.checkAndIncrement(`oauth_introspect:${payload?.client_id ?? "unknown"}`, req);
+            await this.rateLimiter?.checkAndIncrement(
+                `oauth_introspect:${payload?.client_id ?? "unknown"}`,
+                undefined,
+                req,
+            );
 
             const client: Client = await this.clientAuthUtils!.authenticateClient(req);
             if (client.clientType !== ClientType.CONFIDENTIAL) {
