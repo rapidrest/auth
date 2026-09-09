@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0-beta.5] - 2026-09-09
+
+### Changed
+- Move RateLimiter to @rapidrest/service-core, import it from there instead
+- Apply the new @RateLimit() decorator to OIDC discovery, JWKS, client secret regeneration, and impersonation
+- Bump @rapidrest/service-core dependency to ^1.7.1
+- Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+- Bump @rapidrest/core to ^5.2.2 and @rapidrest/service-core to ^1.7.2
+- Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+- Updated CI workflows
+
+### Removed
+- Removed AuthEventType.RATELIMIT_EXCEEDED in favor of service-core's RATELIMIT_EXCEEDED_EVENT
+
 ## [2.0.0-beta.4] - 2026-09-07
 
 ### Added
@@ -110,7 +124,8 @@ tagged.
 - `PasskeyStrategy` - WebAuthn based passkey authentication
 - `TOTPStrategy` - RFC 6238 Time-Based One Time Password authentication (e.g. Google Authenticator, etc.)
 
-[Unreleased]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.4...HEAD
+[Unreleased]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.5...HEAD
+[2.0.0-beta.5]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.4...v2.0.0-beta.5
 [2.0.0-beta.4]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.3...v2.0.0-beta.4
 [2.0.0-beta.3]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.2...v2.0.0-beta.3
 [2.0.0-beta.2]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.1...v2.0.0-beta.2
