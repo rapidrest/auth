@@ -20,12 +20,13 @@ import {
     OTPContact,
     OTPContactType,
     PasskeyConfig,
+    PasswordConfig,
     RecoveryCodesSecret,
     StoredPasskeyCredential,
     TOTPConfig,
     TOTPSecret,
 } from "../auth/types.js";
-import { importArgon2, verifyDummyPassword } from "../auth/shared.js";
+import { importArgon2, normalizePasswordSubmission, verifyDummyPassword, WeakClientHashError } from "../auth/shared.js";
 import { TokenUtils } from "../auth/TokenUtils.js";
 import { UserUtils } from "./UserUtils.js";
 
@@ -75,6 +76,9 @@ export abstract class BaseAuthMFARoute<U extends User, S extends Secret, A exten
 
     @Inject(MessagingUtils)
     protected messagingUtils?: MessagingUtils;
+
+    @Config("auth:password", new PasswordConfig())
+    protected passwordConfig: PasswordConfig = new PasswordConfig();
 
     @Inject(RateLimiter)
     protected rateLimiter?: RateLimiter;
@@ -530,8 +534,10 @@ export abstract class BaseAuthMFARoute<U extends User, S extends Secret, A exten
         const user: U | undefined = await this.userUtils.lookup(name);
         if (!user) {
             // Burn an equivalent amount of time to the real verification path below so a nonexistent
-            // user can't be distinguished from a wrong password via response timing.
-            await verifyDummyPassword(password);
+            // user can't be distinguished from a wrong password via response timing. No real uid exists
+            // yet to normalize against — `name` is only a placeholder so the dummy path still takes the
+            // same shape-dependent branch (plaintext vs. already-hashed) a real attempt would have.
+            await verifyDummyPassword(password, name, this.passwordConfig);
             throw new Error("Invalid authorization request.");
         }
 
@@ -550,13 +556,25 @@ export abstract class BaseAuthMFARoute<U extends User, S extends Secret, A exten
         if (secrets.length === 0) {
             // No password secret to check against — burn the same amount of time as a real
             // verification so this case isn't distinguishable via timing from a wrong password.
-            await verifyDummyPassword(password);
+            await verifyDummyPassword(password, user.uid, this.passwordConfig);
         } else {
-            for (const secret of secrets) {
-                const argon = await importArgon2();
-                success = await argon.verify(secret.data, password);
-                if (success) {
-                    break;
+            // Normalizes once (not per-secret): a raw-plaintext submission is hashed into the same
+            // canonical form a capable client would have submitted directly (see
+            // normalizePasswordSubmission()), so either kind of client can authenticate against the one
+            // stored hash below. A below-floor fake client-hash fails closed here, same as a wrong
+            // password — no distinct error, so it can't be distinguished from one by timing or message.
+            try {
+                const normalized = await normalizePasswordSubmission(password, user.uid, this.passwordConfig);
+                for (const secret of secrets) {
+                    const argon = await importArgon2();
+                    success = await argon.verify(secret.data, normalized);
+                    if (success) {
+                        break;
+                    }
+                }
+            } catch (err) {
+                if (!(err instanceof WeakClientHashError)) {
+                    throw err;
                 }
             }
         }

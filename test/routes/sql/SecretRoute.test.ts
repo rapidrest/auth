@@ -31,7 +31,8 @@ import { Repository } from "typeorm";
 import { SecretSQL } from "../../../src/models/sql/SecretSQL.js";
 import { MongoMemoryServer } from "mongodb-memory-server";
 import { SecretType } from "../../../src/models/types.js";
-import { StoredPasskeyCredential, TOTPSecret } from "../../../src/auth/types.js";
+import { PasswordConfig, StoredPasskeyCredential, TOTPSecret } from "../../../src/auth/types.js";
+import { normalizePasswordSubmission } from "../../../src/auth/shared.js";
 
 const mockGenerateRegistrationOptions = generateRegistrationOptions as any;
 const mockVerifyRegistrationResponse = verifyRegistrationResponse as any;
@@ -727,7 +728,12 @@ describe("Route:SecretSQL Tests", () => {
 
         const existing: SecretSQL | null = await repo.findOne({ where: { uid: obj.uid } });
         expect(existing?.data).not.toBe("NewValidPassw0rd!");
-        expect(await argon2.verify(existing!.data, "NewValidPassw0rd!")).toBe(true);
+        // The stored hash is of the canonical (would-be client-hashed) form of the new plaintext, not the
+        // plaintext itself — see normalizePasswordSubmission() in shared.ts, which
+        // BaseSecretRoute.processPasswordSecret() applies to every password created/changed through the
+        // real route.
+        const canonical = await normalizePasswordSubmission("NewValidPassw0rd!", user.uid, new PasswordConfig());
+        expect(await argon2.verify(existing!.data, canonical)).toBe(true);
     });
 
     it("Regression: rotates a PASSWORD secret's data and enforces complexity even when `type` is omitted from the request body (previously fell through validateUpdate()'s switch unvalidated since it keyed off obj.type instead of existing.type).", async () => {
@@ -744,7 +750,8 @@ describe("Route:SecretSQL Tests", () => {
 
         const existing: SecretSQL | null = await repo.findOne({ where: { uid: obj.uid } });
         expect(existing?.data).not.toBe("NewValidPassw0rd!");
-        expect(await argon2.verify(existing!.data, "NewValidPassw0rd!")).toBe(true);
+        const canonical = await normalizePasswordSubmission("NewValidPassw0rd!", user.uid, new PasswordConfig());
+        expect(await argon2.verify(existing!.data, canonical)).toBe(true);
     });
 
     it("Rejects an updated PASSWORD secret that doesn't meet complexity requirements.", async () => {

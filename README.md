@@ -32,6 +32,7 @@ For complete documentation please visit [RapidREST.dev](https://rapidrest.dev).
 * Session revocation ("log out everywhere") that invalidates every outstanding refresh token for an account
 * Optional TOTP secret encryption at rest (AES-256-GCM)
 * Configurable Argon2 password hashing cost parameters
+* Client-side pre-hashed (Argon2id) password support, alongside plaintext, so a capable client's real password never reaches the server
 * Secure, `HttpOnly` cookies by default when cookie-based token issuance is enabled
 * Default account provisioning on startup, with configuration-driven role/verification sync
 

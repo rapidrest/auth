@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Client-side pre-hashed (Argon2id) password support, alongside plaintext
+
 ## [2.0.0-beta.6] - 2026-09-09
 
 ### Changed

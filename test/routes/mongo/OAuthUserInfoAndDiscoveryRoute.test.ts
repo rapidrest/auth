@@ -18,6 +18,18 @@ import { ConsentGrantMongo } from "../../../src/models/mongo/ConsentGrantMongo.j
 import { OAuthRefreshTokenMongo } from "../../../src/models/mongo/OAuthRefreshTokenMongo.js";
 import { SigningKeyMongo } from "../../../src/models/mongo/SigningKeyMongo.js";
 import { ClientType, ContactType, SecretType, TokenEndpointAuthMethod } from "../../../src/models/types.js";
+import { normalizePasswordSubmission } from "../../../src/auth/shared.js";
+import { PasswordConfig } from "../../../src/auth/types.js";
+
+// Stored hashes must be of the canonical (would-be client-hashed) form of a plaintext password, not
+// the plaintext itself — see normalizePasswordSubmission() in shared.ts, which
+// BaseSecretRoute.processPasswordSecret() applies to every password created/changed through the real
+// route. A raw `argon2.hash(password)` here (the pre-client-hashing-support shape) would no longer be
+// verifiable via login, since login normalizes a plaintext submission the same way before comparing.
+const hashPasswordForLogin = async function (password: string, userUid: string): Promise<string> {
+    const canonical = await normalizePasswordSubmission(password, userUid, new PasswordConfig());
+    return argon2.hash(canonical);
+};
 
 const mongod: MongoMemoryServer = new MongoMemoryServer({
     instance: {
@@ -67,7 +79,11 @@ describe("Route:OAuthUserInfoAndDiscoveryMongo Tests", () => {
     };
 
     const createSecretMongo = async function (data?: any): Promise<SecretMongo> {
-        const obj = new SecretMongo({ data: await argon2.hash("password"), type: SecretType.PASSWORD, ...data });
+        const obj = new SecretMongo({
+            data: await hashPasswordForLogin("password", data.userUid),
+            type: SecretType.PASSWORD,
+            ...data,
+        });
         const result = await secretRepo.save(obj);
         await withOwnerACL(result.uid, "SecretMongo", result.userUid);
         return result;

@@ -1276,15 +1276,24 @@ describe("BaseAuthElevationRoute Tests", () => {
                 /Invalid authorization request/,
             );
 
-            expect(verifyDummySpy).toHaveBeenCalledWith("pass1");
+            expect(verifyDummySpy).toHaveBeenCalledWith("pass1", "unknown-user", expect.any(Object));
         });
 
+        // Stored hashes are built via normalizePasswordSubmission() rather than a raw argon2.hash(password)
+        // to mirror what BaseSecretRoute actually persists: the canonical (would-be client-hashed) form of
+        // a plaintext password, not the plaintext itself — see BaseSecretRoute.processPasswordSecret().
         it("Resolves the user when at least one stored password matches — this is what lets a password-only " +
             "(no second factor enrolled) admin account still elevate.", async () => {
             const route = new TestAuthElevationRoute();
             const argon2 = await import("argon2");
+            const shared = await import("../../src/auth/shared.js");
+            const canonical = await shared.normalizePasswordSubmission(
+                "correct-password",
+                "user-uid-1",
+                new (await import("../../src/auth/types.js")).PasswordConfig(),
+            );
             (route as any).secretRepo = {
-                find: vi.fn().mockResolvedValue([{ data: await argon2.hash("correct-password") }]),
+                find: vi.fn().mockResolvedValue([{ data: await argon2.hash(canonical) }]),
             };
             (route as any).userUtils = { lookup: vi.fn().mockResolvedValue({ uid: "user-uid-1" }) };
 
@@ -1296,8 +1305,14 @@ describe("BaseAuthElevationRoute Tests", () => {
         it("Throws when none of the user's stored passwords match.", async () => {
             const route = new TestAuthElevationRoute();
             const argon2 = await import("argon2");
+            const shared = await import("../../src/auth/shared.js");
+            const canonical = await shared.normalizePasswordSubmission(
+                "correct-password",
+                "user-uid-1",
+                new (await import("../../src/auth/types.js")).PasswordConfig(),
+            );
             (route as any).secretRepo = {
-                find: vi.fn().mockResolvedValue([{ data: await argon2.hash("correct-password") }]),
+                find: vi.fn().mockResolvedValue([{ data: await argon2.hash(canonical) }]),
             };
             (route as any).userUtils = { lookup: vi.fn().mockResolvedValue({ uid: "user-uid-1" }) };
 
@@ -1317,7 +1332,40 @@ describe("BaseAuthElevationRoute Tests", () => {
                 /Invalid authorization request/,
             );
 
-            expect(verifyDummySpy).toHaveBeenCalledWith("any-password");
+            expect(verifyDummySpy).toHaveBeenCalledWith("any-password", "user-uid-1", expect.any(Object));
+        });
+
+        // Proves the dual-mode requirement: a capable client submitting its own locally-computed
+        // Argon2id hash (instead of the plaintext) authenticates against the same stored credential.
+        it("Resolves the user when the submitted value is already a client-side hash of the correct password.", async () => {
+            const route = new TestAuthElevationRoute();
+            const argon2 = await import("argon2");
+            const shared = await import("../../src/auth/shared.js");
+            const clientHash = await argon2.hash("correct-password", {
+                salt: shared.deriveClientSalt("user-uid-1"),
+                ...shared.CLIENT_ARGON2_PARAMS,
+            });
+            (route as any).secretRepo = {
+                find: vi.fn().mockResolvedValue([{ data: await argon2.hash(clientHash) }]),
+            };
+            (route as any).userUtils = { lookup: vi.fn().mockResolvedValue({ uid: "user-uid-1" }) };
+
+            const user = await (route as any).verify("user1", clientHash);
+
+            expect(user).toEqual({ uid: "user-uid-1" });
+        });
+
+        // Regression/coverage: a non-WeakClientHashError thrown while normalizing (e.g. deriveClientSalt()
+        // choking on a malformed uid) must propagate, not be silently swallowed alongside the
+        // WeakClientHashError case handled above.
+        it("Propagates a non-WeakClientHashError thrown while normalizing, rather than swallowing it.", async () => {
+            const route = new TestAuthElevationRoute();
+            (route as any).secretRepo = { find: vi.fn().mockResolvedValue([{ data: "some-hash" }]) };
+            (route as any).userUtils = { lookup: vi.fn().mockResolvedValue({ uid: 123 as any }) };
+
+            await expect((route as any).verify("user1", "correct-password")).rejects.toThrow(
+                /must be of type string/,
+            );
         });
     });
 });

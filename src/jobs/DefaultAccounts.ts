@@ -6,7 +6,7 @@ import { ObjectDecorators } from "@rapidrest/core";
 import { ACLAction, BackgroundService, ObjectFactory, RepoUtils } from "@rapidrest/service-core";
 import { Alias, AliasType, Contact, ContactType, Profile, Secret, SecretType, User } from "../models/types.js";
 import { PasswordConfig } from "../auth/types.js";
-import { generatePassword, importArgon2 } from "../auth/shared.js";
+import { generatePassword, importArgon2, normalizePasswordSubmission } from "../auth/shared.js";
 import * as path from "path";
 import * as fs from "fs/promises";
 import { existsSync } from "fs";
@@ -287,9 +287,13 @@ export abstract class DefaultAccounts<
                 account.password = generatePassword(this.passwordConfig);
             }
 
+            // Normalizes through the same canonicalization `BaseSecretRoute` applies to a client-submitted
+            // plaintext password, so this account can still log in via a capable client that hashes
+            // locally (see `normalizePasswordSubmission()` in shared.ts) — not just via plaintext.
+            const canonical = await normalizePasswordSubmission(account.password, user.uid, this.passwordConfig);
             const argon = await importArgon2();
             const secret: S = new this.secretClass({
-                data: await argon.hash(account.password),
+                data: await argon.hash(canonical),
                 type: SecretType.PASSWORD,
                 userUid: user.uid,
             });

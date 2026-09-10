@@ -96,6 +96,25 @@ export class PasswordConfig {
     public readonly hash_time_cost: number = 3;
     // The argon2 parallelism (number of threads/lanes) used when hashing a password.
     public readonly hash_parallelism: number = 4;
+    // Set to false to reject a password submitted in already client-hashed (argon2id) form outright,
+    // forcing every client on this deployment to submit plaintext.
+    public readonly allow_client_hashing: boolean = true;
+    // Set to true to reject a password submitted as plaintext outright, forcing every client on this
+    // deployment to hash locally before submitting. Has no effect on login — only on setting/changing
+    // a password (see BaseSecretRoute) — since a stored hash accepts either form at login regardless.
+    public readonly require_client_hashing: boolean = false;
+    // The minimum argon2 memory cost, in KiB, a client-submitted pre-hashed password's embedded
+    // parameters must meet to be accepted as already-hashed rather than rejected outright. Prevents a
+    // hand-crafted, deliberately-cheap fake hash from smuggling a low-entropy credential past the
+    // plaintext strength checks that would otherwise apply. Defaults match the documented client-side
+    // parameters (see `CLIENT_ARGON2_PARAMS` in shared.ts) that a real capable client is expected to use.
+    public readonly client_hash_min_memory_cost: number = 19456;
+    // The minimum argon2 time cost (iterations) a client-submitted pre-hashed password's embedded
+    // parameters must meet. See `client_hash_min_memory_cost`.
+    public readonly client_hash_min_time_cost: number = 2;
+    // The minimum argon2 parallelism a client-submitted pre-hashed password's embedded parameters must
+    // meet. See `client_hash_min_memory_cost`.
+    public readonly client_hash_min_parallelism: number = 1;
 }
 
 /**

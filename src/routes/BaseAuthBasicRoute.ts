@@ -15,7 +15,8 @@ import {
 } from "@rapidrest/service-core";
 import { Alias, AuthResult, Secret, SecretType, User } from "../models/types.js";
 import { BasicStrategy, BasicStrategyOptions } from "../auth/BasicStrategy.js";
-import { importArgon2, verifyDummyPassword } from "../auth/shared.js";
+import { importArgon2, normalizePasswordSubmission, verifyDummyPassword, WeakClientHashError } from "../auth/shared.js";
+import { PasswordConfig } from "../auth/types.js";
 import { TokenUtils } from "../auth/TokenUtils.js";
 import { UserUtils } from "./UserUtils.js";
 
@@ -45,6 +46,9 @@ export abstract class BaseAuthBasicRoute<U extends User, S extends Secret, A ext
 
     @Config("auth")
     protected jwtConfig?: any;
+
+    @Config("auth:password", new PasswordConfig())
+    protected passwordConfig: PasswordConfig = new PasswordConfig();
 
     @Inject(RateLimiter)
     protected rateLimiter?: RateLimiter;
@@ -96,8 +100,11 @@ export abstract class BaseAuthBasicRoute<U extends User, S extends Secret, A ext
             const user: User | undefined = await this.userUtils.lookup(name);
             if (!user) {
                 // Burn an equivalent amount of time to the real verification path below so a nonexistent
-                // user can't be distinguished from a wrong password via response timing.
-                await verifyDummyPassword(password);
+                // user can't be distinguished from a wrong password via response timing. No real uid
+                // exists yet to normalize against — `name` is only a placeholder so the dummy path still
+                // takes the same shape-dependent branch (plaintext vs. already-hashed) a real attempt
+                // with this submission would have.
+                await verifyDummyPassword(password, name, this.passwordConfig);
                 throw new Error("Invalid name or password");
             }
 
@@ -106,7 +113,7 @@ export abstract class BaseAuthBasicRoute<U extends User, S extends Secret, A ext
             // in this function - a distinct "requires MFA" message would let an attacker enumerate valid
             // usernames (and which ones have MFA enabled) purely from the error text.
             if (user.requireMFA) {
-                await verifyDummyPassword(password);
+                await verifyDummyPassword(password, user.uid, this.passwordConfig);
                 throw new Error("Invalid name or password");
             }
 
@@ -125,13 +132,26 @@ export abstract class BaseAuthBasicRoute<U extends User, S extends Secret, A ext
             if (secrets.length === 0) {
                 // No password secret to check against — burn the same amount of time as a real
                 // verification so this case isn't distinguishable via timing from a wrong password.
-                await verifyDummyPassword(password);
+                await verifyDummyPassword(password, user.uid, this.passwordConfig);
             } else {
-                for (const secret of secrets) {
-                    const argon = await importArgon2();
-                    success = await argon.verify(secret.data, password);
-                    if (success) {
-                        break;
+                // Normalizes once (not per-secret): a raw-plaintext submission is hashed into the same
+                // canonical form a capable client would have submitted directly (see
+                // normalizePasswordSubmission()), so either kind of client can authenticate against the
+                // one stored hash below. A below-floor fake client-hash fails closed here, same as a
+                // wrong password — no distinct error, so it can't be distinguished from one by timing
+                // or message.
+                try {
+                    const normalized = await normalizePasswordSubmission(password, user.uid, this.passwordConfig);
+                    for (const secret of secrets) {
+                        const argon = await importArgon2();
+                        success = await argon.verify(secret.data, normalized);
+                        if (success) {
+                            break;
+                        }
+                    }
+                } catch (err) {
+                    if (!(err instanceof WeakClientHashError)) {
+                        throw err;
                     }
                 }
             }

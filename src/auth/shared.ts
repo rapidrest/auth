@@ -875,11 +875,139 @@ export const DUMMY_ARGON2_HASH: string =
  * response time of a "user not found" path with a "user found, password checked" path so that an attacker
  * can't enumerate valid usernames/emails by measuring response latency (a nonexistent user would otherwise
  * short-circuit before ever running the deliberately-slow Argon2 verify).
+ *
+ * When `userUid`/`config` are supplied (every password call site — see `BaseAuthBasicRoute`/
+ * `BaseAuthElevationRoute`), `password` is first run through `normalizePasswordSubmission()` exactly as a
+ * real verification would, so this dummy path costs the same as a real attempt of the same submitted shape
+ * (plaintext vs. already client-hashed vs. a below-floor fake hash) — otherwise the extra hash step that
+ * branch adds would itself become a timing side-channel. Omit them (as the recovery-code call site does)
+ * to fall back to the original, single-verify-only behavior, which has no such branch to equalize.
  * @param password The value to verify against the dummy hash. Never actually a real password of anyone.
+ * @param userUid The account `uid` a real attempt would have normalized against. Never a real account.
+ * @param config Supplies the minimum accepted client-hash cost parameters.
  */
-export const verifyDummyPassword = async function (password: string): Promise<void> {
+export const verifyDummyPassword = async function (
+    password: string,
+    userUid?: string,
+    config?: PasswordConfig,
+): Promise<void> {
     const argon = await importArgon2();
+    if (userUid && config) {
+        let normalized: string;
+        try {
+            normalized = await normalizePasswordSubmission(password, userUid, config);
+        } catch (err) {
+            if (err instanceof WeakClientHashError) {
+                // Mirrors the real path: a below-floor fake hash is rejected before ever reaching
+                // argon2.verify(), so the dummy path burns no additional time here either.
+                return;
+            }
+            throw err;
+        }
+        await argon.verify(DUMMY_ARGON2_HASH, normalized);
+        return;
+    }
     await argon.verify(DUMMY_ARGON2_HASH, password);
+};
+
+///////////////////////////////////////////////////////////////////////////////
+// CLIENT-SIDE PASSWORD HASHING
+///////////////////////////////////////////////////////////////////////////////
+
+/**
+ * The fixed Argon2id parameters a client must use when hashing a password locally before submitting it,
+ * so the same password always produces the same hash for a given account regardless of which device or
+ * session computed it. Deliberately lighter than a deployment's own configurable server-side
+ * `hash_memory_cost` etc. (see `PasswordConfig`), since this needs to run acceptably in a browser or
+ * mobile WASM context. These are NOT configurable — changing them changes the hash output and breaks
+ * login from any client still using the old constants.
+ */
+export const CLIENT_ARGON2_PARAMS = {
+    memoryCost: 19456,
+    timeCost: 2,
+    parallelism: 1,
+    hashLength: 32,
+} as const;
+
+/**
+ * Derives the deterministic salt a client uses to hash a password locally: the SHA-256 digest of the
+ * account's `uid`. Using `uid` (immutable, unique, returned on every successful login) rather than an
+ * email/username avoids the salt changing if the account's contact info is later edited, and sidesteps
+ * ambiguity when an account has multiple aliases — `uid` is the same no matter which alias was used to
+ * authenticate. A client that doesn't yet know its account's `uid` (e.g. its first-ever login on a new
+ * device) has no way to compute this and must fall back to submitting a raw password instead.
+ */
+export const deriveClientSalt = function (userUid: string): Buffer {
+    return crypto.createHash("sha256").update(userUid).digest();
+};
+
+/**
+ * Matches the PHC-encoded string `argon2.hash()` produces for an argon2id hash, e.g.
+ * `$argon2id$v=19$m=19456,p=1,t=2$<salt>$<hash>`. Used to distinguish an already client-hashed password
+ * submission from a raw plaintext one — deliberately based on the value's own structure rather than a
+ * client-supplied flag, since a flag could be lied about (tagging a weak plaintext string as "already
+ * hashed" to dodge `validatePassword()`'s strength checks) whereas a value can't be faked into this shape
+ * without also failing `normalizePasswordSubmission()`'s cost-parameter floor check below.
+ */
+const CLIENT_HASH_FORMAT_REGEX = /^\$argon2id\$v=\d+\$m=(\d+),p=(\d+),t=(\d+)\$[A-Za-z0-9+/]+\$[A-Za-z0-9+/]+$/;
+
+/**
+ * Returns whether `value` is structurally shaped like an argon2id PHC hash string, i.e. was very likely
+ * produced by a client hashing its password locally rather than typed as a plaintext password.
+ */
+export const isClientHashedFormat = function (value: string): boolean {
+    return CLIENT_HASH_FORMAT_REGEX.test(value);
+};
+
+/**
+ * Thrown when a submitted value is shaped like a client-hashed argon2id password but its embedded cost
+ * parameters fall below `PasswordConfig`'s configured minimum — e.g. a hand-crafted, deliberately-cheap
+ * fake hash used to smuggle a low-entropy credential past plaintext strength validation.
+ */
+export class WeakClientHashError extends Error {}
+
+/**
+ * Normalizes a submitted password value to the canonical form that should be fed into the server's own
+ * Argon2id hash (on create/change-password) or verify (on login) call, regardless of whether the
+ * submitting client hashed it locally first:
+ * - Already client-hashed (matches `isClientHashedFormat()`): returned unchanged, once its embedded
+ * cost parameters are confirmed to meet `config`'s configured minimum (throws `WeakClientHashError`
+ * otherwise).
+ * - Raw plaintext: hashed here, using the same fixed salt derivation and parameters a capable client
+ * would have used (`deriveClientSalt(userUid)` + `CLIENT_ARGON2_PARAMS`), so a legacy/incapable
+ * client's submission normalizes to what a capable client's submission of the same password would have
+ * been — letting a single stored hash (see `BaseSecretRoute`) accept logins from either kind of client.
+ *
+ * @param value The raw value submitted by the client — either a plaintext password or an already
+ * client-hashed value.
+ * @param userUid The `uid` of the account this password belongs to, used to derive the salt for the
+ * plaintext fallback path.
+ * @param config Supplies the minimum accepted client-hash cost parameters.
+ */
+export const normalizePasswordSubmission = async function (
+    value: string,
+    userUid: string,
+    config: PasswordConfig,
+): Promise<string> {
+    const match = CLIENT_HASH_FORMAT_REGEX.exec(value);
+    if (match) {
+        const memoryCost = Number(match[1]);
+        const parallelism = Number(match[2]);
+        const timeCost = Number(match[3]);
+        if (
+            memoryCost < config.client_hash_min_memory_cost ||
+            timeCost < config.client_hash_min_time_cost ||
+            parallelism < config.client_hash_min_parallelism
+        ) {
+            throw new WeakClientHashError(
+                "Client-hashed password does not meet the minimum required Argon2id cost parameters.",
+            );
+        }
+        return value;
+    }
+
+    const argon = await importArgon2();
+    return await argon.hash(value, { salt: deriveClientSalt(userUid), ...CLIENT_ARGON2_PARAMS });
 };
 
 /**

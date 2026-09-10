@@ -24,9 +24,12 @@ import {
     generateTOTPURI,
     importArgon2,
     importOTPLib,
+    isClientHashedFormat,
     isPasskeyRegistrationResponse,
     isValidTOTPSecret,
+    normalizePasswordSubmission,
     verifyPasskeyRegistrationResponse,
+    WeakClientHashError,
 } from "../auth/shared.js";
 import { AuthEventType } from "../auth/events.js";
 import {
@@ -166,19 +169,7 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
                 await this.validateWebAuthnCreate(obj, req, this.passkeyConfig);
                 break;
             case SecretType.PASSWORD:
-                {
-                    if (typeof obj.data === "string") {
-                        this.validatePassword(obj.data);
-                        const argon = await importArgon2();
-                        obj.data = await argon.hash(obj.data, this.argon2Options());
-                    } else {
-                        throw new ApiError(
-                            ApiErrors.INVALID_REQUEST,
-                            400,
-                            "A secret of type 'password' must specify string data.",
-                        );
-                    }
-                }
+                obj.data = await this.processPasswordSecret(obj.data, obj.userUid!);
                 break;
             case SecretType.RECOVERY_CODES:
                 await this.validateRecoveryCodesCreate(obj, req);
@@ -236,6 +227,53 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
                 400,
                 `Password must have at least one special character: ${this.passwordConfig.special_chars}`,
             );
+        }
+    }
+
+    /**
+     * Validates a `password`-type secret's submitted `data` — either a plaintext password or a value
+     * already hashed client-side (see `isClientHashedFormat()`/`normalizePasswordSubmission()` in
+     * shared.ts) — and returns the server-side Argon2id hash to persist as `Secret.data`.
+     *
+     * A submission already in client-hashed form skips `validatePassword()`'s plaintext strength rules
+     * (meaningless against a hash) but must still meet `passwordConfig`'s minimum cost-parameter floor.
+     * A plaintext submission is validated as today, then normalized (hashed with the same fixed
+     * salt/parameters a capable client would have used) before the server's own hash is computed on top
+     * — so the one resulting stored hash accepts a login submitted either way (see
+     * `BaseAuthBasicRoute`/`BaseAuthElevationRoute`).
+     */
+    private async processPasswordSecret(data: unknown, userUid: string): Promise<string> {
+        if (typeof data !== "string") {
+            throw new ApiError(ApiErrors.INVALID_REQUEST, 400, "A secret of type 'password' must specify string data.");
+        }
+
+        if (isClientHashedFormat(data)) {
+            if (!this.passwordConfig.allow_client_hashing) {
+                throw new ApiError(
+                    ApiErrors.INVALID_REQUEST,
+                    400,
+                    "This server does not accept client-hashed passwords.",
+                );
+            }
+        } else if (this.passwordConfig.require_client_hashing) {
+            throw new ApiError(
+                ApiErrors.INVALID_REQUEST,
+                400,
+                "This server requires passwords to be hashed client-side before submission.",
+            );
+        } else {
+            this.validatePassword(data);
+        }
+
+        try {
+            const canonical = await normalizePasswordSubmission(data, userUid, this.passwordConfig);
+            const argon = await importArgon2();
+            return await argon.hash(canonical, this.argon2Options());
+        } catch (err) {
+            if (err instanceof WeakClientHashError) {
+                throw new ApiError(ApiErrors.INVALID_REQUEST, 400, err.message);
+            }
+            throw err;
         }
     }
 
@@ -676,19 +714,7 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
                         "Passkey secrets cannot be modified. Create a new secret.",
                     );
                 case SecretType.PASSWORD:
-                    {
-                        if (typeof obj.data === "string") {
-                            this.validatePassword(obj.data);
-                            const argon = await importArgon2();
-                            obj.data = await argon.hash(obj.data, this.argon2Options());
-                        } else {
-                            throw new ApiError(
-                                ApiErrors.INVALID_REQUEST,
-                                400,
-                                "A secret of type 'password' must specify string data.",
-                            );
-                        }
-                    }
+                    obj.data = await this.processPasswordSecret(obj.data, existing.userUid);
                     break;
                 case SecretType.RECOVERY_CODES:
                     // Do not allow changing recovery codes' data - a client-supplied value here would

@@ -21,9 +21,11 @@ import {
     verifyRegistrationResponse,
 } from "@simplewebauthn/server";
 import {
+    CLIENT_ARGON2_PARAMS,
     DUMMY_ARGON2_HASH,
     DUMMY_TOTP_SECRET,
     decryptTOTPSecret,
+    deriveClientSalt,
     encryptTOTPSecret,
     generateOTP,
     generatePasskeyChallenge,
@@ -34,10 +36,12 @@ import {
     getBasicData,
     getBearerToken,
     getRequestData,
+    isClientHashedFormat,
     isOTPResponse,
     isPasskeyRegistrationResponse,
     isPasskeyResponse,
     isValidTOTPSecret,
+    normalizePasswordSubmission,
     obfuscateContact,
     verifyDummyPassword,
     verifyDummyTOTP,
@@ -45,6 +49,7 @@ import {
     verifyPasskeyChallenge,
     verifyPasskeyRegistrationResponse,
     verifyTOTP,
+    WeakClientHashError,
 } from "../../src/auth/shared.js";
 import {
     OTPContactType,
@@ -808,6 +813,159 @@ describe("verifyDummyPassword", () => {
 
         expect(DUMMY_ARGON2_HASH).toMatch(/^\$argon2id\$/);
         await expect(argon2.verify(DUMMY_ARGON2_HASH, "definitely-the-wrong-password")).resolves.toBe(false);
+    });
+
+    // When userUid/config are supplied, the dummy path must take the same shape-dependent branch a real
+    // verification would (see normalizePasswordSubmission()), so the extra hash step a plaintext
+    // submission triggers doesn't itself become a timing side-channel.
+    describe("with userUid/config (the real password call sites' usage)", () => {
+        it("Resolves without throwing for a plaintext-shaped input.", async () => {
+            await expect(
+                verifyDummyPassword("plaintext-guess", "some-uid", new PasswordConfig()),
+            ).resolves.toBeUndefined();
+        });
+
+        it("Resolves without throwing for an already client-hashed-shaped input at/above the floor.", async () => {
+            const clientHash = await (
+                await import("argon2")
+            ).hash("whatever", { salt: deriveClientSalt("some-uid"), ...CLIENT_ARGON2_PARAMS });
+
+            await expect(verifyDummyPassword(clientHash, "some-uid", new PasswordConfig())).resolves.toBeUndefined();
+        });
+
+        it("Resolves without throwing for a below-floor fake hash (the WeakClientHashError branch).", async () => {
+            const weakHash = "$argon2id$v=19$m=8,p=1,t=1$c29tZXNhbHQ$aGFzaA";
+
+            await expect(verifyDummyPassword(weakHash, "some-uid", new PasswordConfig())).resolves.toBeUndefined();
+        });
+
+        // Regression/coverage: a non-WeakClientHashError thrown while normalizing (e.g. deriveClientSalt()
+        // choking on a malformed uid) must propagate, not be silently swallowed alongside the
+        // WeakClientHashError case above.
+        it("Propagates a non-WeakClientHashError thrown while normalizing, rather than swallowing it.", async () => {
+            await expect(verifyDummyPassword("plaintext-guess", 123 as any, new PasswordConfig())).rejects.toThrow(
+                /must be of type string/,
+            );
+        });
+    });
+});
+
+describe("isClientHashedFormat", () => {
+    it("Returns true for a real Argon2id hash string.", async () => {
+        const argon2 = await import("argon2");
+        const hash = await argon2.hash("some-password");
+
+        expect(isClientHashedFormat(hash)).toBe(true);
+    });
+
+    it("Returns false for a plaintext password, even one that happens to contain '$'.", () => {
+        expect(isClientHashedFormat("Str0ngP@ss")).toBe(false);
+        expect(isClientHashedFormat("$cheap$fake$hash")).toBe(false);
+    });
+
+    it("Returns false for an empty string.", () => {
+        expect(isClientHashedFormat("")).toBe(false);
+    });
+});
+
+describe("deriveClientSalt", () => {
+    it("Is deterministic for the same uid.", () => {
+        expect(deriveClientSalt("user-uid-1")).toEqual(deriveClientSalt("user-uid-1"));
+    });
+
+    it("Differs for different uids.", () => {
+        expect(deriveClientSalt("user-uid-1")).not.toEqual(deriveClientSalt("user-uid-2"));
+    });
+
+    it("Returns a 32-byte buffer, satisfying argon2's minimum salt length.", () => {
+        expect(deriveClientSalt("user-uid-1").length).toBe(32);
+    });
+});
+
+describe("normalizePasswordSubmission", () => {
+    it("Is deterministic for the same plaintext password and uid — this is what lets a capable client " +
+        "reproduce the same hash across sessions/devices.", async () => {
+        const config = new PasswordConfig();
+
+        const a = await normalizePasswordSubmission("Str0ngP@ss", "user-uid-1", config);
+        const b = await normalizePasswordSubmission("Str0ngP@ss", "user-uid-1", config);
+
+        expect(a).toBe(b);
+    });
+
+    it("Produces different canonical values for the same password under different uids.", async () => {
+        const config = new PasswordConfig();
+
+        const a = await normalizePasswordSubmission("Str0ngP@ss", "user-uid-1", config);
+        const b = await normalizePasswordSubmission("Str0ngP@ss", "user-uid-2", config);
+
+        expect(a).not.toBe(b);
+    });
+
+    it("Hashes plaintext using deriveClientSalt(userUid) and CLIENT_ARGON2_PARAMS.", async () => {
+        const config = new PasswordConfig();
+        const argon2 = await import("argon2");
+
+        const canonical = await normalizePasswordSubmission("Str0ngP@ss", "user-uid-1", config);
+        const expected = await argon2.hash("Str0ngP@ss", {
+            salt: deriveClientSalt("user-uid-1"),
+            ...CLIENT_ARGON2_PARAMS,
+        });
+
+        expect(canonical).toBe(expected);
+    });
+
+    it("Returns an already client-hashed value unchanged when it meets the configured cost floor.", async () => {
+        const config = new PasswordConfig();
+        const argon2 = await import("argon2");
+        const clientHash = await argon2.hash("Str0ngP@ss", {
+            salt: deriveClientSalt("user-uid-1"),
+            ...CLIENT_ARGON2_PARAMS,
+        });
+
+        const canonical = await normalizePasswordSubmission(clientHash, "user-uid-1", config);
+
+        expect(canonical).toBe(clientHash);
+    });
+
+    it("Throws WeakClientHashError for a below-floor client-hashed value.", async () => {
+        const config = new PasswordConfig();
+        // Well-formed PHC shape, but m/t/p all below the default floor (19456/2/1).
+        const weakHash = "$argon2id$v=19$m=8,p=1,t=1$c29tZXNhbHQ$aGFzaA";
+
+        await expect(normalizePasswordSubmission(weakHash, "user-uid-1", config)).rejects.toThrow(
+            WeakClientHashError,
+        );
+    });
+
+    it("Accepts a client-hashed value using higher-than-floor cost parameters.", async () => {
+        const config = new PasswordConfig();
+        const argon2 = await import("argon2");
+        const strongerHash = await argon2.hash("Str0ngP@ss", {
+            salt: deriveClientSalt("user-uid-1"),
+            memoryCost: 65536,
+            timeCost: 4,
+            parallelism: 2,
+            hashLength: 32,
+        });
+
+        const canonical = await normalizePasswordSubmission(strongerHash, "user-uid-1", config);
+
+        expect(canonical).toBe(strongerHash);
+    });
+
+    it("Honors a deployment-configured (non-default) cost floor.", async () => {
+        const config = new PasswordConfig();
+        (config as any).client_hash_min_memory_cost = 999_999;
+        const argon2 = await import("argon2");
+        const clientHash = await argon2.hash("Str0ngP@ss", {
+            salt: deriveClientSalt("user-uid-1"),
+            ...CLIENT_ARGON2_PARAMS,
+        });
+
+        await expect(normalizePasswordSubmission(clientHash, "user-uid-1", config)).rejects.toThrow(
+            WeakClientHashError,
+        );
     });
 });
 

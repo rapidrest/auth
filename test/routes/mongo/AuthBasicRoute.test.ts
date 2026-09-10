@@ -20,6 +20,18 @@ import { UserMongo } from "../../../src/models/mongo/UserMongo.js";
 import { MongoMemoryServer } from "mongodb-memory-server";
 import { SecretMongo } from "../../../src/models/mongo/SecretMongo.js";
 import { SecretType } from "../../../src/models/types.js";
+import { normalizePasswordSubmission } from "../../../src/auth/shared.js";
+import { PasswordConfig } from "../../../src/auth/types.js";
+
+// Stored hashes must be of the canonical (would-be client-hashed) form of a plaintext password, not
+// the plaintext itself — see normalizePasswordSubmission() in shared.ts, which
+// BaseSecretRoute.processPasswordSecret() applies to every password created/changed through the real
+// route. A raw `argon2.hash(password)` here (the pre-client-hashing-support shape) would no longer be
+// verifiable via Basic auth, since login normalizes a plaintext submission the same way before comparing.
+const hashPasswordForLogin = async function (password: string, userUid: string): Promise<string> {
+    const canonical = await normalizePasswordSubmission(password, userUid, new PasswordConfig());
+    return argon2.hash(canonical);
+};
 
 const mongod: MongoMemoryServer = new MongoMemoryServer({
     instance: {
@@ -78,10 +90,11 @@ describe("Route:AuthBasicMongo Tests", () => {
     };
 
     const createSecretMongo = async function (data?: any): Promise<SecretMongo> {
+        const userUid: string = data?.userUid ?? uuid.v4();
         const obj: SecretMongo = new SecretMongo({
-            data: await argon2.hash("password"),
+            data: await hashPasswordForLogin("password", userUid),
             type: SecretType.PASSWORD,
-            userUid: uuid.v4(),
+            userUid,
             ...data,
         });
 
@@ -178,7 +191,7 @@ describe("Route:AuthBasicMongo Tests", () => {
             userUid: user.uid,
         });
         await createSecretMongo({
-            data: await argon2.hash("another-password"),
+            data: await hashPasswordForLogin("another-password", user.uid),
             userUid: user.uid,
         });
 
@@ -219,5 +232,26 @@ describe("Route:AuthBasicMongo Tests", () => {
             .set("Authorization", `basic ${Buffer.from(user.uid + ":password").toString("base64")}`);
 
         expect(result.status).toBe(401);
+    });
+
+    // End-to-end proof of the dual-mode client-side password hashing support: a capable client
+    // computes its own Argon2id hash locally (using the documented salt derivation/parameters — see
+    // deriveClientSalt()/CLIENT_ARGON2_PARAMS in shared.ts) and submits that instead of the plaintext.
+    it("Can authenticate submitting an already client-side-hashed password instead of plaintext.", async () => {
+        const shared = await import("../../../src/auth/shared.js");
+        const user: UserMongo = await createUserMongo();
+        await createSecretMongo({ userUid: user.uid });
+        const clientHash = await argon2.hash("password", {
+            salt: shared.deriveClientSalt(user.uid),
+            ...shared.CLIENT_ARGON2_PARAMS,
+        });
+
+        const result = await request(server.getApplication())
+            .get(baseUrl)
+            .set("Authorization", `basic ${Buffer.from(user.uid + ":" + clientHash).toString("base64")}`);
+
+        expect(result.status).toBeGreaterThanOrEqual(200);
+        expect(result.status).toBeLessThan(300);
+        expect(result.body).toHaveProperty("token");
     });
 });

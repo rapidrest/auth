@@ -422,7 +422,7 @@ describe("BaseSecretRoute Tests", () => {
             const route = new TestSecretRoute();
             const obj: any = { type: SecretType.PASSWORD, data: VALID_PASSWORD };
 
-            await (route as any).validateCreate(obj, {} as any);
+            await (route as any).validateCreate(obj, {} as any, { uid: "user-1" });
 
             expect(obj.data).not.toBe(VALID_PASSWORD);
             expect(typeof obj.data).toBe("string");
@@ -442,9 +442,89 @@ describe("BaseSecretRoute Tests", () => {
             };
             const obj: any = { type: SecretType.PASSWORD, data: VALID_PASSWORD };
 
-            await (route as any).validateCreate(obj, {} as any);
+            await (route as any).validateCreate(obj, {} as any, { uid: "user-1" });
 
             expect(obj.data).toContain("m=1024,p=1,t=2");
+        });
+
+        // Proves the dual-mode requirement end to end: a capable client submitting its own locally-computed
+        // Argon2id hash (instead of plaintext) is accepted directly — skipping validatePassword()'s
+        // plaintext-only complexity rules, which a hash string wouldn't meaningfully satisfy — and is hashed
+        // again on top (see processPasswordSecret()) so login later succeeds for either kind of submission.
+        it("Accepts an already client-hashed PASSWORD secret, skipping plaintext strength validation.", async () => {
+            const route = new TestSecretRoute();
+            const shared = await import("../../src/auth/shared.js");
+            const clientHash = await (
+                await import("argon2")
+            ).hash("way-too-short", { salt: shared.deriveClientSalt("user-1"), ...shared.CLIENT_ARGON2_PARAMS });
+            const obj: any = { type: SecretType.PASSWORD, data: clientHash };
+
+            await (route as any).validateCreate(obj, {} as any, { uid: "user-1" });
+
+            expect(obj.data).not.toBe(clientHash);
+            expect(typeof obj.data).toBe("string");
+            await expect((await import("argon2")).verify(obj.data, clientHash)).resolves.toBe(true);
+        });
+
+        it("Rejects a client-hashed PASSWORD secret whose embedded cost parameters fall below the configured floor.", async () => {
+            const route = new TestSecretRoute();
+            // Well-formed PHC shape, but m/t/p all below the default floor (19456/2/1).
+            const weakHash = "$argon2id$v=19$m=8,p=1,t=1$c29tZXNhbHQ$aGFzaA";
+            const obj: any = { type: SecretType.PASSWORD, data: weakHash };
+
+            await expect((route as any).validateCreate(obj, {} as any, { uid: "user-1" })).rejects.toThrow(
+                /minimum required Argon2id cost parameters/,
+            );
+        });
+
+        it("Rejects an already client-hashed PASSWORD secret when allow_client_hashing is false.", async () => {
+            const route = new TestSecretRoute();
+            (route as any).passwordConfig = { ...new PasswordConfig(), allow_client_hashing: false };
+            const shared = await import("../../src/auth/shared.js");
+            const clientHash = await (
+                await import("argon2")
+            ).hash("Str0ngP@ss", { salt: shared.deriveClientSalt("user-1"), ...shared.CLIENT_ARGON2_PARAMS });
+            const obj: any = { type: SecretType.PASSWORD, data: clientHash };
+
+            await expect((route as any).validateCreate(obj, {} as any, { uid: "user-1" })).rejects.toThrow(
+                /does not accept client-hashed passwords/,
+            );
+        });
+
+        it("Rejects a plaintext PASSWORD secret when require_client_hashing is true.", async () => {
+            const route = new TestSecretRoute();
+            (route as any).passwordConfig = { ...new PasswordConfig(), require_client_hashing: true };
+            const obj: any = { type: SecretType.PASSWORD, data: VALID_PASSWORD };
+
+            await expect((route as any).validateCreate(obj, {} as any, { uid: "user-1" })).rejects.toThrow(
+                /requires passwords to be hashed client-side/,
+            );
+        });
+
+        it("Accepts an already client-hashed PASSWORD secret when require_client_hashing is true.", async () => {
+            const route = new TestSecretRoute();
+            (route as any).passwordConfig = { ...new PasswordConfig(), require_client_hashing: true };
+            const shared = await import("../../src/auth/shared.js");
+            const clientHash = await (
+                await import("argon2")
+            ).hash("Str0ngP@ss", { salt: shared.deriveClientSalt("user-1"), ...shared.CLIENT_ARGON2_PARAMS });
+            const obj: any = { type: SecretType.PASSWORD, data: clientHash };
+
+            await (route as any).validateCreate(obj, {} as any, { uid: "user-1" });
+
+            expect(typeof obj.data).toBe("string");
+        });
+
+        // Regression/coverage: a non-WeakClientHashError thrown while normalizing (e.g. deriveClientSalt()
+        // choking on a malformed uid) must propagate, not be wrapped into the 400 ApiError used for the
+        // WeakClientHashError case above.
+        it("Propagates a non-WeakClientHashError thrown while normalizing, rather than wrapping it.", async () => {
+            const route = new TestSecretRoute();
+            const obj: any = { type: SecretType.PASSWORD, data: VALID_PASSWORD };
+
+            await expect((route as any).validateCreate(obj, {} as any, { uid: 123 as any })).rejects.toThrow(
+                /must be of type string/,
+            );
         });
 
         it("Throws for a PASSWORD secret with non-string data.", async () => {
@@ -976,6 +1056,24 @@ describe("BaseSecretRoute Tests", () => {
             await expect((route as any).validateUpdate(obj, existing, { uid: "u1" })).rejects.toThrow(
                 /minimum length of: 8/,
             );
+        });
+
+        // Confirms the update path normalizes/salts against existing.userUid (the secret's owner), not
+        // some other value — required for a subsequent login's own normalization (keyed off the same
+        // account uid) to land on the same canonical form.
+        it("Accepts an already client-hashed PASSWORD secret on update, salted against existing.userUid.", async () => {
+            const route = new TestSecretRoute();
+            const existing: any = { uid: "id-1", type: SecretType.PASSWORD, userUid: "u1" };
+            const shared = await import("../../src/auth/shared.js");
+            const clientHash = await (
+                await import("argon2")
+            ).hash("way-too-short", { salt: shared.deriveClientSalt("u1"), ...shared.CLIENT_ARGON2_PARAMS });
+            const obj: any = { uid: "id-1", data: clientHash };
+
+            await (route as any).validateUpdate(obj, existing, { uid: "u1" });
+
+            expect(obj.data).not.toBe(clientHash);
+            await expect((await import("argon2")).verify(obj.data, clientHash)).resolves.toBe(true);
         });
 
         it("Throws for a PASSWORD secret update with non-string data.", async () => {

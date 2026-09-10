@@ -132,7 +132,7 @@ describe("BaseAuthBasicRoute Tests", () => {
 
             await expect(verify("unknown-user", "pass1")).rejects.toThrow(/Invalid name or password/);
 
-            expect(verifyDummySpy).toHaveBeenCalledWith("pass1");
+            expect(verifyDummySpy).toHaveBeenCalledWith("pass1", "unknown-user", expect.any(Object));
         });
 
         // Regression: the dummy-Argon2 timing equalization above only covered the "no such user" case —
@@ -148,7 +148,7 @@ describe("BaseAuthBasicRoute Tests", () => {
 
             await expect(verify("user1", "pass1")).rejects.toThrow(/Invalid name or password/);
 
-            expect(verifyDummySpy).toHaveBeenCalledWith("pass1");
+            expect(verifyDummySpy).toHaveBeenCalledWith("pass1", "user-uid-1", expect.any(Object));
         });
 
         // Regression/coverage: `requireMFA` accounts must reject basic auth entirely rather than let a
@@ -172,14 +172,23 @@ describe("BaseAuthBasicRoute Tests", () => {
 
             await expect(verify("user1", "pass1")).rejects.toThrow(/Invalid name or password/);
 
-            expect(verifyDummySpy).toHaveBeenCalledWith("pass1");
+            expect(verifyDummySpy).toHaveBeenCalledWith("pass1", "user-uid-1", expect.any(Object));
         });
 
+        // Stored hashes are built via normalizePasswordSubmission() rather than a raw argon2.hash(password)
+        // to mirror what BaseSecretRoute actually persists: the canonical (would-be client-hashed) form of
+        // a plaintext password, not the plaintext itself — see BaseSecretRoute.processPasswordSecret().
         it("Allows login to proceed to password verification when requireMFA is false.", async () => {
             const { userUtils, secretRepo, verify } = await setupRoute();
             const argon2 = await import("argon2");
+            const shared = await import("../../src/auth/shared.js");
             userUtils.lookup.mockResolvedValue({ uid: "user-uid-1", requireMFA: false });
-            secretRepo.find.mockResolvedValue([{ data: await argon2.hash("correct-password") }]);
+            const canonical = await shared.normalizePasswordSubmission(
+                "correct-password",
+                "user-uid-1",
+                new (await import("../../src/auth/types.js")).PasswordConfig(),
+            );
+            secretRepo.find.mockResolvedValue([{ data: await argon2.hash(canonical) }]);
 
             const user = await verify("user1", "correct-password");
 
@@ -188,8 +197,15 @@ describe("BaseAuthBasicRoute Tests", () => {
 
         it("Throws when none of the user's stored passwords match.", async () => {
             const { userUtils, secretRepo, verify } = await setupRoute();
+            const argon2 = await import("argon2");
+            const shared = await import("../../src/auth/shared.js");
             userUtils.lookup.mockResolvedValue({ uid: "user-uid-1" });
-            secretRepo.find.mockResolvedValue([{ data: await (await import("argon2")).hash("correct-password") }]);
+            const canonical = await shared.normalizePasswordSubmission(
+                "correct-password",
+                "user-uid-1",
+                new (await import("../../src/auth/types.js")).PasswordConfig(),
+            );
+            secretRepo.find.mockResolvedValue([{ data: await argon2.hash(canonical) }]);
 
             await expect(verify("user1", "wrong-password")).rejects.toThrow(/Invalid name or password/);
             expect(secretRepo.find).toHaveBeenCalledWith(
@@ -201,15 +217,47 @@ describe("BaseAuthBasicRoute Tests", () => {
         it("Resolves the user when at least one stored password matches.", async () => {
             const { userUtils, secretRepo, verify } = await setupRoute();
             const argon2 = await import("argon2");
+            const shared = await import("../../src/auth/shared.js");
+            const config = new (await import("../../src/auth/types.js")).PasswordConfig();
             userUtils.lookup.mockResolvedValue({ uid: "user-uid-1" });
             secretRepo.find.mockResolvedValue([
-                { data: await argon2.hash("another-password") },
-                { data: await argon2.hash("correct-password") },
+                { data: await argon2.hash(await shared.normalizePasswordSubmission("another-password", "user-uid-1", config)) },
+                { data: await argon2.hash(await shared.normalizePasswordSubmission("correct-password", "user-uid-1", config)) },
             ]);
 
             const user = await verify("user1", "correct-password");
 
             expect(user).toEqual({ uid: "user-uid-1" });
+        });
+
+        // Proves the dual-mode requirement: a capable client submitting its own locally-computed
+        // Argon2id hash (instead of the plaintext) authenticates against the same stored credential.
+        it("Resolves the user when the submitted value is already a client-side hash of the correct password.", async () => {
+            const { userUtils, secretRepo, verify } = await setupRoute();
+            const argon2 = await import("argon2");
+            const shared = await import("../../src/auth/shared.js");
+            const config = new (await import("../../src/auth/types.js")).PasswordConfig();
+            userUtils.lookup.mockResolvedValue({ uid: "user-uid-1" });
+            const clientHash = await argon2.hash("correct-password", {
+                salt: shared.deriveClientSalt("user-uid-1"),
+                ...shared.CLIENT_ARGON2_PARAMS,
+            });
+            secretRepo.find.mockResolvedValue([{ data: await argon2.hash(clientHash) }]);
+
+            const user = await verify("user1", clientHash);
+
+            expect(user).toEqual({ uid: "user-uid-1" });
+        });
+
+        // Regression/coverage: a non-WeakClientHashError thrown while normalizing (e.g. deriveClientSalt()
+        // choking on a malformed uid) must propagate, not be silently swallowed alongside the
+        // WeakClientHashError case handled above.
+        it("Propagates a non-WeakClientHashError thrown while normalizing, rather than swallowing it.", async () => {
+            const { userUtils, secretRepo, verify } = await setupRoute();
+            userUtils.lookup.mockResolvedValue({ uid: 123 as any });
+            secretRepo.find.mockResolvedValue([{ data: "some-hash" }]);
+
+            await expect(verify("user1", "correct-password")).rejects.toThrow(/must be of type string/);
         });
     });
 });

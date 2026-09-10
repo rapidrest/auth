@@ -66,7 +66,58 @@ Keep entries terse — this is a reference, not a transcript.
 
 ## Session Log
 
-### 2026-09-08 (latest) — Integration tier fixed: a session-local zombie process, plus a real root-caused `@rapidrest/core` bug
+### 2026-09-10 (latest) — Client-side pre-hashed (Argon2id) password support, dual-mode
+
+JP wants clients capable of it to hash a password locally (Argon2id) before ever sending it, so the
+real password never reaches the server — while still supporting incapable clients sending plaintext,
+with **both accepted for the same account/credential** (JP's explicit choice over locking a credential
+to one mode — see plan at `C:\Users\caska\.claude\plans\a-new-use-case-cosmic-eclipse.md`).
+
+- **Key design insight, found during planning**: `argon2.hash()`/`argon2.verify()` are already opaque
+  about *what* they're hashing. The whole feature is one shared canonicalization step
+  (`normalizePasswordSubmission()` in `shared.ts`) inserted before the existing hash (create/change-
+  password) and verify (login) calls — **no new stored fields, no new request fields, no new
+  endpoints, no schema changes**. A submitted value already shaped like a real Argon2id PHC string
+  (`isClientHashedFormat()`) is used as-is (after a minimum-cost-parameter floor check —
+  `PasswordConfig.client_hash_min_*` — closes off a hand-crafted fake-hash smuggling a weak credential
+  past plaintext strength rules); anything else is plaintext, hashed here into the same form a capable
+  client would have produced (`deriveClientSalt(userUid)` = `SHA-256(uid)` + fixed
+  `CLIENT_ARGON2_PARAMS`, exported as the interop contract for downstream client implementations).
+  `uid` (not email/username) is the salt input specifically so it's stable across alias changes and
+  ambiguity-free when an account has multiple aliases — the tradeoff is a capable client can't
+  pre-hash until it has learned the account's `uid` from a prior real login, so first-login-per-device
+  naturally/gracefully falls back to plaintext.
+- **Initially missed one of three real password-verify call sites**: `BasicRoute`/`ElevationRoute`
+  were the obvious ones, but `BaseAuthMFARoute.verify()` (password-as-first-factor before the 2FA
+  challenge, wired via `options.verify = this.verify.bind(this)`) is a third, easy to miss because
+  `MFAStrategy.ts` (a *different* file) has its own unrelated `argon.verify()` for recovery-code replay
+  — don't conflate the two when grepping for "MFA password" call sites again.
+  `BaseAuthElevationRoute.verifyPasswordOnly()` needed no separate change — it just delegates to
+  `verify()`.
+- **`DefaultAccounts.ts` bypasses `BaseSecretRoute` entirely** (calls `argon.hash()` directly, never
+  through `validateCreate()`), so it needed the same `normalizePasswordSubmission()` call added
+  explicitly or a default-provisioned account's password would silently stop being loginable under the
+  new normalize-then-verify login path. Worth re-checking for any *other* direct `secretRepo.create()`
+  of a `PASSWORD` secret that bypasses the route layer if this area changes again.
+- **Wide, mostly-mechanical integration-test fallout**: any fixture building a `Secret`/`SecretSQL`/
+  `SecretMongo` via a raw `argon2.hash(plaintext)` and then exercising a *real* login (Basic/MFA/
+  Elevation, or anything that logs in as a prerequisite — refresh tokens, impersonation, OAuth
+  authorize/token flows) broke, since login now normalizes the submitted plaintext into a different
+  canonical form before comparing. Fixed ~14 files (`test/routes/{sql,mongo}/{AuthBasicRoute,
+  AuthMFARoute,AuthElevationRoute,AuthRefreshRoute,ImpersonationRoute,OAuthAuthorizeAndTokenRoute,
+  OAuthUserInfoAndDiscoveryRoute}.test.ts` + `SecretRoute.test.ts`'s two password-rotation assertions)
+  by routing the fixture's hash through the same `normalizePasswordSubmission()` call (delegated the
+  bulk of this sweep to a subagent, verified the diffs myself after). **Did not** need to touch
+  `AccountRoute.test.ts` (JWTs minted directly there, no real password login in the flow) or any
+  `clientSecretHash` fixture (OAuth *client* secrets — separate `ClientAuthUtils` code path, untouched
+  by this feature) — confirms the earlier instinct that not every `argon2.hash("password")` site needed
+  fixing, only ones on a path that actually re-verifies through the new normalize step.
+- Full `yarn test:prod`: 103/103 files, 1896/1897 tests (1 pre-existing deliberate skip), 100%
+  statements/functions/lines, 95.42% branches (≥95% threshold). `yarn build` clean.
+- Updated `README.md`/`RELEASE_NOTES.md`/`CHANGELOG.md` per the doc-ownership/pre-release-changelog
+  conventions above. Not committed — per the commit-approval convention, awaiting explicit ask.
+
+### 2026-09-08 — Integration tier fixed: a session-local zombie process, plus a real root-caused `@rapidrest/core` bug
 
 Asked to "fix the integration-tier failures" (the 42-file red state documented in the session below).
 Found and fixed two entirely separate things - **no changes needed in this repo for either**:

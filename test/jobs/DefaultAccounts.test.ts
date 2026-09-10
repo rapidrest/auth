@@ -673,7 +673,16 @@ describe("DefaultAccounts Tests", () => {
                 expect(secret.type).toBe(SecretType.PASSWORD);
                 expect(secret.userUid).toBe("user-1");
                 expect(options.user).toBeDefined();
-                await expect(argon2.verify(secret.data, VALID_PASSWORD)).resolves.toBe(true);
+                // The stored hash is of the canonical (would-be client-hashed) form of the configured
+                // password, not the plaintext itself — see normalizePasswordSubmission() in shared.ts,
+                // which BaseSecretRoute.processPasswordSecret() applies identically.
+                const shared = await import("../../src/auth/shared.js");
+                const canonical = await shared.normalizePasswordSubmission(
+                    VALID_PASSWORD,
+                    "user-1",
+                    new PasswordConfig(),
+                );
+                await expect(argon2.verify(secret.data, canonical)).resolves.toBe(true);
             });
 
             it("Randomly generates a password satisfying the password config when none is configured, and logs it.", async () => {
@@ -694,7 +703,8 @@ describe("DefaultAccounts Tests", () => {
                 expect(generatePasswordSpy).toHaveBeenCalledWith(passwordConfig);
                 expect(accounts[0].password).toBe("Gener@ted1Pw");
                 const [secret] = secretCreate.mock.calls[0];
-                await expect(argon2.verify(secret.data, "Gener@ted1Pw")).resolves.toBe(true);
+                const canonical = await shared.normalizePasswordSubmission("Gener@ted1Pw", "user-1", passwordConfig);
+                await expect(argon2.verify(secret.data, canonical)).resolves.toBe(true);
             });
 
             it("Writes the generated account information to default file once a password secret is created.", async () => {
