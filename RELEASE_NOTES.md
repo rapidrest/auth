@@ -1,6 +1,6 @@
 # Release Notes
 
-## Unreleased
+## v2.0.0-beta.7
 
 * Added client-side pre-hashed (Argon2id) password support. A capable client can hash the password locally before sending it, so the real password never reaches the server. A single stored credential accepts either form; server-side strength validation only applies to plaintext.
 

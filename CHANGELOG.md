@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0-beta.7] - 2026-09-10
+
+### Added
+- Added client-side pre-hashed (Argon2id) password support
+
 ### Added
 - Client-side pre-hashed (Argon2id) password support, alongside plaintext
 
@@ -132,7 +137,8 @@ tagged.
 - `PasskeyStrategy` - WebAuthn based passkey authentication
 - `TOTPStrategy` - RFC 6238 Time-Based One Time Password authentication (e.g. Google Authenticator, etc.)
 
-[Unreleased]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.6...HEAD
+[Unreleased]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.7...HEAD
+[2.0.0-beta.7]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.6...v2.0.0-beta.7
 [2.0.0-beta.6]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.5...v2.0.0-beta.6
 [2.0.0-beta.5]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.4...v2.0.0-beta.5
 [2.0.0-beta.4]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.3...v2.0.0-beta.4
