@@ -436,10 +436,7 @@ describe("Route:ProfileSQL Tests", () => {
             .set("Authorization", "jwt " + userToken)
             .send(obj);
 
-        // See the identical note in test/routes/mongo/ProfileRoute.test.ts: the real error here is 403
-        // AUTH_PERMISSION_FAILURE from validateCreate(), but CRUDRoute.validateCreateBulk (an upstream bug
-        // in @rapidrest/service-core) flattens every create-time validation failure to a generic 400.
-        expect(result.status).toBe(400);
+        expect(result.status).toBe(403);
 
         const count: number = await repo.count({ where: { uid: obj.uid } });
         expect(count).toBe(0);

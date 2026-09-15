@@ -443,12 +443,7 @@ describe("Route:ProfileMongo Tests", () => {
             .set("Authorization", "jwt " + userToken)
             .send(obj);
 
-        // Expected 400, not 403: POST / is validated via CRUDRoute's `validateCreateBulk`, which wraps any
-        // rejection from `validateCreate()` (here, the 403 AUTH_PERMISSION_FAILURE this ownership check
-        // throws) into a generic `ApiError(ApiErrorMessages.BULK_UPDATE_FAILURE, 400, ...)` — an upstream
-        // bug in `@rapidrest/service-core`'s `CRUDRoute.validateCreateBulk` (see the identical note in
-        // test/routes/mongo/AliasRoute.test.ts) that discards the real status/message for every model.
-        expect(result.status).toBe(400);
+        expect(result.status).toBe(403);
 
         const count: number = await repo.count({ uid: obj.uid });
         expect(count).toBe(0);

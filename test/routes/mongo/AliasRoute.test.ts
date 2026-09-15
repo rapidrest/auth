@@ -418,14 +418,7 @@ describe("Route:AliasMongo Tests", () => {
             .set("Authorization", "jwt " + userToken)
             .send(obj);
 
-        // Expected 400, not 403: POST / is validated via CRUDRoute's `validateCreateBulk`, which wraps any
-        // rejection from `validateCreate()` (here, the 403 AUTH_PERMISSION_FAILURE this ownership check
-        // throws) into a generic `ApiError(ApiErrorMessages.BULK_UPDATE_FAILURE, 400, ...)` — discarding the
-        // original status/message entirely. This is an upstream bug in
-        // `@rapidrest/service-core`'s `CRUDRoute.validateCreateBulk` (it also misuses the *update*-bulk
-        // failure constants for the *create* path), not something this route controls; it flattens every
-        // create-time validation failure (permission, uniqueness, etc.) to the same 400 across every model.
-        expect(result.status).toBe(400);
+        expect(result.status).toBe(403);
 
         const count: number = await repo.count({ userUid: obj.userUid });
         expect(count).toBe(0);
@@ -439,9 +432,7 @@ describe("Route:AliasMongo Tests", () => {
             .set("Authorization", "jwt " + userToken)
             .send({ alias: existing.alias, type: AliasType.NAME, userUid: user.uid });
 
-        // See the comment above: the real error here is 403 IDENTIFIER_EXISTS from validateCreate(), but
-        // CRUDRoute.validateCreateBulk flattens it to a generic 400.
-        expect(result.status).toBe(400);
+        expect(result.status).toBe(403);
 
         const count: number = await repo.count({ alias: existing.alias });
         expect(count).toBe(1);
@@ -459,8 +450,6 @@ describe("Route:AliasMongo Tests", () => {
             .set("Authorization", "jwt " + userToken)
             .send({ alias: email, type: AliasType.NAME, userUid: user.uid });
 
-        // The real error is 400 INVALID_REQUEST from validateCreate() — already the expected flattened code
-        // here (see the CRUDRoute.validateCreateBulk comment above), so nothing extra is being masked.
         expect(result.status).toBe(400);
 
         const count: number = await repo.count({ alias: email });
