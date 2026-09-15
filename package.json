@@ -24,7 +24,7 @@
     },
     "peerDependencies": {
         "@rapidrest/core": "5.x",
-        "@rapidrest/service-core": "^1.7.1",
+        "@rapidrest/service-core": "2.x",
         "@simplewebauthn/server": ">=13.0.0",
         "argon2": "0.x",
         "jwks-rsa": "4.x",
