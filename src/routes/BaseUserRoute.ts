@@ -14,11 +14,12 @@ import {
     UpdateObject,
 } from "@rapidrest/service-core";
 import { ApiError, JWTUser, ObjectDecorators, UserUtils } from "@rapidrest/core";
-import { AuthResult, User } from "../models/types.js";
+import { AuthResult, SystemSettings, User } from "../models/types.js";
+import { SystemSettingsUtils } from "./SystemSettingsUtils.js";
 import { TokenUtils } from "../auth/TokenUtils.js";
 
 const { Description, Returns, Summary } = DocDecorators;
-const { Config, Inject } = ObjectDecorators;
+const { Config, Init, Inject } = ObjectDecorators;
 const {
     Auth,
     Delete,
@@ -39,6 +40,10 @@ const {
  * @author Jean-Philippe Steinmetz
  */
 export abstract class BaseUserRoute<T extends User> extends ModelRoute<T> {
+    protected abstract systemSettingsClass?: any;
+
+    protected systemSettingsUtils?: SystemSettingsUtils;
+
     @Config("auth:default_scopes", [])
     protected defaultScopes: string[] = [];
 
@@ -47,6 +52,24 @@ export abstract class BaseUserRoute<T extends User> extends ModelRoute<T> {
 
     @Inject(TokenUtils)
     protected tokenUtils?: TokenUtils;
+
+    @Init
+    protected async initSystemSettings(): Promise<void> {
+        if (!this.systemSettingsUtils && this.systemSettingsClass) {
+            this.systemSettingsUtils = await this._objectFactory!.newInstance(SystemSettingsUtils, {
+                name: this.systemSettingsClass.name,
+                args: [this.systemSettingsClass],
+            });
+        }
+    }
+
+    /**
+     * Returns `true` if new accounts may currently be registered. Reads the runtime `SystemSettings` when
+     * `systemSettingsClass` is set, otherwise (or for anything not stored) falls back to `@Config("auth:allowRegistration")`.
+     */
+    protected async isRegistrationAllowed(): Promise<boolean> {
+        return (await this.systemSettingsUtils!.get()).allowRegistration;
+    }
 
     @Summary("Count Users")
     @Description(
@@ -66,6 +89,11 @@ export abstract class BaseUserRoute<T extends User> extends ModelRoute<T> {
     }
 
     protected async validateCreate(obj: Partial<T>, user?: JWTUser): Promise<void> {
+        // Trusted users (e.g. an admin) can always create new accounts, even when registration is closed.
+        if (!UserUtils.hasRoles(user, this.trustedRoles) && !(await this.isRegistrationAllowed())) {
+            throw new ApiError(ApiErrors.AUTH_PERMISSION_FAILURE, 403, ApiErrorMessages.AUTH_PERMISSION_FAILURE);
+        }
+
         await super.validate(obj, { user });
 
         // Only trusted users can set a user's roles
@@ -78,8 +106,14 @@ export abstract class BaseUserRoute<T extends User> extends ModelRoute<T> {
             obj.verified = false;
         }
 
-        // If the server requires MFA for all accounts, make sure it is set/enforced
-        obj.requireMFA = this.authConfig.require_mfa ?? obj.requireMFA;
+        // If the system currently mandates MFA for all accounts, force it on for this new one too, even when
+        // the caller is a trusted admin creating it on someone else's behalf — unlike validateUpdate() (which
+        // lets a trusted caller deliberately exempt an *existing* account), a mandate can't be satisfied by a
+        // brand-new account that opts out from the very start. When the mandate is off, the client's own
+        // choice (or its absence) is left untouched.
+        if ((await this.systemSettingsUtils!.get()).requireMFA) {
+            obj.requireMFA = true;
+        }
     }
 
     @Summary("Create User")
@@ -226,8 +260,11 @@ export abstract class BaseUserRoute<T extends User> extends ModelRoute<T> {
 
         if ("requireMFA" in obj) {
             if (existing && obj.requireMFA !== existing.requireMFA) {
-                // If the server requires MFA for all accounts, don't allow this to be changed, unless its by an admin
-                if (this.authConfig.require_mfa) {
+                // If the server currently requires MFA for all accounts, don't allow this to be changed, unless
+                // it's by an admin. Reads the runtime `SystemSettings` (the same source `validateCreate()`
+                // consults) rather than the static `@Config` value, so an admin toggling this at runtime via
+                // `PUT /settings` takes effect immediately here too, not just for newly-created accounts.
+                if ((await this.systemSettingsUtils!.get()).requireMFA) {
                     obj.requireMFA = isTrusted ? obj.requireMFA : existing.requireMFA;
                 }
             }

@@ -9,8 +9,22 @@
 import { ACLAction, ModelRoute } from "@rapidrest/service-core";
 import { BaseUserRoute } from "../../src/routes/BaseUserRoute.js";
 import { TokenUtils } from "../../src/auth/TokenUtils.js";
+import { SystemSettingsUtils } from "../../src/routes/SystemSettingsUtils.js";
 
-class TestUserRoute extends BaseUserRoute<any> {}
+/** A permissive default (registration open, MFA not mandated), overridable per test via `route.systemSettingsUtils`. */
+function makeSystemSettingsUtils(overrides: { allowRegistration?: boolean; requireMFA?: boolean } = {}): any {
+    return { get: vi.fn().mockResolvedValue({ allowRegistration: true, requireMFA: false, ...overrides }) };
+}
+
+class TestUserRoute extends BaseUserRoute<any> {
+    constructor() {
+        super();
+        // Every test gets a working `systemSettingsUtils` by default (as `@Init` would provide once a real
+        // `systemSettingsClass` is set) so that tests unrelated to registration/MFA policy don't all need to
+        // wire this up themselves. A test that cares reconfigures `(route as any).systemSettingsUtils`.
+        this.systemSettingsUtils = makeSystemSettingsUtils();
+    }
+}
 
 function makeRes(): any {
     return { setHeader: vi.fn(), appendHeader: vi.fn() };
@@ -286,10 +300,10 @@ describe("BaseUserRoute Tests", () => {
             expect(obj.verified).toBe(true);
         });
 
-        it("Forces requireMFA to the server-configured value when auth:require_mfa is set, overriding any client-supplied value.", async () => {
+        it("Forces requireMFA to the runtime system-settings value when set, overriding any client-supplied value.", async () => {
             vi.spyOn(ModelRoute.prototype as any, "validate").mockResolvedValue(undefined);
             const route = new TestUserRoute();
-            (route as any).authConfig = { require_mfa: true };
+            (route as any).systemSettingsUtils = makeSystemSettingsUtils({ requireMFA: true });
             const obj: any = { requireMFA: false };
 
             await (route as any).validateCreate(obj, { uid: "admin-uid", roles: ["admin"] });
@@ -297,10 +311,10 @@ describe("BaseUserRoute Tests", () => {
             expect(obj.requireMFA).toBe(true);
         });
 
-        it("Leaves the client-supplied requireMFA alone when auth:require_mfa is unset.", async () => {
+        it("Leaves the client-supplied requireMFA alone when the system doesn't mandate it.", async () => {
             vi.spyOn(ModelRoute.prototype as any, "validate").mockResolvedValue(undefined);
             const route = new TestUserRoute();
-            (route as any).authConfig = {};
+            (route as any).systemSettingsUtils = makeSystemSettingsUtils({ requireMFA: false });
             const obj: any = { requireMFA: true };
 
             await (route as any).validateCreate(obj, { uid: "user-1", roles: [] });
@@ -472,7 +486,7 @@ describe("BaseUserRoute Tests", () => {
             const route = new TestUserRoute();
             const findOne = vi.fn().mockResolvedValue({ uid: "user-1", requireMFA: true });
             (route as any).repoUtils = { findOne };
-            (route as any).authConfig = { require_mfa: true };
+            (route as any).systemSettingsUtils = makeSystemSettingsUtils({ requireMFA: true });
             const obj: any = { uid: "user-1", verified: false };
 
             await (route as any).validateUpdate("user-1", obj, { uid: "user-1", roles: [] });
@@ -485,7 +499,7 @@ describe("BaseUserRoute Tests", () => {
             const route = new TestUserRoute();
             const findOne = vi.fn().mockResolvedValue({ uid: "user-1", requireMFA: true });
             (route as any).repoUtils = { findOne };
-            (route as any).authConfig = { require_mfa: true };
+            (route as any).systemSettingsUtils = makeSystemSettingsUtils({ requireMFA: true });
             const obj: any = { uid: "user-1", requireMFA: true };
 
             await (route as any).validateUpdate("user-1", obj, { uid: "user-1", roles: [] });
@@ -501,7 +515,7 @@ describe("BaseUserRoute Tests", () => {
             const route = new TestUserRoute();
             const findOne = vi.fn().mockResolvedValue({ uid: "user-1", requireMFA: true });
             (route as any).repoUtils = { findOne };
-            (route as any).authConfig = { require_mfa: true };
+            (route as any).systemSettingsUtils = makeSystemSettingsUtils({ requireMFA: true });
             const obj: any = { uid: "user-1", requireMFA: false };
 
             await (route as any).validateUpdate("user-1", obj, { uid: "user-1", roles: [] });
@@ -514,7 +528,7 @@ describe("BaseUserRoute Tests", () => {
             const route = new TestUserRoute();
             const findOne = vi.fn().mockResolvedValue({ uid: "user-1", requireMFA: false });
             (route as any).repoUtils = { findOne };
-            (route as any).authConfig = { require_mfa: true };
+            (route as any).systemSettingsUtils = makeSystemSettingsUtils({ requireMFA: true });
             const obj: any = { uid: "user-1", requireMFA: true };
 
             await (route as any).validateUpdate("user-1", obj, { uid: "user-1", roles: [] });
@@ -527,7 +541,7 @@ describe("BaseUserRoute Tests", () => {
             const route = new TestUserRoute();
             const findOne = vi.fn().mockResolvedValue({ uid: "victim-uid", requireMFA: true });
             (route as any).repoUtils = { findOne };
-            (route as any).authConfig = { require_mfa: true };
+            (route as any).systemSettingsUtils = makeSystemSettingsUtils({ requireMFA: true });
             const obj: any = { uid: "victim-uid", requireMFA: false };
 
             await (route as any).validateUpdate("victim-uid", obj, { uid: "admin-uid", roles: ["admin"] });
@@ -535,17 +549,33 @@ describe("BaseUserRoute Tests", () => {
             expect(obj.requireMFA).toBe(false);
         });
 
-        it("Allows requireMFA to be changed freely by a non-trusted caller when the server has no configured opinion (auth:require_mfa unset).", async () => {
+        it("Allows requireMFA to be changed freely by a non-trusted caller when the system has no configured opinion (requireMFA not mandated).", async () => {
             vi.spyOn(ModelRoute.prototype as any, "validate").mockResolvedValue(undefined);
             const route = new TestUserRoute();
             const findOne = vi.fn().mockResolvedValue({ uid: "user-1", requireMFA: true });
             (route as any).repoUtils = { findOne };
-            (route as any).authConfig = {};
+            (route as any).systemSettingsUtils = makeSystemSettingsUtils({ requireMFA: false });
             const obj: any = { uid: "user-1", requireMFA: false };
 
             await (route as any).validateUpdate("user-1", obj, { uid: "user-1", roles: [] });
 
             expect(obj.requireMFA).toBe(false);
+        });
+
+        it("Uses the runtime system settings over a stale authConfig snapshot (regression: validateUpdate previously read the static config directly).", async () => {
+            vi.spyOn(ModelRoute.prototype as any, "validate").mockResolvedValue(undefined);
+            const route = new TestUserRoute();
+            const findOne = vi.fn().mockResolvedValue({ uid: "user-1", requireMFA: true });
+            (route as any).repoUtils = { findOne };
+            // A stale/never-updated static config says MFA isn't mandated, but an admin has since toggled it
+            // on at runtime via `PUT /settings` — the freeze must follow the live value, not this snapshot.
+            (route as any).authConfig = { requireMFA: false };
+            (route as any).systemSettingsUtils = makeSystemSettingsUtils({ requireMFA: true });
+            const obj: any = { uid: "user-1", requireMFA: false };
+
+            await (route as any).validateUpdate("user-1", obj, { uid: "user-1", roles: [] });
+
+            expect(obj.requireMFA).toBe(true);
         });
     });
 
@@ -623,6 +653,86 @@ describe("BaseUserRoute Tests", () => {
             await route.truncate({ p: 1 }, { q: 1 }, { uid: "u1" } as any);
 
             expect(spy).toHaveBeenCalledWith({ params: { p: 1 }, query: { q: 1 }, user: { uid: "u1" } });
+        });
+    });
+
+    describe("registration disabled", () => {
+        function makeRoute(allowRegistration: boolean): TestUserRoute {
+            const route = new TestUserRoute();
+            (route as any).systemSettingsUtils = makeSystemSettingsUtils({ allowRegistration });
+            (route as any).trustedRoles = ["admin"];
+            vi.spyOn(route as any, "validate").mockResolvedValue(undefined);
+            return route;
+        }
+
+        it("Rejects an unauthenticated create with 403 when registration is disabled.", async () => {
+            const route = makeRoute(false);
+
+            await expect((route as any).validateCreate({}, undefined)).rejects.toMatchObject({ status: 403 });
+        });
+
+        it("Rejects a non-trusted authenticated create with 403 when registration is disabled.", async () => {
+            const route = makeRoute(false);
+
+            await expect((route as any).validateCreate({}, { uid: "user", roles: [] })).rejects.toMatchObject({
+                status: 403,
+            });
+        });
+
+        it("Never creates the user when registration is disabled.", async () => {
+            const route = makeRoute(false);
+            const doCreate = vi.spyOn(ModelRoute.prototype as any, "doCreate");
+            (route as any).repoUtils = { instantiateObject: (o: any) => o };
+            (route as any).tokenUtils = makeTokenUtils(false);
+
+            await expect(route.create({} as any, {} as any, makeRes())).rejects.toMatchObject({ status: 403 });
+            expect(doCreate).not.toHaveBeenCalled();
+        });
+
+        it("Still allows a trusted (admin) caller to create users when registration is closed.", async () => {
+            const route = makeRoute(false);
+
+            await expect(
+                (route as any).validateCreate({}, { uid: "admin", roles: ["admin"] }),
+            ).resolves.toBeUndefined();
+        });
+
+        it("Uses the current (possibly just-toggled) runtime settings on every call.", async () => {
+            const route = makeRoute(false);
+
+            await expect((route as any).validateCreate({}, undefined)).rejects.toMatchObject({ status: 403 });
+
+            (route as any).systemSettingsUtils = makeSystemSettingsUtils({ allowRegistration: true });
+            await expect((route as any).validateCreate({}, undefined)).resolves.toBeUndefined();
+        });
+
+        it("initSystemSettings() creates a shared SystemSettingsUtils for systemSettingsClass.", async () => {
+            class FakeSettings {}
+            const utils = makeSystemSettingsUtils();
+            const newInstance = vi.fn().mockResolvedValue(utils);
+            const route = new TestUserRoute();
+            (route as any).systemSettingsUtils = undefined;
+            (route as any).systemSettingsClass = FakeSettings;
+            Object.defineProperty(route, "_objectFactory", { value: { newInstance } });
+
+            await (route as any).initSystemSettings();
+            await (route as any).initSystemSettings();
+
+            expect(newInstance).toHaveBeenCalledTimes(1);
+            expect(newInstance).toHaveBeenCalledWith(SystemSettingsUtils, {
+                name: "FakeSettings",
+                args: [FakeSettings],
+            });
+            expect((route as any).systemSettingsUtils).toBe(utils);
+        });
+
+        it("initSystemSettings() leaves an already-set systemSettingsUtils alone without a systemSettingsClass.", async () => {
+            const route = new TestUserRoute();
+            const existing = (route as any).systemSettingsUtils;
+
+            await (route as any).initSystemSettings();
+
+            expect((route as any).systemSettingsUtils).toBe(existing);
         });
     });
 });

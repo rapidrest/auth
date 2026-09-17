@@ -4,6 +4,7 @@
 ///////////////////////////////////////////////////////////////////////////////
 import { AliasType, ClientType, SecretType, SigningKeyStatus, TokenEndpointAuthMethod } from "../../src/models/types.js";
 import { AliasSQL } from "../../src/models/sql/AliasSQL.js";
+import { SystemSettingsSQL } from "../../src/models/sql/SystemSettingsSQL.js";
 import { AuthorizationCodeSQL } from "../../src/models/sql/AuthorizationCodeSQL.js";
 import { ClientSQL } from "../../src/models/sql/ClientSQL.js";
 import { ConsentGrantSQL } from "../../src/models/sql/ConsentGrantSQL.js";
@@ -157,5 +158,19 @@ describe("SQL model default construction", () => {
         expect(obj.roles).toEqual([]);
         expect(obj.scopes).toEqual([]);
         expect(obj.verified).toBe(false);
+    });
+
+    it("SystemSettingsSQL falls back to class defaults when constructed with no data.", () => {
+        const obj = new SystemSettingsSQL();
+
+        expect(obj.allowRegistration).toBe(true);
+        expect(obj.requireMFA).toBe(false);
+    });
+
+    it("SystemSettingsSQL applies provided data when constructed with data.", () => {
+        expect(new SystemSettingsSQL({ allowRegistration: false }).allowRegistration).toBe(false);
+        expect(new SystemSettingsSQL({ requireMFA: true }).requireMFA).toBe(true);
+        expect(new SystemSettingsSQL({}).allowRegistration).toBe(true);
+        expect(new SystemSettingsSQL({}).requireMFA).toBe(false);
     });
 });

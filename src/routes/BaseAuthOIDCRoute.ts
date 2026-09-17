@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: MPL-2.0
 ///////////////////////////////////////////////////////////////////////////////
 import "reflect-metadata";
-import { JWTUser, MessagingUtils, ObjectDecorators } from "@rapidrest/core";
+import { ApiError, JWTUser, MessagingUtils, ObjectDecorators } from "@rapidrest/core";
 import {
     RouteDecorators,
     DocDecorators,
@@ -12,8 +12,11 @@ import {
     AuthMiddleware,
     ObjectFactory,
     HttpRequest,
+    ApiErrorMessages,
+    ApiErrors,
 } from "@rapidrest/service-core";
-import { Alias, AliasType, AuthResult, ContactType, Profile, User } from "../models/types.js";
+import { Alias, AliasType, AuthResult, SystemSettings, ContactType, Profile, User } from "../models/types.js";
+import { SystemSettingsUtils } from "./SystemSettingsUtils.js";
 import { OIDCProfile, OIDCProvider, OIDCStrategy, OIDCStrategyOptions } from "../auth/OIDCStrategy.js";
 import { TokenUtils } from "../auth/TokenUtils.js";
 import * as uuid from "uuid";
@@ -46,12 +49,15 @@ const AuthUser = RouteDecorators.User;
 export abstract class BaseAuthOIDCRoute<U extends User, A extends Alias, P extends Profile> {
     protected abstract aliasClass: any;
     protected abstract profileClass: any;
+    protected abstract systemSettingsClass?: any;
     protected abstract userClass: any;
 
     // Automatically injected by ObjectFactory on instantiation
     private _objectFactory?: ObjectFactory;
 
     protected aliasRepo?: RepoUtils<A>;
+
+    protected systemSettingsUtils?: SystemSettingsUtils;
 
     @Inject(AuthMiddleware)
     protected authMiddleware?: AuthMiddleware;
@@ -117,6 +123,13 @@ export abstract class BaseAuthOIDCRoute<U extends User, A extends Alias, P exten
             this.userRepo = await this._objectFactory.newInstance(RepoUtils, {
                 name: this.userClass.name,
                 args: [this.userClass],
+            });
+        }
+
+        if (!this.systemSettingsUtils && this.systemSettingsClass) {
+            this.systemSettingsUtils = await this._objectFactory.newInstance(SystemSettingsUtils, {
+                name: this.systemSettingsClass.name,
+                args: [this.systemSettingsClass],
             });
         }
 
@@ -198,6 +211,16 @@ export abstract class BaseAuthOIDCRoute<U extends User, A extends Alias, P exten
             }
 
             if (!user) {
+                // If new user registration is closed we immediately reject instead of creating a new
+                // account for the authenticated user.
+                if (!(await this.isRegistrationAllowed())) {
+                    throw new ApiError(
+                        ApiErrors.AUTH_PERMISSION_FAILURE,
+                        403,
+                        ApiErrorMessages.AUTH_PERMISSION_FAILURE,
+                    );
+                }
+
                 // Create a new user for the given profile
                 const newUser: User = {
                     uid: uuid.v4(),
@@ -291,6 +314,14 @@ export abstract class BaseAuthOIDCRoute<U extends User, A extends Alias, P exten
             args: [options],
         });
         this.authMiddleware.register(strategy.name, strategy);
+    }
+
+    /**
+     * Returns `true` if new accounts may currently be registered. Reads the runtime `SystemSettings` when
+     * `systemSettingsClass` is set, otherwise (or for anything not stored) falls back to `@Config("auth:allowRegistration")`.
+     */
+    protected async isRegistrationAllowed(): Promise<boolean> {
+        return (await this.systemSettingsUtils!.get()).allowRegistration;
     }
 
     /**

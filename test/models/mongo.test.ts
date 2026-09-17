@@ -4,6 +4,7 @@
 ///////////////////////////////////////////////////////////////////////////////
 import { AliasType, ClientType, SecretType, SigningKeyStatus, TokenEndpointAuthMethod } from "../../src/models/types.js";
 import { AliasMongo } from "../../src/models/mongo/AliasMongo.js";
+import { SystemSettingsMongo } from "../../src/models/mongo/SystemSettingsMongo.js";
 import { AuthorizationCodeMongo } from "../../src/models/mongo/AuthorizationCodeMongo.js";
 import { ClientMongo } from "../../src/models/mongo/ClientMongo.js";
 import { ConsentGrantMongo } from "../../src/models/mongo/ConsentGrantMongo.js";
@@ -157,5 +158,19 @@ describe("Mongo model default construction", () => {
         expect(obj.roles).toEqual([]);
         expect(obj.scopes).toEqual([]);
         expect(obj.verified).toBe(false);
+    });
+
+    it("SystemSettingsMongo falls back to class defaults when constructed with no data.", () => {
+        const obj = new SystemSettingsMongo();
+
+        expect(obj.allowRegistration).toBe(true);
+        expect(obj.requireMFA).toBe(false);
+    });
+
+    it("SystemSettingsMongo applies provided data when constructed with data.", () => {
+        expect(new SystemSettingsMongo({ allowRegistration: false }).allowRegistration).toBe(false);
+        expect(new SystemSettingsMongo({ requireMFA: true }).requireMFA).toBe(true);
+        expect(new SystemSettingsMongo({}).allowRegistration).toBe(true);
+        expect(new SystemSettingsMongo({}).requireMFA).toBe(false);
     });
 });

@@ -22,6 +22,8 @@ export * from "./BaseOAuthUserInfoRoute.js";
 export * from "./BaseProfileRoute.js";
 export * from "./BaseRegistrationRoute.js";
 export * from "./BaseSecretRoute.js";
+export * from "./BaseSettingsRoute.js";
 export * from "./BaseUserRoute.js";
+export * from "./SystemSettingsUtils.js";
 export * from "./UserUtils.js";
 export * from "./BaseImpersonationRoute.js";

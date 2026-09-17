@@ -12,6 +12,7 @@ import { AliasType } from "../../src/models/types.js";
 import { generateOTP } from "../../src/auth/shared.js";
 import { AuthEventType } from "../../src/auth/events.js";
 import { TokenUtils } from "../../src/auth/TokenUtils.js";
+import { SystemSettingsUtils } from "../../src/routes/SystemSettingsUtils.js";
 
 function makeRes(): any {
     return { setHeader: vi.fn(), appendHeader: vi.fn() };
@@ -33,9 +34,21 @@ class FakeUserClass {
     }
 }
 
+/** A permissive default (registration open), overridable per test via `(route as any).systemSettingsUtils`. */
+function makeSystemSettingsUtils(overrides: { allowRegistration?: boolean } = {}): any {
+    return { get: vi.fn().mockResolvedValue({ allowRegistration: true, requireMFA: false, ...overrides }) };
+}
+
 class TestRegistrationRoute extends BaseRegistrationRoute<any, any> {
     protected aliasClass: any = FakeAliasClass;
     protected userClass: any = FakeUserClass;
+
+    constructor() {
+        super();
+        // Every test gets a working `systemSettingsUtils` by default (as `@Init` would provide once a real
+        // `systemSettingsClass` is set), so tests unrelated to registration policy don't need to wire it up.
+        this.systemSettingsUtils = makeSystemSettingsUtils();
+    }
 }
 
 function makeMockObjectFactory(aliasRepo: any, userRepo: any) {
@@ -708,6 +721,76 @@ describe("BaseRegistrationRoute Tests", () => {
             vi.spyOn(EventUtils, "record").mockRejectedValue(new Error("telemetry down"));
 
             await expect((route as any).verify({ email: "user@example.com", token }, req)).resolves.toBeDefined();
+        });
+    });
+
+    describe("registration disabled", () => {
+        function makeRoute(allowRegistration: boolean): TestRegistrationRoute {
+            const route = new TestRegistrationRoute();
+            (route as any).systemSettingsUtils = makeSystemSettingsUtils({ allowRegistration });
+            (route as any).aliasRepo = { find: vi.fn().mockResolvedValue([]), create: vi.fn() };
+            (route as any).userRepo = { create: vi.fn() };
+            (route as any).messagingUtils = { sendEmail: vi.fn().mockResolvedValue(undefined), sendSMS: vi.fn() };
+            (route as any).logger = { debug: vi.fn() };
+            return route;
+        }
+
+        it("start() rejects with 403 and sends no code when registration is disabled.", async () => {
+            const route = makeRoute(false);
+
+            await expect((route as any).start({ email: "user@example.com" }, makeReq())).rejects.toMatchObject({
+                status: 403,
+            });
+            expect((route as any).messagingUtils.sendEmail).not.toHaveBeenCalled();
+            expect((route as any).aliasRepo.find).not.toHaveBeenCalled();
+        });
+
+        it("verify() rejects with 403 and creates nothing when registration was closed after the code was sent.", async () => {
+            const req = makeReq();
+            const token = await generateOTP(req, { id: "user@example.com" });
+            const route = makeRoute(false);
+
+            await expect((route as any).verify({ email: "user@example.com", token }, req)).rejects.toMatchObject({
+                status: 403,
+            });
+            expect((route as any).aliasRepo.create).not.toHaveBeenCalled();
+            expect((route as any).userRepo.create).not.toHaveBeenCalled();
+        });
+
+        it("Uses the current (possibly just-toggled) runtime settings on every call.", async () => {
+            const route = makeRoute(false);
+
+            await expect((route as any).start({ email: "user@example.com" }, makeReq())).rejects.toMatchObject({
+                status: 403,
+            });
+
+            (route as any).systemSettingsUtils = makeSystemSettingsUtils({ allowRegistration: true });
+            await expect((route as any).start({ email: "user@example.com" }, makeReq())).resolves.toEqual({});
+        });
+
+        it("initialize() creates a shared SystemSettingsUtils for systemSettingsClass.", async () => {
+            class FakeSettings {}
+            const utils = makeSystemSettingsUtils();
+            const route = new TestRegistrationRoute();
+            (route as any).systemSettingsUtils = undefined;
+            (route as any).systemSettingsClass = FakeSettings;
+            const objectFactory = makeMockObjectFactory({}, {});
+            objectFactory.newInstance.mockImplementation(async (type: any) =>
+                type === SystemSettingsUtils ? utils : {},
+            );
+            (route as any)._objectFactory = objectFactory;
+
+            await (route as any).initialize();
+            await (route as any).initialize();
+
+            expect(objectFactory.newInstance).toHaveBeenCalledWith(SystemSettingsUtils, {
+                name: "FakeSettings",
+                args: [FakeSettings],
+            });
+            expect(objectFactory.newInstance.mock.calls.filter((c: any) => c[0] === SystemSettingsUtils)).toHaveLength(
+                1,
+            );
+            expect((route as any).systemSettingsUtils).toBe(utils);
         });
     });
 });

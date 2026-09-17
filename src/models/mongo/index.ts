@@ -6,4 +6,5 @@ export * from "./OAuthRefreshTokenMongo.js";
 export * from "./ProfileMongo.js";
 export * from "./SecretMongo.js";
 export * from "./SigningKeyMongo.js";
+export * from "./SystemSettingsMongo.js";
 export * from "./UserMongo.js";

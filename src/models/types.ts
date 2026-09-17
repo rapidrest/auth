@@ -1,5 +1,10 @@
-import { JWTUser } from "@rapidrest/core";
+///////////////////////////////////////////////////////////////////////////////
+// Copyright (C) 2026 Jean-Philippe Steinmetz. All rights reserved.
+// SPDX-License-Identifier: MPL-2.0
+///////////////////////////////////////////////////////////////////////////////
+import { JWTUser, ObjectDecorators } from "@rapidrest/core";
 import { BaseEntity } from "@rapidrest/service-core";
+const { RequiresScope } = ObjectDecorators;
 
 /**
  * @author Jean-Philippe Steinmetz
@@ -414,7 +419,7 @@ export interface User extends BaseEntity, JWTUser {
     /**
      * Set to `true` to require multi-factor authentication for this account, otherwise set to `false`.
      *
-     * Default value is set by `@Config("auth:require_mfa")`.
+     * Default value is set by `@Config("auth:requireMFA")`.
      */
     requireMFA?: boolean;
 
@@ -427,3 +432,47 @@ export interface User extends BaseEntity, JWTUser {
      */
     sessionsRevokedAt?: number;
 }
+
+/**
+ * Deployment-wide authentication policy that can be changed at runtime by an administrator. Stored as a single
+ * record (see `SystemSettingsUtils`), seeded from the server configuration the first time it is read.
+ *
+ * Any field left `undefined`/`null` falls back to its corresponding `@Config` value.
+ *
+ * @author Jean-Philippe Steinmetz
+ */
+export class SystemSettings {
+    /**
+     * Set to `true` to allow new accounts to be registered, otherwise set to `false`. When `false`, new accounts
+     * can only be created by a user with a trusted role.
+     *
+     * Seeded from and falls back to `@Config("auth:allowRegistration")`.
+     */
+    public allowRegistration: boolean = true;
+
+    /**
+     * Set to `true` to force multi-factor authentication for every account regardless of its own
+     * `requireMFA` value (see `BaseUserRoute.validateCreate`/`validateUpdate` and `AuthMFARoute`,
+     * which drives `MFAStrategyOptions.require2FA` from this same flag).
+     */
+    @RequiresScope("system")
+    public requireMFA: boolean = false;
+
+    constructor(other?: Partial<SystemSettings>) {
+        if (other) {
+            this.allowRegistration =
+                other.allowRegistration !== undefined ? other.allowRegistration : this.allowRegistration;
+            this.requireMFA = other.requireMFA !== undefined ? other.requireMFA : this.requireMFA;
+        }
+    }
+}
+
+/**
+ * Deployment-wide authentication policy that can be changed at runtime by an administrator. Stored as a single
+ * record (see `SystemSettingsUtils`), seeded from the server configuration the first time it is read.
+ *
+ * Any field left `undefined`/`null` falls back to its corresponding `@Config` value.
+ *
+ * @author Jean-Philippe Steinmetz
+ */
+export interface SystemSettingsEntity extends BaseEntity, SystemSettings {}
