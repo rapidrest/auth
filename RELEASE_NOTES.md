@@ -1,5 +1,11 @@
 # Release Notes
 
+## Unreleased
+
+* Added new `SystemSettings` data model for managing common configuration variables at runtime.
+* Added new `BaseSettingsRoute` route that exposes endpoints for managing `SystemSettings`.
+* Upgraded to service-core v2.1.1
+
 ## v2.0.0-beta.8
 
 * Upgraded to service-core v2.1.0
