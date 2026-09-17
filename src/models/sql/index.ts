@@ -6,4 +6,5 @@ export * from "./OAuthRefreshTokenSQL.js";
 export * from "./ProfileSQL.js";
 export * from "./SecretSQL.js";
 export * from "./SigningKeySQL.js";
+export * from "./SystemSettingsSQL.js";
 export * from "./UserSQL.js";

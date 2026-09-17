@@ -3,11 +3,12 @@
 // SPDX-License-Identifier: MPL-2.0
 ///////////////////////////////////////////////////////////////////////////////
 import { RepoUtils, RouteDecorators } from "@rapidrest/service-core";
-import { UserSQL } from "../../models/sql/index.js";
+import { SystemSettingsSQL, UserSQL } from "../../models/sql/index.js";
 import { BaseUserRoute } from "../BaseUserRoute.js";
 const { Model } = RouteDecorators;
 
 @Model(UserSQL)
 export class BaseUserRouteSQL extends BaseUserRoute<UserSQL> {
+    protected systemSettingsClass: any = SystemSettingsSQL;
     protected readonly repoUtilsClass: any = RepoUtils;
 }

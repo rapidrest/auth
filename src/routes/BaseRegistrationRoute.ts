@@ -2,8 +2,9 @@
 // Copyright (C) 2026 Jean-Philippe Steinmetz
 // SPDX-License-Identifier: MPL-2.0
 ////////////////////////////////////////////////////////////////////////////////
-import { ApiError, EventUtils, MessagingUtils, ObjectDecorators, ValidationUtils } from "@rapidrest/core";
+import { ApiError, EventUtils, MessagingUtils, ObjectDecorators, UserUtils, ValidationUtils } from "@rapidrest/core";
 import {
+    ApiErrorMessages,
     ApiErrors,
     DocDecorators,
     HttpRequest,
@@ -14,7 +15,8 @@ import {
     RepoUtils,
     RouteDecorators,
 } from "@rapidrest/service-core";
-import { Alias, AliasType, AuthResult, User } from "../models/types.js";
+import { Alias, AliasType, AuthResult, SystemSettings, User } from "../models/types.js";
+import { SystemSettingsUtils } from "./SystemSettingsUtils.js";
 import { generateOTP, verifyOTP } from "../auth/shared.js";
 import { AuthEventType } from "../auth/events.js";
 import { TokenUtils } from "../auth/TokenUtils.js";
@@ -48,10 +50,13 @@ interface VerifyBody {
  */
 export abstract class BaseRegistrationRoute<U extends User, A extends Alias> {
     protected abstract aliasClass: any;
+    protected abstract systemSettingsClass?: any;
     protected abstract userClass: any;
 
     // Automatically injected by ObjectFactory on instantiation
     private _objectFactory?: ObjectFactory;
+
+    protected systemSettingsUtils?: SystemSettingsUtils;
 
     @Config("auth:default_scopes", [])
     protected defaultScopes: string[] = [];
@@ -96,6 +101,21 @@ export abstract class BaseRegistrationRoute<U extends User, A extends Alias> {
                 args: [this.userClass],
             });
         }
+
+        if (!this.systemSettingsUtils && this.systemSettingsClass) {
+            this.systemSettingsUtils = await this._objectFactory.newInstance(SystemSettingsUtils, {
+                name: this.systemSettingsClass.name,
+                args: [this.systemSettingsClass],
+            });
+        }
+    }
+
+    /**
+     * Returns `true` if new accounts may currently be registered. Reads the runtime `SystemSettings` when
+     * `systemSettingsClass` is set, otherwise (or for anything not stored) falls back to `@Config("auth:allowRegistration")`.
+     */
+    protected async isRegistrationAllowed(): Promise<boolean> {
+        return (await this.systemSettingsUtils!.get()).allowRegistration;
     }
 
     /**
@@ -111,6 +131,10 @@ export abstract class BaseRegistrationRoute<U extends User, A extends Alias> {
         }
         if (!req.session) {
             throw new Error("Registration requires session support. Configure the `session` config block.");
+        }
+
+        if (!(await this.isRegistrationAllowed())) {
+            throw new ApiError(ApiErrors.AUTH_PERMISSION_FAILURE, 403, ApiErrorMessages.AUTH_PERMISSION_FAILURE);
         }
 
         const email = (body?.email ?? "").trim().toLowerCase();
@@ -200,6 +224,11 @@ export abstract class BaseRegistrationRoute<U extends User, A extends Alias> {
         }
         if (!req.session) {
             throw new Error("Registration requires session support. Configure the `session` config block.");
+        }
+
+        // Checked again here, not just in `start()`, since registration may have been closed after the code was sent.
+        if (!(await this.isRegistrationAllowed())) {
+            throw new ApiError(ApiErrors.AUTH_PERMISSION_FAILURE, 403, ApiErrorMessages.AUTH_PERMISSION_FAILURE);
         }
 
         const email = (body?.email ?? "").trim().toLowerCase();

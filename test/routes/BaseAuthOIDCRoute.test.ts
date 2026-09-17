@@ -10,6 +10,7 @@ import { BaseAuthOIDCRoute } from "../../src/routes/BaseAuthOIDCRoute.js";
 import { UserUtils } from "../../src/routes/UserUtils.js";
 import { AliasType } from "../../src/models/types.js";
 import { TokenUtils } from "../../src/auth/TokenUtils.js";
+import { SystemSettingsUtils } from "../../src/routes/SystemSettingsUtils.js";
 
 class FakeAliasClass {
     static readonly name = "FakeAlias";
@@ -28,11 +29,23 @@ const providerConfig: OIDCProvider = {
     clientSecret: "client-secret",
 };
 
+/** A permissive default (registration open), overridable per test via `(route as any).systemSettingsUtils`. */
+function makeSystemSettingsUtils(overrides: { allowRegistration?: boolean } = {}): any {
+    return { get: vi.fn().mockResolvedValue({ allowRegistration: true, requireMFA: false, ...overrides }) };
+}
+
 class TestAuthOIDCRoute extends BaseAuthOIDCRoute<any, any, any> {
     protected aliasClass: any = FakeAliasClass;
     protected profileClass: any = FakeProfileClass;
     protected userClass: any = FakeUserClass;
     protected providerConfig: OIDCProvider = providerConfig;
+
+    constructor() {
+        super();
+        // Every test gets a working `systemSettingsUtils` by default (as `@Init` would provide once a real
+        // `systemSettingsClass` is set), so tests unrelated to registration policy don't need to wire it up.
+        this.systemSettingsUtils = makeSystemSettingsUtils();
+    }
 }
 
 // Simulates a multi-provider setup (e.g. one route per third-party OIDC provider): each subclass
@@ -691,6 +704,92 @@ describe("BaseAuthOIDCRoute Tests", () => {
                 "Set-Cookie",
                 expect.stringContaining(`refresh=${result?.refresh}`),
             );
+        });
+    });
+
+    describe("registration disabled", () => {
+        async function setupRoute(allowRegistration: boolean) {
+            const userRepo = { create: vi.fn(), findOne: vi.fn().mockResolvedValue(undefined) };
+            const profileRepo = { create: vi.fn() };
+            const aliasRepo = { create: vi.fn(), findOne: vi.fn().mockResolvedValue(undefined) };
+            const userUtils = { lookup: vi.fn().mockResolvedValue(undefined) };
+            const route = new TestAuthOIDCRoute();
+            (route as any).authMiddleware = { register: vi.fn() };
+            const { objectFactory, getOptions } = makeMockObjectFactory(aliasRepo, profileRepo, userRepo, userUtils);
+            (route as any)._objectFactory = objectFactory;
+            await (route as any).initialize();
+            (route as any).systemSettingsUtils = makeSystemSettingsUtils({ allowRegistration });
+            return { route, userRepo, profileRepo, aliasRepo, userUtils, getUser: getOptions()!.getUser.bind(getOptions()) };
+        }
+
+        const profile: OIDCProfile = {
+            id: "provider-user-1",
+            provider: "test-provider",
+            email: "new@example.com",
+            email_verified: true,
+        };
+
+        it("Rejects a first-time sign-in with 403 and provisions nothing when registration is disabled.", async () => {
+            const { getUser, userRepo, profileRepo, aliasRepo } = await setupRoute(false);
+
+            await expect(getUser("token", profile)).rejects.toMatchObject({ status: 403 });
+            expect(userRepo.create).not.toHaveBeenCalled();
+            expect(profileRepo.create).not.toHaveBeenCalled();
+            expect(aliasRepo.create).not.toHaveBeenCalled();
+        });
+
+        it("Still signs in a returning user found by the provider alias.", async () => {
+            const { getUser, userUtils, aliasRepo } = await setupRoute(false);
+            userUtils.lookup.mockResolvedValue({ uid: "existing" });
+
+            await expect(getUser("token", profile)).resolves.toEqual({ uid: "existing" });
+            expect(aliasRepo.create).not.toHaveBeenCalled();
+        });
+
+        it("Still links and signs in an existing account found by its verified e-mail.", async () => {
+            const { getUser, userRepo, aliasRepo } = await setupRoute(false);
+            aliasRepo.findOne.mockResolvedValue({ type: AliasType.EMAIL, verified: true, userUid: "existing" });
+            userRepo.findOne.mockResolvedValue({ uid: "existing" });
+
+            await expect(getUser("token", profile)).resolves.toEqual({ uid: "existing" });
+            expect(userRepo.create).not.toHaveBeenCalled();
+            expect(aliasRepo.create).toHaveBeenCalledWith(expect.objectContaining({ type: AliasType.OAUTH }), {
+                ignoreACL: true,
+            });
+        });
+
+        it("Uses the current (possibly just-toggled) runtime settings on every call.", async () => {
+            const { route, getUser, userRepo } = await setupRoute(false);
+
+            await expect(getUser("token", profile)).rejects.toMatchObject({ status: 403 });
+            expect(userRepo.create).not.toHaveBeenCalled();
+
+            (route as any).systemSettingsUtils = makeSystemSettingsUtils({ allowRegistration: true });
+            userRepo.create.mockResolvedValue({ uid: "new-user" });
+            await expect(getUser("token", profile)).resolves.toEqual({ uid: "new-user" });
+        });
+
+        it("initialize() creates a shared SystemSettingsUtils for systemSettingsClass.", async () => {
+            class FakeSettings {}
+            const utils = makeSystemSettingsUtils();
+            const route = new TestAuthOIDCRoute();
+            (route as any).systemSettingsUtils = undefined;
+            (route as any).systemSettingsClass = FakeSettings;
+            (route as any).authMiddleware = { register: vi.fn() };
+            const { objectFactory } = makeMockObjectFactory({}, {}, {}, {});
+            const original = objectFactory.newInstance.getMockImplementation()!;
+            objectFactory.newInstance.mockImplementation(async (type: any, opts: any) =>
+                type === SystemSettingsUtils ? utils : original(type, opts),
+            );
+            (route as any)._objectFactory = objectFactory;
+
+            await (route as any).initialize();
+
+            expect(objectFactory.newInstance).toHaveBeenCalledWith(SystemSettingsUtils, {
+                name: "FakeSettings",
+                args: [FakeSettings],
+            });
+            expect((route as any).systemSettingsUtils).toBe(utils);
         });
     });
 });
