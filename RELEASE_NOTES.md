@@ -1,6 +1,6 @@
 # Release Notes
 
-## Unreleased
+## v2.0.0-beta.9
 
 * Added new `SystemSettings` data model for managing common configuration variables at runtime.
 * Added new `BaseSettingsRoute` route that exposes endpoints for managing `SystemSettings`.

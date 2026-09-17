@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0-beta.9] - 2026-09-17
+
+### Added
+- Added a runtime-togglable SystemSettings for registration and MFA policy, and a dedicated BaseSettingsRoute to expose it
+- Added BaseSettingsRoute (GET public, PUT trusted-role-only) to serve and update SystemSettings, with requireMFA gated behind @RequiresScope so only a trusted admin (or a token carrying the "system" scope) sees it in the response. Deliberately don't put that same @RequiresScope on the persistence models (SystemSettingsSQL/Mongo): RepoUtils applies it to every internal read/write regardless of caller, and since SystemSettingsUtils never passes a user, doing so there silently stripped requireMFA from every entity it read back, making the stored value permanently unreadable to the code enforcing it.
+
+### Changed
+- Introduce SystemSettings (allowRegistration, requireMFA) as a single persisted record read/written through SystemSettingsUtils, seeded from @Config the first time it's read and authoritative from then on; unlike the auth:allowRegistration/auth:requireMFA config it replaces as the source of truth, it has no "revert to config" null sentinel, so update() rejects null and any non-boolean value outright rather than silently accepting either. Wire it into every path that can create a User: BaseUserRoute.validateCreate/validateUpdate, BaseRegistrationRoute's OTP start/verify, and BaseAuthOIDCRoute's first-time OAuth sign-in all now consult the stored setting, closing registration server-wide without a restart. Fix BaseUserRoute.validateCreate forcing requireMFA to the stored value even when the mandate is off, discarding a caller's own opt-in, and validateUpdate reading the static config snapshot instead of the same runtime setting validateCreate uses. Seed both fields (not just allowRegistration) when the record is first created.
+- Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+- Updated service-core and release notes
+
 ## [2.0.0-beta.8] - 2026-09-15
 
 ### Changed
@@ -146,7 +157,8 @@ tagged.
 - `PasskeyStrategy` - WebAuthn based passkey authentication
 - `TOTPStrategy` - RFC 6238 Time-Based One Time Password authentication (e.g. Google Authenticator, etc.)
 
-[Unreleased]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.8...HEAD
+[Unreleased]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.9...HEAD
+[2.0.0-beta.9]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.8...v2.0.0-beta.9
 [2.0.0-beta.8]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.7...v2.0.0-beta.8
 [2.0.0-beta.7]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.6...v2.0.0-beta.7
 [2.0.0-beta.6]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.5...v2.0.0-beta.6
