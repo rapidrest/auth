@@ -300,6 +300,41 @@ describe("TokenUtils Tests", () => {
             );
         });
 
+        it("Scopes both cookies to the configured Domain so sibling subdomains receive them.", async () => {
+            const tokenUtils = makeTokenUtils();
+            (tokenUtils as any).cookieConfig = {
+                enabled: true,
+                access: { name: "jwt", domain: ".mydomain.com" },
+                refresh: { name: "refresh", domain: ".mydomain.com", maxAge: 1209600 },
+            };
+            const res = makeRes();
+
+            const result = await tokenUtils.createAuthResult(user, [], undefined, res);
+
+            const [, accessValue] = res.appendHeader.mock.calls[0];
+            const [, refreshValue] = res.appendHeader.mock.calls[1];
+            expect(accessValue).toBe(`jwt=${result.token}; Path=/; Domain=.mydomain.com; SameSite=Lax; HttpOnly; Secure`);
+            expect(refreshValue).toBe(
+                `refresh=${result.refresh}; Path=/; Domain=.mydomain.com; SameSite=Lax; Max-Age=1209600; HttpOnly; Secure`,
+            );
+        });
+
+        it("Omits the Domain attribute (a host-only cookie) when none is configured.", async () => {
+            const tokenUtils = makeTokenUtils();
+            (tokenUtils as any).cookieConfig = {
+                enabled: true,
+                access: { name: "jwt" },
+                refresh: { name: "refresh" },
+            };
+            const res = makeRes();
+
+            await tokenUtils.createAuthResult(user, [], undefined, res);
+
+            for (const [, value] of res.appendHeader.mock.calls) {
+                expect(value).not.toContain("Domain=");
+            }
+        });
+
         it("Records IP, lastAccess, lastLogin and userUid on the session when a session is present.", async () => {
             const tokenUtils = makeTokenUtils();
             const req = makeReq();
@@ -450,6 +485,31 @@ describe("TokenUtils Tests", () => {
                 2,
                 "Set-Cookie",
                 "refresh=; Path=/; SameSite=Lax; Max-Age=0; HttpOnly; Secure",
+            );
+        });
+
+        // A cookie set with a Domain is only cleared by a header carrying the same Domain — without it, logout
+        // would leave the domain-scoped cookie alive in every subdomain that received it.
+        it("Carries the configured Domain on the clearing headers so a domain-scoped cookie is actually cleared.", () => {
+            const tokenUtils = makeTokenUtils();
+            (tokenUtils as any).cookieConfig = {
+                enabled: true,
+                access: { name: "jwt", domain: ".mydomain.com" },
+                refresh: { name: "refresh", domain: ".mydomain.com" },
+            };
+            const res = makeRes();
+
+            tokenUtils.clearToken(res);
+
+            expect(res.appendHeader).toHaveBeenNthCalledWith(
+                1,
+                "Set-Cookie",
+                "jwt=; Path=/; Domain=.mydomain.com; SameSite=Lax; Max-Age=0; HttpOnly; Secure",
+            );
+            expect(res.appendHeader).toHaveBeenNthCalledWith(
+                2,
+                "Set-Cookie",
+                "refresh=; Path=/; Domain=.mydomain.com; SameSite=Lax; Max-Age=0; HttpOnly; Secure",
             );
         });
 

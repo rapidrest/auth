@@ -22,6 +22,13 @@ export interface TokenCookieConfig {
     name: string;
     /** The `Path` attribute of the cookie. Default is `/`. */
     path?: string;
+    /**
+     * The `Domain` attribute of the cookie, e.g. `.mydomain.com` to share the session with sibling subdomains
+     * such as `mail.mydomain.com` when this server itself is on `auth.mydomain.com`. Omitted by default, which
+     * makes the cookie host-only: the browser returns it to the exact host that set it and nothing else, so no
+     * other subdomain ever sees it.
+     */
+    domain?: string;
     /** The `Max-Age` attribute of the cookie, in seconds. Omitted (session cookie) if not set. */
     maxAge?: number;
     /** The `SameSite` attribute of the cookie. Default is `Lax`. */
@@ -71,8 +78,13 @@ export class TokenUtils {
         const parts: string[] = [
             `${config.name ?? "jwt"}=${token}`,
             `Path=${config.path ?? "/"}`,
-            `SameSite=${config.sameSite ?? "Lax"}`,
         ];
+        // A cookie is only cleared by a `Set-Cookie` whose Domain and Path match the one that set it, so this
+        // must go through here for the clearing header too — not just the one that sets the token.
+        if (config.domain) {
+            parts.push(`Domain=${config.domain}`);
+        }
+        parts.push(`SameSite=${config.sameSite ?? "Lax"}`);
         if (clearing) {
             parts.push("Max-Age=0");
         } else if (config.maxAge !== undefined) {

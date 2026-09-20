@@ -196,6 +196,26 @@ describe("BaseImpersonationRoute Tests", () => {
             );
         });
 
+        it("Scopes the restored jwt cookie to the configured Domain, but never the jwt_impersonator clear.", async () => {
+            const route = makeRoute();
+            (route as any).sessionCookieDomain = ".mydomain.com";
+            const res = makeResponse();
+            const req = makeRequest({ cookies: { jwt_impersonator: "admins-original-token" } });
+
+            await route.stopImpersonating(req, res, caller);
+
+            expect(res.appendHeader).toHaveBeenCalledWith(
+                "Set-Cookie",
+                expect.stringContaining("jwt=admins-original-token; Path=/; Domain=.mydomain.com;"),
+            );
+            // The stash cookie is only ever read by this server, so it stays host-only.
+            const cleared = res.appendHeader.mock.calls
+                .map(([, value]: [string, string]) => value)
+                .find((value: string) => value.startsWith("jwt_impersonator=;"));
+            expect(cleared).toBeDefined();
+            expect(cleared).not.toContain("Domain=");
+        });
+
         it("Logs a warning naming the user that was being impersonated.", async () => {
             const route = makeRoute();
             const warn = vi.fn();

@@ -51,6 +51,16 @@ export abstract class BaseImpersonationRoute<U extends User> {
     @Config("auth:default_scopes", [])
     protected defaultScopes: string[] = [];
 
+    /**
+     * The `Domain` the session cookie is scoped to — must match what `TokenUtils` uses for the same cookie
+     * (`auth:cookie:access:domain`), or restoring the session here would write a second, host-only `jwt`
+     * cookie alongside the domain-scoped one. Only ever applied to the session cookie: the stashed
+     * impersonator cookie is read back by this server alone, so it stays host-only. The empty default means
+     * "host-only" and is required: `@Config` throws at startup for a path that's unset and has no default.
+     */
+    @Config("auth:cookie:access:domain", "")
+    private sessionCookieDomain: string = "";
+
     @Inject(TokenUtils)
     protected tokenUtils?: TokenUtils;
 
@@ -81,9 +91,10 @@ export abstract class BaseImpersonationRoute<U extends User> {
      * route's own tests) commonly run over plain HTTP, where a `Secure` cookie is silently dropped by the
      * browser entirely, breaking the very session it's meant to set.
      */
-    private buildCookie(name: string, token: string): string {
+    private buildCookie(name: string, token: string, domain?: string): string {
         const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
-        return `${name}=${token}; Path=/; HttpOnly; SameSite=Lax${secure}`;
+        const scope = domain ? `; Domain=${domain}` : "";
+        return `${name}=${token}; Path=/${scope}; HttpOnly; SameSite=Lax${secure}`;
     }
 
     private buildClearCookie(name: string): string {
@@ -159,7 +170,7 @@ export abstract class BaseImpersonationRoute<U extends User> {
             return { restored: false };
         }
 
-        res.appendHeader("Set-Cookie", this.buildCookie(SESSION_COOKIE_NAME, impersonatorToken));
+        res.appendHeader("Set-Cookie", this.buildCookie(SESSION_COOKIE_NAME, impersonatorToken, this.sessionCookieDomain));
         res.appendHeader("Set-Cookie", this.buildClearCookie(IMPERSONATOR_COOKIE_NAME));
 
         this.logger?.warn(`[Impersonation] Stopped impersonating (was acting as '${user.uid}').`);
