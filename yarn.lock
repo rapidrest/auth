@@ -1356,7 +1356,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@rapidrest/auth@workspace:."
   dependencies:
-    "@rapidrest/cli": "npm:^1.0.1"
+    "@rapidrest/cli": "npm:^2.1.0"
     "@rapidrest/core": "npm:^5.2.2"
     "@rapidrest/service-core": "npm:^2.1.1"
     "@simplewebauthn/server": "npm:^13.3.2"
@@ -1420,9 +1420,9 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@rapidrest/cli@npm:^1.0.1":
-  version: 1.0.1
-  resolution: "@rapidrest/cli@npm:1.0.1"
+"@rapidrest/cli@npm:^2.1.0":
+  version: 2.1.0
+  resolution: "@rapidrest/cli@npm:2.1.0"
   dependencies:
     "@inquirer/prompts": "npm:^8.6.0"
     "@oclif/core": "npm:^4"
@@ -1443,7 +1443,7 @@ __metadata:
   bin:
     rapidrest: bin/run.js
     rr: bin/run.js
-  checksum: 10c0/98213084761e78c79c55577c71a081ba0f62e37bb0db4c1779a2b17eeb2daa4137def40b42c5c2b8e2f416feea0852d86cf5915dda0d96837e9571231f1ca361
+  checksum: 10c0/cc2b05a64da59331a8d250177a8c2c365c229c9149b99dc1825901aae9bbbdca8b58b62493980d3f31b465d9809dc4fd43a951068cd58b6fb0acc0d4d282a142
   languageName: node
   linkType: hard
 
