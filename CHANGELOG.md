@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0-beta.10] - 2026-09-20
+
+### Added
+- Added an optional domain to the auth cookie configuration so the jwt and refresh cookies can be shared with sibling subdomains, on the clearing headers as well as the ones that set them
+
+### Changed
+- Upgraded @rapidrest/cli
+
+### Fixed
+- Fixed restoring an impersonated session writing a host-only jwt cookie beside the domain-scoped one when a cookie domain is configured
+
 ## [2.0.0-beta.9] - 2026-09-17
 
 ### Added
@@ -157,7 +168,8 @@ tagged.
 - `PasskeyStrategy` - WebAuthn based passkey authentication
 - `TOTPStrategy` - RFC 6238 Time-Based One Time Password authentication (e.g. Google Authenticator, etc.)
 
-[Unreleased]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.9...HEAD
+[Unreleased]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.10...HEAD
+[2.0.0-beta.10]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.9...v2.0.0-beta.10
 [2.0.0-beta.9]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.8...v2.0.0-beta.9
 [2.0.0-beta.8]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.7...v2.0.0-beta.8
 [2.0.0-beta.7]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.6...v2.0.0-beta.7

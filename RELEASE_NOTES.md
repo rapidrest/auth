@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v2.0.0-beta.10
+
 ## v2.0.0-beta.9
 
 * Added new `SystemSettings` data model for managing common configuration variables at runtime.
