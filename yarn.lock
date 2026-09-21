@@ -1357,7 +1357,7 @@ __metadata:
   resolution: "@rapidrest/auth@workspace:."
   dependencies:
     "@rapidrest/cli": "npm:^2.1.0"
-    "@rapidrest/core": "npm:^5.2.2"
+    "@rapidrest/core": "npm:^6.0.0"
     "@rapidrest/service-core": "npm:^2.1.1"
     "@simplewebauthn/server": "npm:^13.3.2"
     "@swc/core": "npm:^1.15.41"
@@ -1447,9 +1447,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@rapidrest/core@npm:^5.2.2":
-  version: 5.2.2
-  resolution: "@rapidrest/core@npm:5.2.2"
+"@rapidrest/core@npm:^6.0.0":
+  version: 6.0.0
+  resolution: "@rapidrest/core@npm:6.0.0"
   dependencies:
     form-data: "npm:^4.0.6"
     handlebars: "npm:^4.7.9"
@@ -1466,7 +1466,7 @@ __metadata:
     reflect-metadata: 0.2.x
     winston: 3.x
     winston-transport: 4.x
-  checksum: 10c0/474853632650bfa9cd74d35f48f68306570cfcb4e07ad79e4cd7b9948135046d3fc1160843a80560e60b449225cf0f0196ab2f36af578435aefe305b78a07756
+  checksum: 10c0/a3751eec5b646264e4bb619e1a365b4fc3350949b009ae25702fa9896e3f24c2257cbe4bf7e6cea59a7b884d48472cf133c59e91b1044212cdb49ede454e9f9c
   languageName: node
   linkType: hard
 
