@@ -27,3 +27,4 @@ test\.dir/
 !.yarn/versions
 openapi.*
 passwords
+junit.xml
