@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: MPL-2.0
 ////////////////////////////////////////////////////////////////////////////////
 import * as crypto from "crypto";
-import { ApiError } from "@rapidrest/core";
+import { ApiError, MessagingUtils } from "@rapidrest/core";
 import { ApiErrors, HttpRequest } from "@rapidrest/service-core";
 import {
     OTPContactType,
@@ -231,11 +231,84 @@ export const obfuscateContact = function (contact: string, type: OTPContactType)
             result = result.replace(/^(.).*(.{2})(@)/, "$1***$2$3");
             break;
         case OTPContactType.SMS:
+        case OTPContactType.WHATSAPP:
             result = result.replace(/.(?=.{4})/g, "*");
             break;
     }
 
     return result;
+};
+
+/**
+ * A `MessagingUtils` that may additionally report whether WhatsApp delivery is currently usable. A subclass
+ * whose WhatsApp settings can change at runtime (e.g. because they live in a database rather than in the
+ * static config) implements `isWhatsAppConfigured()` so the OTP routes always see its current state.
+ */
+export type WhatsAppAwareMessagingUtils = MessagingUtils & {
+    /**
+     * Returns `true` while a one-time code can currently be sent over WhatsApp. Optional - see
+     * `isWhatsAppConfigured()` for what is consulted when it isn't implemented.
+     */
+    isWhatsAppConfigured?(): boolean | Promise<boolean>;
+};
+
+/**
+ * Determines whether WhatsApp should currently be offered as a one-time code delivery channel. The OTP routes
+ * (`BaseAuthDiscoverRoute`, `BaseAuthOTPRoute`, `BaseAuthMFARoute` and `BaseAuthElevationRoute`) consult this
+ * before listing a WhatsApp option for a verified phone contact and before honoring a request for one, so
+ * WhatsApp is never offered on a server that can't deliver over it.
+ *
+ * Resolved in order:
+ *
+ * 1. The optional `isWhatsAppConfigured(): boolean | Promise<boolean>` hook on `messagingUtils`, when it
+ * defines one. It is called on every check (nothing is cached here) and its result is authoritative. A hook
+ * that throws is treated as `false`.
+ * 2. Otherwise `@rapidrest/core`'s own state: `MessagingUtils` keeps its validated `whatsapp` configuration in
+ * a private field named `whatsapp`, set once `init()` has accepted the `whatsapp` config block. That field
+ * being truthy means WhatsApp is configured.
+ *
+ * @param messagingUtils The messaging service the routes send codes through. `false` when not provided.
+ */
+export const isWhatsAppConfigured = async function (messagingUtils?: WhatsAppAwareMessagingUtils): Promise<boolean> {
+    if (!messagingUtils) {
+        return false;
+    }
+
+    if (typeof messagingUtils.isWhatsAppConfigured === "function") {
+        try {
+            return !!(await messagingUtils.isWhatsAppConfigured());
+        } catch {
+            return false;
+        }
+    }
+
+    return !!(messagingUtils as any).whatsapp;
+};
+
+/** The suffix appended to a phone alias's uid to form the id of its WhatsApp delivery method. */
+export const WHATSAPP_METHOD_SUFFIX = ":whatsapp";
+
+/**
+ * Builds the id of the WhatsApp OTP method for the phone alias with the given uid. The alias's own uid
+ * identifies its SMS method, so the WhatsApp method needs a distinct, derivable id for both to be individually
+ * selectable.
+ *
+ * @param aliasUid The uid of the verified phone alias.
+ */
+export const toWhatsAppMethodId = function (aliasUid: string): string {
+    return aliasUid + WHATSAPP_METHOD_SUFFIX;
+};
+
+/**
+ * The inverse of `toWhatsAppMethodId()`. Returns the alias uid a WhatsApp method id was derived from, or
+ * `undefined` if `id` isn't a WhatsApp method id.
+ *
+ * @param id The method id to parse.
+ */
+export const parseWhatsAppMethodId = function (id: string): string | undefined {
+    return id.length > WHATSAPP_METHOD_SUFFIX.length && id.endsWith(WHATSAPP_METHOD_SUFFIX)
+        ? id.slice(0, -WHATSAPP_METHOD_SUFFIX.length)
+        : undefined;
 };
 
 ///////////////////////////////////////////////////////////////////////////////

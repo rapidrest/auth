@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Add WhatsApp as a one-time code delivery channel for verified phone contacts, alongside SMS, offered only while WhatsApp is configured
+
 ## [2.0.0-beta.10] - 2026-09-20
 
 ### Added

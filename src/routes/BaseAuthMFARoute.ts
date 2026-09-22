@@ -26,7 +26,15 @@ import {
     TOTPConfig,
     TOTPSecret,
 } from "../auth/types.js";
-import { importArgon2, normalizePasswordSubmission, verifyDummyPassword, WeakClientHashError } from "../auth/shared.js";
+import {
+    importArgon2,
+    isWhatsAppConfigured,
+    normalizePasswordSubmission,
+    parseWhatsAppMethodId,
+    toWhatsAppMethodId,
+    verifyDummyPassword,
+    WeakClientHashError,
+} from "../auth/shared.js";
 import { TokenUtils } from "../auth/TokenUtils.js";
 import { UserUtils } from "./UserUtils.js";
 
@@ -217,6 +225,32 @@ export abstract class BaseAuthMFARoute<U extends User, S extends Secret, A exten
     }
 
     /**
+     * Converts a verified phone alias into its WhatsApp `MFAMethod`, delivering the code over WhatsApp instead of
+     * SMS. Its `id` is derived from the alias's uid (see `toWhatsAppMethodId()`) so it is selectable and
+     * resolvable independently of the same alias's SMS method, whose id is the plain alias uid. The caller is
+     * responsible for only using this while WhatsApp is configured (see `isWhatsAppConfigured()`).
+     * @param alias The alias to convert.
+     * @param obfuscate Set to `true` to obfuscate the contact, as for `convertAliasToMethod()`.
+     * @returns The method, or `undefined` if `alias` isn't a verified phone.
+     */
+    protected convertAliasToWhatsAppMethod(alias: Alias, obfuscate?: boolean): MFAMethod | undefined {
+        // Same proven-contact requirement as convertAliasToMethod().
+        if (!alias.verified || alias.type !== AliasType.PHONE) {
+            return undefined;
+        }
+
+        return {
+            id: toWhatsAppMethodId(alias.uid),
+            data: {
+                contact: obfuscate ? this.obfuscateAlias(alias.alias, alias.type) : alias.alias,
+                type: OTPContactType.WHATSAPP,
+                verified: alias.verified,
+            },
+            type: MFAMethodType.OTP,
+        };
+    }
+
+    /**
      * Converts a `Secret` into the `MFAMethod` shape `MFAStrategy` understands.
      * @param secret The secret to convert.
      * @param redact Set to `true` when the result will be sent to the (not-yet-authenticated-for-phase-3)
@@ -300,6 +334,21 @@ export abstract class BaseAuthMFARoute<U extends User, S extends Secret, A exten
             return undefined;
         }
 
+        // A WhatsApp method's id is derived from its phone alias's uid rather than being a record of its own,
+        // so it is resolved here - never through the secret/alias lookups below, which would only ever
+        // produce the alias's SMS method. Only while WhatsApp is configured, and only for a phone alias that
+        // belongs to `userUid` and is verified.
+        const whatsAppAliasUid: string | undefined = parseWhatsAppMethodId(id);
+        if (whatsAppAliasUid !== undefined) {
+            if (!(await isWhatsAppConfigured(this.messagingUtils))) {
+                return undefined;
+            }
+            const whatsAppAlias: A | undefined = await this.aliasRepo.findOne(whatsAppAliasUid, { ignoreACL: true });
+            return whatsAppAlias && whatsAppAlias.userUid === userUid
+                ? this.convertAliasToWhatsAppMethod(whatsAppAlias)
+                : undefined;
+        }
+
         // The 2fa auth method may be a secret or an alias (OTP). First look for a secret
         // with the matching id. If not found, look for an alias.
         const secret: S | undefined = await this.secretRepo.findOne(id, { ignoreACL: true });
@@ -358,11 +407,19 @@ export abstract class BaseAuthMFARoute<U extends User, S extends Secret, A exten
         // Filter aliases to only those that can be notified
         const aliases = allAliases.filter((alias) => [AliasType.EMAIL, AliasType.PHONE].includes(alias.type));
 
-        // Now add all eligible aliases to our list of methods (e.g. email, phone).
+        // Now add all eligible aliases to our list of methods (e.g. email, phone). A verified phone is
+        // additionally offered over WhatsApp, when configured, as its own method right after its SMS one.
+        const whatsApp: boolean = await isWhatsAppConfigured(this.messagingUtils);
         for (const alias of aliases) {
             const method: MFAMethod | undefined = this.convertAliasToMethod(alias, true);
             if (method) {
                 results.push(method);
+            }
+            if (whatsApp) {
+                const whatsAppMethod: MFAMethod | undefined = this.convertAliasToWhatsAppMethod(alias, true);
+                if (whatsAppMethod) {
+                    results.push(whatsAppMethod);
+                }
             }
         }
 
@@ -394,6 +451,13 @@ export abstract class BaseAuthMFARoute<U extends User, S extends Secret, A exten
                 this.messagingUtils
                     ?.sendSMS(this.template, { totp }, { to: contact.contact })
                     .catch((err) => this.logger?.debug(`[BaseAuthMFARoute] Failed to send verification SMS: ${err}`));
+                break;
+            case OTPContactType.WHATSAPP:
+                this.messagingUtils
+                    ?.sendWhatsApp(this.template, { totp }, { to: contact.contact })
+                    .catch((err) =>
+                        this.logger?.debug(`[BaseAuthMFARoute] Failed to send verification WhatsApp message: ${err}`),
+                    );
                 break;
         }
     }

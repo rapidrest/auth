@@ -222,6 +222,94 @@ describe("BaseAuthDiscoverRoute Tests", () => {
         });
     });
 
+    describe("discover (WhatsApp)", () => {
+        function makeRoute(messagingUtils: any, aliases: any[]): TestAuthDiscoverRoute {
+            const route = new TestAuthDiscoverRoute();
+            (route as any).userUtils = { lookup: vi.fn().mockResolvedValue({ uid: "user-1" }) };
+            (route as any).secretRepo = { find: vi.fn().mockResolvedValue([]) };
+            (route as any).aliasRepo = { find: vi.fn().mockResolvedValue(aliases) };
+            (route as any).messagingUtils = messagingUtils;
+            return route;
+        }
+
+        const email = { uid: "a1", alias: "john@example.com", type: AliasType.EMAIL, userUid: "user-1", verified: true };
+        const phone = { uid: "a2", alias: "+15551234567", type: AliasType.PHONE, userUid: "user-1", verified: true };
+        const smsHints = [
+            { contact: "j***hn@example.com", type: AliasType.EMAIL },
+            { contact: "********4567", type: AliasType.PHONE },
+        ];
+
+        it("Adds an obfuscated WhatsApp hint right after each verified phone's SMS hint when the hook says true.", async () => {
+            const route = makeRoute({ isWhatsAppConfigured: vi.fn().mockResolvedValue(true) }, [email, phone]);
+
+            const result = await route.discover("user-1", {} as any);
+
+            expect(result.otp).toEqual([
+                ...smsHints,
+                { contact: "********4567", type: AliasType.PHONE, channel: "whatsapp" },
+            ]);
+        });
+
+        it("Adds the WhatsApp hint when there is no hook but core's own whatsapp field is truthy.", async () => {
+            const route = makeRoute({ whatsapp: { accessToken: "t", phoneNumberId: "1" } }, [email, phone]);
+
+            const result = await route.discover("user-1", {} as any);
+
+            expect(result.otp).toHaveLength(3);
+            expect(result.otp[2]).toEqual({ contact: "********4567", type: AliasType.PHONE, channel: "whatsapp" });
+        });
+
+        it("Leaves the hints unchanged when WhatsApp is not configured.", async () => {
+            for (const messagingUtils of [undefined, {}, { whatsapp: undefined }]) {
+                const result = await makeRoute(messagingUtils, [email, phone]).discover("user-1", {} as any);
+                expect(result.otp).toEqual(smsHints);
+            }
+        });
+
+        it("Leaves the hints unchanged when the hook says false, even if core's field is set.", async () => {
+            const route = makeRoute({ isWhatsAppConfigured: () => false, whatsapp: { accessToken: "t" } }, [
+                email,
+                phone,
+            ]);
+
+            const result = await route.discover("user-1", {} as any);
+
+            expect(result.otp).toEqual(smsHints);
+        });
+
+        it("Never offers WhatsApp for an unverified phone or an e-mail.", async () => {
+            const route = makeRoute({ isWhatsAppConfigured: () => true }, [email, { ...phone, verified: false }]);
+            // The alias query itself is what restricts the hints to verified aliases - honor it like the repo does.
+            const all = [email, { ...phone, verified: false }];
+            (route as any).aliasRepo = {
+                find: vi.fn(async (query: any) => all.filter((a) => a.verified === query.verified)),
+            };
+
+            const result = await route.discover("user-1", {} as any);
+
+            expect((route as any).aliasRepo.find).toHaveBeenCalledWith(
+                { userUid: "user-1", verified: true },
+                { ignoreACL: true },
+            );
+            expect(result.otp).toEqual([smsHints[0]]);
+        });
+
+        it("Treats a hook that throws as WhatsApp not being configured.", async () => {
+            const route = makeRoute(
+                {
+                    isWhatsAppConfigured: () => {
+                        throw new Error("db down");
+                    },
+                },
+                [email, phone],
+            );
+
+            const result = await route.discover("user-1", {} as any);
+
+            expect(result.otp).toEqual(smsHints);
+        });
+    });
+
     describe("convertAliasType", () => {
         it("Throws for an unsupported alias type (e.g. name/oauth are not OTP-eligible).", () => {
             const route = new TestAuthDiscoverRoute();

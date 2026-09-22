@@ -88,6 +88,21 @@ describe("OTPStrategy Tests", () => {
             options.allowDiscovery = true;
         });
 
+        it("Obfuscates a WhatsApp contact like an SMS one.", async () => {
+            (options.getContacts as any).mockResolvedValue([
+                { contact: "+15551234567", type: OTPContactType.SMS, verified: true },
+                { contact: "+15551234567", type: OTPContactType.WHATSAPP, verified: true },
+            ]);
+            const res = makeRes();
+
+            await strategy.authenticate(makeReq({ body: {}, query: { id: "user-uid-1" } }), res, false);
+
+            expect(res.json).toHaveBeenCalledWith([
+                { contact: "********4567", type: OTPContactType.SMS },
+                { contact: "********4567", type: OTPContactType.WHATSAPP },
+            ]);
+        });
+
         it("Returns obfuscated contacts for the given id.", async () => {
             (options.getContacts as any).mockResolvedValue([
                 { contact: "john.smith@gmail.com", type: OTPContactType.EMAIL, verified: true },
@@ -193,6 +208,47 @@ describe("OTPStrategy Tests", () => {
             expect(res.status).toHaveBeenCalledWith(200);
             expect(res.json).toHaveBeenCalledWith({});
             expect((req.session as any).id).toBe("contact-1");
+        });
+
+        it("Looks the contact up without a channel when the request names none.", async () => {
+            (options.getContact as any).mockResolvedValue(undefined);
+
+            await strategy.authenticate(makeReq({ body: { id: "contact-1" } }), makeRes());
+
+            expect(options.getContact).toHaveBeenCalledWith("contact-1", undefined);
+        });
+
+        it("Passes the requested channel to getContact and notifies the contact it returns.", async () => {
+            const contact = { contact: "+15551234567", type: OTPContactType.WHATSAPP, verified: true };
+            (options.getContact as any).mockResolvedValue(contact);
+            const req = makeReq({ body: { id: "contact-1", channel: "whatsapp" } });
+            const res = makeRes();
+
+            await strategy.authenticate(req, res);
+
+            expect(options.getContact).toHaveBeenCalledWith("contact-1", "whatsapp");
+            expect(options.notifyContact).toHaveBeenCalledWith(contact, expect.any(String));
+            expect((req.session as any).id).toBe("contact-1");
+            expect(res.json).toHaveBeenCalledWith({});
+        });
+
+        it("Ignores a channel that is not a string.", async () => {
+            (options.getContact as any).mockResolvedValue(undefined);
+
+            await strategy.authenticate(makeReq({ body: { id: "contact-1", channel: { $ne: null } } }), makeRes());
+
+            expect(options.getContact).toHaveBeenCalledWith("contact-1", undefined);
+        });
+
+        it("Commits the same response, and sends nothing, when the requested channel isn't available.", async () => {
+            (options.getContact as any).mockResolvedValue(undefined);
+            const res = makeRes();
+
+            await strategy.authenticate(makeReq({ body: { id: "contact-1", channel: "whatsapp" } }), res);
+
+            expect(options.notifyContact).not.toHaveBeenCalled();
+            expect(res.status).toHaveBeenCalledWith(200);
+            expect(res.json).toHaveBeenCalledWith({});
         });
 
         it("Invokes checkRateLimit before generating/sending a new OTP.", async () => {

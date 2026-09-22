@@ -16,6 +16,7 @@ import {
 import { Alias, AliasType, AuthResult, Secret, User } from "../models/types.js";
 import { OTPStrategy, OTPStrategyOptions } from "../auth/OTPStrategy.js";
 import { OTPContact, OTPContactType } from "../auth/types.js";
+import { isWhatsAppConfigured } from "../auth/shared.js";
 import { TokenUtils } from "../auth/TokenUtils.js";
 import { UserUtils } from "./UserUtils.js";
 
@@ -156,9 +157,13 @@ export abstract class BaseAuthOTPRoute<U extends User, A extends Alias, S extend
     /**
      * Retrieves the alias with the given unique id.
      * @param id The unique id of the alias to retrieve.
+     * @param channel The delivery channel the client asked for, if any. Only `"whatsapp"` is meaningful - it
+     * selects WhatsApp delivery, and is honored only for a verified phone alias while WhatsApp is configured
+     * (see `isWhatsAppConfigured()`), otherwise `undefined` is returned so nothing is sent. Any other value
+     * (or none) leaves the alias on its default channel (e-mail or SMS), exactly as before.
      * @returns The alias if found, otherwise `undefined`.
      */
-    protected async getContact(id: string): Promise<OTPContact | undefined> {
+    protected async getContact(id: string, channel?: string): Promise<OTPContact | undefined> {
         if (!this.aliasRepo) {
             throw new Error("aliasRepo is not set.");
         }
@@ -166,14 +171,27 @@ export abstract class BaseAuthOTPRoute<U extends User, A extends Alias, S extend
             return undefined;
         }
         const alias: Alias | undefined = await this.aliasRepo.findOne(id, { ignoreACL: true });
+        if (!alias) {
+            return undefined;
+        }
 
-        return alias
-            ? {
-                  contact: alias.alias,
-                  type: this.convertAliasType(alias.type),
-                  verified: alias.verified,
-              }
-            : undefined;
+        let type: OTPContactType = this.convertAliasType(alias.type);
+        if (channel === OTPContactType.WHATSAPP) {
+            if (
+                alias.type !== AliasType.PHONE ||
+                !alias.verified ||
+                !(await isWhatsAppConfigured(this.messagingUtils))
+            ) {
+                return undefined;
+            }
+            type = OTPContactType.WHATSAPP;
+        }
+
+        return {
+            contact: alias.alias,
+            type,
+            verified: alias.verified,
+        };
     }
 
     /**
@@ -208,6 +226,7 @@ export abstract class BaseAuthOTPRoute<U extends User, A extends Alias, S extend
         // Filter aliases to only those that can be notified
         aliases = aliases.filter((alias) => [AliasType.EMAIL, AliasType.PHONE].includes(alias.type));
 
+        const whatsApp: boolean = await isWhatsAppConfigured(this.messagingUtils);
         const results: OTPContact[] = [];
         for (const alias of aliases) {
             results.push({
@@ -215,6 +234,14 @@ export abstract class BaseAuthOTPRoute<U extends User, A extends Alias, S extend
                 type: this.convertAliasType(alias.type),
                 verified: alias.verified,
             });
+            // A verified phone can also receive its code over WhatsApp, listed right after its SMS entry.
+            if (whatsApp && alias.type === AliasType.PHONE && alias.verified) {
+                results.push({
+                    contact: alias.alias,
+                    type: OTPContactType.WHATSAPP,
+                    verified: alias.verified,
+                });
+            }
         }
 
         return results;
@@ -249,6 +276,13 @@ export abstract class BaseAuthOTPRoute<U extends User, A extends Alias, S extend
                 this.messagingUtils
                     ?.sendSMS(this.template, { totp }, { to: contact.contact })
                     .catch((err) => this.logger?.debug(`[BaseAuthOTPRoute] Failed to send verification SMS: ${err}`));
+                break;
+            case OTPContactType.WHATSAPP:
+                this.messagingUtils
+                    ?.sendWhatsApp(this.template, { totp }, { to: contact.contact })
+                    .catch((err) =>
+                        this.logger?.debug(`[BaseAuthOTPRoute] Failed to send verification WhatsApp message: ${err}`),
+                    );
                 break;
         }
     }

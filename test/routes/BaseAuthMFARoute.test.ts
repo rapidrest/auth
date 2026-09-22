@@ -521,6 +521,253 @@ describe("BaseAuthMFARoute Tests", () => {
         });
     });
 
+    describe("WhatsApp", () => {
+        const phone = { uid: "alias-1", userUid: "user-1", alias: "+15551234567", type: AliasType.PHONE, verified: true };
+        const email = { uid: "alias-2", userUid: "user-1", alias: "user@example.com", type: AliasType.EMAIL, verified: true };
+        const configured = { isWhatsAppConfigured: vi.fn().mockResolvedValue(true) };
+
+        function makeRoute(aliases: any[], messagingUtils: any): TestAuthMFARoute {
+            const route = new TestAuthMFARoute();
+            (route as any).secretRepo = {
+                find: vi.fn().mockResolvedValue([]),
+                findOne: vi.fn().mockResolvedValue(undefined),
+            };
+            (route as any).aliasRepo = {
+                find: vi.fn().mockResolvedValue(aliases),
+                findOne: vi.fn(async (id: string) => aliases.find((a) => a.uid === id)),
+            };
+            (route as any).userRepo = {};
+            (route as any).messagingUtils = messagingUtils;
+            return route;
+        }
+
+        describe("convertAliasToWhatsAppMethod", () => {
+            it("Converts a verified PHONE alias into an OTP method with a derived id and the WHATSAPP type.", () => {
+                const route = new TestAuthMFARoute();
+
+                const result = (route as any).convertAliasToWhatsAppMethod(phone);
+
+                expect(result).toEqual({
+                    id: "alias-1:whatsapp",
+                    data: { contact: "+15551234567", type: OTPContactType.WHATSAPP, verified: true },
+                    type: MFAMethodType.OTP,
+                });
+            });
+
+            it("Obfuscates the contact when requested.", () => {
+                const route = new TestAuthMFARoute();
+
+                const result = (route as any).convertAliasToWhatsAppMethod(phone, true);
+
+                expect(result.data.contact).toBe("********4567");
+            });
+
+            it("Returns undefined for an unverified PHONE alias.", () => {
+                const route = new TestAuthMFARoute();
+
+                expect((route as any).convertAliasToWhatsAppMethod({ ...phone, verified: false })).toBeUndefined();
+            });
+
+            it("Returns undefined for an alias that is not a phone.", () => {
+                const route = new TestAuthMFARoute();
+
+                expect((route as any).convertAliasToWhatsAppMethod(email)).toBeUndefined();
+            });
+        });
+
+        describe("getMethods", () => {
+            it("Lists an obfuscated WhatsApp method right after the phone's unchanged SMS method when configured.", async () => {
+                const route = makeRoute([email, phone], configured);
+
+                const result = await (route as any).getMethods("user-1");
+
+                expect(result).toEqual([
+                    {
+                        id: "alias-2",
+                        data: { contact: "u***er@example.com", type: OTPContactType.EMAIL, verified: true },
+                        type: MFAMethodType.OTP,
+                    },
+                    {
+                        id: "alias-1",
+                        data: { contact: "********4567", type: OTPContactType.SMS, verified: true },
+                        type: MFAMethodType.OTP,
+                    },
+                    {
+                        id: "alias-1:whatsapp",
+                        data: { contact: "********4567", type: OTPContactType.WHATSAPP, verified: true },
+                        type: MFAMethodType.OTP,
+                    },
+                ]);
+            });
+
+            it("Lists it when there is no hook but core's own whatsapp field is truthy.", async () => {
+                const route = makeRoute([phone], { whatsapp: { accessToken: "t", phoneNumberId: "1" } });
+
+                const result = await (route as any).getMethods("user-1");
+
+                expect(result.map((m: any) => m.id)).toEqual(["alias-1", "alias-1:whatsapp"]);
+            });
+
+            it("Does not list it when WhatsApp is not configured (hook false, no hook and no field, or no messaging).", async () => {
+                for (const messagingUtils of [{ isWhatsAppConfigured: () => false }, {}, undefined]) {
+                    const result = await (makeRoute([email, phone], messagingUtils) as any).getMethods("user-1");
+                    expect(result.map((m: any) => m.id)).toEqual(["alias-2", "alias-1"]);
+                }
+            });
+
+            it("Never lists WhatsApp for an unverified phone alias.", async () => {
+                const route = makeRoute([{ ...phone, verified: false }], configured);
+
+                expect(await (route as any).getMethods("user-1")).toEqual([]);
+            });
+        });
+
+        describe("getMethod", () => {
+            it("Resolves the WhatsApp id to the WHATSAPP method for that alias's real contact.", async () => {
+                const route = makeRoute([phone], configured);
+
+                const result = await (route as any).getMethod("alias-1:whatsapp", "user-1");
+
+                expect(result).toEqual({
+                    id: "alias-1:whatsapp",
+                    data: { contact: "+15551234567", type: OTPContactType.WHATSAPP, verified: true },
+                    type: MFAMethodType.OTP,
+                });
+            });
+
+            it("Still resolves the plain alias id to the SMS method.", async () => {
+                const route = makeRoute([phone], configured);
+
+                const result = await (route as any).getMethod("alias-1", "user-1");
+
+                expect(result.id).toBe("alias-1");
+                expect(result.data.type).toBe(OTPContactType.SMS);
+            });
+
+            it("Does not resolve the WhatsApp id when WhatsApp is not configured.", async () => {
+                const route = makeRoute([phone], { isWhatsAppConfigured: () => false });
+
+                expect(await (route as any).getMethod("alias-1:whatsapp", "user-1")).toBeUndefined();
+            });
+
+            it("Does not resolve the WhatsApp id of another user's alias.", async () => {
+                const route = makeRoute([phone], configured);
+
+                expect(await (route as any).getMethod("alias-1:whatsapp", "victim-1")).toBeUndefined();
+            });
+
+            it("Does not resolve the WhatsApp id of an unverified phone, an e-mail, or an unknown alias.", async () => {
+                const route = makeRoute([{ ...phone, verified: false }, email], configured);
+
+                expect(await (route as any).getMethod("alias-1:whatsapp", "user-1")).toBeUndefined();
+                expect(await (route as any).getMethod("alias-2:whatsapp", "user-1")).toBeUndefined();
+                expect(await (route as any).getMethod("nope:whatsapp", "user-1")).toBeUndefined();
+            });
+
+            it("Never resolves a secret through a WhatsApp-suffixed id.", async () => {
+                const route = makeRoute([], configured);
+                (route as any).secretRepo.findOne = vi.fn().mockResolvedValue({
+                    uid: "secret-1",
+                    userUid: "user-1",
+                    type: SecretType.TOTP,
+                    data: {},
+                });
+
+                expect(await (route as any).getMethod("secret-1:whatsapp", "user-1")).toBeUndefined();
+                expect((route as any).secretRepo.findOne).not.toHaveBeenCalled();
+            });
+        });
+
+        describe("notifyContact", () => {
+            it("Sends a WhatsApp message when the contact type is WHATSAPP.", async () => {
+                const route = new TestAuthMFARoute();
+                const sendWhatsApp = vi.fn().mockResolvedValue(undefined);
+                const sendSMS = vi.fn();
+                (route as any).messagingUtils = { sendEmail: vi.fn(), sendSMS, sendWhatsApp };
+
+                await (route as any).notifyContact(
+                    { contact: "+15551234567", type: OTPContactType.WHATSAPP },
+                    "123456",
+                );
+
+                expect(sendWhatsApp).toHaveBeenCalledWith("login-otp", { totp: "123456" }, { to: "+15551234567" });
+                expect(sendSMS).not.toHaveBeenCalled();
+            });
+
+            it("Logs, and does not crash the process, when sendWhatsApp rejects.", async () => {
+                const route = new TestAuthMFARoute();
+                const debug = vi.fn();
+                (route as any).messagingUtils = {
+                    sendWhatsApp: vi.fn().mockRejectedValue(new Error("WhatsApp is not configured.")),
+                };
+                (route as any).logger = { debug };
+
+                await (route as any).notifyContact(
+                    { contact: "+15551234567", type: OTPContactType.WHATSAPP },
+                    "123456",
+                );
+                await new Promise((resolve) => setImmediate(resolve));
+
+                expect(debug).toHaveBeenCalledWith(expect.stringContaining("Failed to send verification WhatsApp"));
+            });
+        });
+
+        // End to end through the real MFAStrategy: the method id chosen in the phase 2 challenge decides the
+        // channel, and the code only ever goes to the phone the alias holds.
+        describe("phase 2 challenge", () => {
+            async function challenge(route: TestAuthMFARoute, methodId: string): Promise<void> {
+                const register = vi.fn();
+                (route as any).authMiddleware = { register };
+                (route as any).rateLimiter = { checkAndIncrement: vi.fn() };
+                (route as any)._objectFactory = makeMockObjectFactory(
+                    (route as any).aliasRepo,
+                    (route as any).secretRepo,
+                    (route as any).userRepo,
+                    {},
+                );
+                await (route as any).initialize();
+                const strategy = register.mock.calls[0][1] as MFAStrategy;
+                const req: any = {
+                    headers: {},
+                    body: { id: "user-1", methodId },
+                    session: { userUid: "user-1" },
+                };
+                const res: any = { status: vi.fn().mockReturnThis(), json: vi.fn().mockReturnThis() };
+                await strategy.authenticate(req, res);
+            }
+
+            it("Sends over WhatsApp, and not SMS, for the WhatsApp method id.", async () => {
+                const sendWhatsApp = vi.fn().mockResolvedValue({});
+                const sendSMS = vi.fn().mockResolvedValue({});
+                const route = makeRoute([phone], { ...configured, sendWhatsApp, sendSMS });
+
+                await challenge(route, "alias-1:whatsapp");
+
+                expect(sendWhatsApp).toHaveBeenCalledWith("login-otp", { totp: expect.any(String) }, { to: "+15551234567" });
+                expect(sendSMS).not.toHaveBeenCalled();
+            });
+
+            it("Sends over SMS, and not WhatsApp, for the plain alias id.", async () => {
+                const sendWhatsApp = vi.fn().mockResolvedValue({});
+                const sendSMS = vi.fn().mockResolvedValue({});
+                const route = makeRoute([phone], { ...configured, sendWhatsApp, sendSMS });
+
+                await challenge(route, "alias-1");
+
+                expect(sendSMS).toHaveBeenCalledWith("login-otp", { totp: expect.any(String) }, { to: "+15551234567" });
+                expect(sendWhatsApp).not.toHaveBeenCalled();
+            });
+
+            it("Rejects the WhatsApp method id once WhatsApp stops being configured.", async () => {
+                const sendWhatsApp = vi.fn();
+                const route = makeRoute([phone], { isWhatsAppConfigured: () => false, sendWhatsApp });
+
+                await expect(challenge(route, "alias-1:whatsapp")).rejects.toThrow(/Invalid secondary authentication method/);
+                expect(sendWhatsApp).not.toHaveBeenCalled();
+            });
+        });
+    });
+
     describe("getUser", () => {
         it("Throws if userUtils is not set.", async () => {
             const route = new TestAuthMFARoute();

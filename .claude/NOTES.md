@@ -66,7 +66,32 @@ Keep entries terse — this is a reference, not a transcript.
 
 ## Session Log
 
-### 2026-09-10 (latest) — Client-side pre-hashed (Argon2id) password support, dual-mode
+### 2026-09-21 (latest) — WhatsApp as an OTP delivery channel for verified phones
+
+Requested by JP for the auth-server (uses `@rapidrest/core` 6.x `MessagingUtils.sendWhatsApp()`). Decisions:
+
+- **Only offered when configured, decided in one place**: `isWhatsAppConfigured(messagingUtils)` in `shared.ts` —
+  the messaging utils' optional `isWhatsAppConfigured(): boolean | Promise<boolean>` hook (authoritative, re-checked
+  every call, a throwing hook == false), else core's private `whatsapp` field (`(mu as any).whatsapp`, truthy once
+  `init()` accepted the config). Four routes call it; nothing is copy-pasted or cached.
+- **Existing SMS/e-mail entries, ids and shapes are untouched** — WhatsApp is always an *extra* entry after the phone's
+  SMS one. MFA/Elevation method id is `<alias uid>:whatsapp` (`toWhatsAppMethodId`/`parseWhatsAppMethodId`); `getMethod()`
+  resolves it *before* the secret/alias lookups (a secret is never reachable through a suffixed id), re-checks
+  configured + ownership + verified + phone, and builds `data.contact` from the alias itself, so the code can only
+  ever go to that user's listed phone. The MFA/elevation challenge phase is what sends (`method.data` -> `notifyContact`);
+  the verify phase only checks the code, so no channel is re-resolved there.
+- **OTP sign-in**: optional `channel: "whatsapp"` beside `id` in the challenge request, forwarded as a new optional
+  2nd arg of `OTPStrategyOptions.getContact(id, channel?)`; any other value keeps the default channel. Unverified /
+  non-phone / not-configured => `undefined` => the same silent 200 as an unknown contact (anti-enumeration).
+- **`BaseAuthDiscoverRoute`** hint shape: extra `{contact, type: "phone", channel: "whatsapp"}` (not a new `type`), so
+  an old client's `type`-keyed label lookup keeps working; it now injects `MessagingUtils`.
+- **Left as-is on purpose**: `BaseAliasRoute`/`BaseProfileRoute`/`BaseRegistrationRoute` verification and registration
+  codes stay e-mail/SMS — they have no request-side channel choice, target *unverified* contacts, and would need their own
+  template fields; not trivial/safe to bolt on.
+- `peerDependencies["@rapidrest/core"]` still says `5.x` (the devDependency is 6.x); `sendWhatsApp` needs 6.x. Not
+  changed here (package.json is the release process's to touch) — flagged to JP.
+
+### 2026-09-10 — Client-side pre-hashed (Argon2id) password support, dual-mode
 
 JP wants clients capable of it to hash a password locally (Argon2id) before ever sending it, so the
 real password never reaches the server — while still supporting incapable clients sending plaintext,

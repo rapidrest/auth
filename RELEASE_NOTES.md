@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+* Added WhatsApp as a one-time code (OTP) delivery channel for verified phone contacts, alongside SMS. It is sent through
+  `MessagingUtils.sendWhatsApp()` (`@rapidrest/core` 6.x) and only offered while WhatsApp is configured: the
+  `MessagingUtils` instance's optional `isWhatsAppConfigured(): boolean | Promise<boolean>` hook decides when it has
+  one, otherwise core's own `whatsapp` config being accepted by `init()`. Existing SMS/e-mail entries are unchanged.
+  * Added `OTPContactType.WHATSAPP`; `obfuscateContact()` masks it like SMS.
+  * `BaseAuthDiscoverRoute` lists an extra hint with `channel: "whatsapp"` for each verified phone. The route now
+    injects `MessagingUtils`.
+  * `BaseAuthOTPRoute` and `OTPStrategy` accept an optional `channel` (`"whatsapp"`) in the challenge request, passed
+    as a new optional second argument of `getContact(id, channel?)`; `getContacts()` also lists a WhatsApp contact for
+    each verified phone.
+  * `BaseAuthMFARoute` and `BaseAuthElevationRoute` list a WhatsApp method with id `<alias uid>:whatsapp` after a
+    verified phone's SMS method (whose id is unchanged), and resolve that id in `getMethod()`.
+  * Added the `isWhatsAppConfigured()`, `toWhatsAppMethodId()` and `parseWhatsAppMethodId()` helpers.
+  * Contact verification and registration codes are unchanged (e-mail/SMS only).
+
 ## v2.0.0-beta.10
 
 ## v2.0.0-beta.9

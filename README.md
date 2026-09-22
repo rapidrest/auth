@@ -6,7 +6,7 @@
 
 A library for implementing a complete authentication server with [RapidREST](https://rapidrest.dev). It
 provides the data models, persistence adapters, and HTTP routes needed to register and authenticate users via
-password, TOTP, OTP (email/SMS), WebAuthn passkeys, FIDO2 hardware security keys, multi-factor authentication, and
+password, TOTP, OTP (email/SMS/WhatsApp), WebAuthn passkeys, FIDO2 hardware security keys, multi-factor authentication, and
 OpenID Connect / OAuth 2.0. Using this library you can stand up a fully featured authorization server by writing
 configuration and a handful of one-line route classes.
 
@@ -20,7 +20,7 @@ For complete documentation please visit [RapidREST.dev](https://rapidrest.dev).
 * `FIDO2Strategy` - FIDO2/WebAuthn hardware based authentication (e.g. YubiKey)
 * `MFAStrategy` - Simple id and password + 2FA authentication [fido2|otp|recovery-code|totp]
 * `OIDCStrategy` - OAuth 2.0 & OpenID Connect authentication
-* `OTPStrategy` - One-Time Password (OTP) authentication (e.g. email, sms)
+* `OTPStrategy` - One-Time Password (OTP) authentication (e.g. email, sms, whatsapp)
 * `PasskeyStrategy` - WebAuthn based passkey authentication
 * `TOTPStrategy` - RFC 6238 Time-Based One Time Password authentication (e.g. Google Authenticator, etc.)
 
@@ -77,6 +77,22 @@ with either `Mongo` or `SQL` at the end of the name (e.g. `BaseAliasRoute` becom
 * `BaseAuthLogoutRoute` - Clears the authentication cookie, if cookie-based token issuance is enabled
 * `BaseAuthRefreshRoute` - Issues a new access token from a valid refresh token
 * `BaseRegistrationRoute` - Self-service account registration via OTP-verified email or phone
+
+#### WhatsApp one-time codes
+
+A verified phone can receive its sign-in (`BaseAuthOTPRoute`), second-factor (`BaseAuthMFARoute`) and elevation
+(`BaseAuthElevationRoute`) one-time codes over WhatsApp as well as SMS, sent through `MessagingUtils.sendWhatsApp()`
+from `@rapidrest/core` 6.x using the same `login-otp` template (give it a `whatsapp`/`whatsapp_template`). WhatsApp is
+only offered while it is configured, and existing SMS/e-mail entries are unchanged:
+
+* Configured means the `MessagingUtils` instance's optional `isWhatsAppConfigured(): boolean | Promise<boolean>` hook
+  returns `true` - checked on every request, so a subclass whose WhatsApp settings change at runtime stays current - or,
+  when it has no such hook, that core's own `whatsapp` config was accepted by `init()`. See `isWhatsAppConfigured()`.
+* `BaseAuthDiscoverRoute` adds a hint with `channel: "whatsapp"` after each verified phone's hint, and
+  `BaseAuthOTPRoute` accepts an optional `channel: "whatsapp"` beside `id` in the challenge request to use it.
+* `BaseAuthMFARoute` and `BaseAuthElevationRoute` add a method with id `<alias uid>:whatsapp` (data type `whatsapp`) after
+  the phone's SMS method, whose id stays the plain alias uid.
+* Contact verification (`BaseAliasRoute`, `BaseProfileRoute`) and registration codes remain e-mail/SMS only.
 
 ## Installation
 

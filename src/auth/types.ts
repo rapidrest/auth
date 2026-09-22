@@ -9,6 +9,11 @@
 export enum OTPContactType {
     EMAIL = "email",
     SMS = "sms",
+    /**
+     * A one-time code delivered over WhatsApp to a verified phone number. Only ever offered when WhatsApp is
+     * configured on the messaging service - see `isWhatsAppConfigured()`.
+     */
+    WHATSAPP = "whatsapp",
 }
 
 /**
@@ -17,7 +22,7 @@ export enum OTPContactType {
 export interface OTPContact {
     /** The contact that the OTP can be sent to. */
     contact: string;
-    /** The method type of contact (e.g. email, sms). */
+    /** The method type of contact (e.g. email, sms, whatsapp). */
     type: OTPContactType;
     /** Indicates if the contact has been verified. */
     verified?: boolean;

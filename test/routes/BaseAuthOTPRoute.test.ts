@@ -147,6 +147,64 @@ describe("BaseAuthOTPRoute Tests", () => {
             expect(result).toBeUndefined();
             expect(findOne).not.toHaveBeenCalled();
         });
+
+        describe("with a requested channel", () => {
+            const phone = { alias: "+15551234567", type: AliasType.PHONE, verified: true };
+
+            function makeRoute(alias: any, messagingUtils: any): TestAuthOTPRoute {
+                const route = new TestAuthOTPRoute();
+                (route as any).aliasRepo = { findOne: vi.fn().mockResolvedValue(alias) };
+                (route as any).messagingUtils = messagingUtils;
+                return route;
+            }
+
+            it("Returns a WhatsApp contact for a verified phone when the hook says WhatsApp is configured.", async () => {
+                const route = makeRoute(phone, { isWhatsAppConfigured: vi.fn().mockResolvedValue(true) });
+
+                const result = await (route as any).getContact("alias-1", "whatsapp");
+
+                expect(result).toEqual({ contact: "+15551234567", type: OTPContactType.WHATSAPP, verified: true });
+            });
+
+            it("Returns a WhatsApp contact when there is no hook but core's own whatsapp field is truthy.", async () => {
+                const route = makeRoute(phone, { whatsapp: { accessToken: "t", phoneNumberId: "1" } });
+
+                const result = await (route as any).getContact("alias-1", "whatsapp");
+
+                expect(result?.type).toBe(OTPContactType.WHATSAPP);
+            });
+
+            it("Returns undefined (nothing is sent) when WhatsApp is not configured.", async () => {
+                for (const messagingUtils of [undefined, {}, { isWhatsAppConfigured: () => false }]) {
+                    const result = await (makeRoute(phone, messagingUtils) as any).getContact("alias-1", "whatsapp");
+                    expect(result).toBeUndefined();
+                }
+            });
+
+            it("Returns undefined for an unverified phone.", async () => {
+                const route = makeRoute({ ...phone, verified: false }, { isWhatsAppConfigured: () => true });
+
+                expect(await (route as any).getContact("alias-1", "whatsapp")).toBeUndefined();
+            });
+
+            it("Returns undefined for an e-mail alias.", async () => {
+                const route = makeRoute(
+                    { alias: "user@example.com", type: AliasType.EMAIL, verified: true },
+                    { isWhatsAppConfigured: () => true },
+                );
+
+                expect(await (route as any).getContact("alias-1", "whatsapp")).toBeUndefined();
+            });
+
+            it("Keeps the default SMS channel when no channel, or any other channel, is requested.", async () => {
+                const route = makeRoute(phone, { isWhatsAppConfigured: () => true });
+
+                for (const channel of [undefined, "sms", "bogus"]) {
+                    const result = await (route as any).getContact("alias-1", channel);
+                    expect(result).toEqual({ contact: "+15551234567", type: OTPContactType.SMS, verified: true });
+                }
+            });
+        });
     });
 
     describe("getContacts", () => {
@@ -262,6 +320,54 @@ describe("BaseAuthOTPRoute Tests", () => {
         });
     });
 
+    describe("getContacts (WhatsApp)", () => {
+        const email = { alias: "user@example.com", type: AliasType.EMAIL, verified: true };
+        const phone = { alias: "+15551234567", type: AliasType.PHONE, verified: true };
+
+        function makeRoute(aliases: any[], messagingUtils: any): TestAuthOTPRoute {
+            const route = new TestAuthOTPRoute();
+            (route as any).userRepo = { findOne: vi.fn().mockResolvedValue({ uid: "user-1" }) };
+            (route as any).aliasRepo = { find: vi.fn().mockResolvedValue(aliases) };
+            (route as any).messagingUtils = messagingUtils;
+            return route;
+        }
+
+        it("Lists a WhatsApp contact after each verified phone's SMS one when configured.", async () => {
+            const route = makeRoute([email, phone], { isWhatsAppConfigured: vi.fn().mockResolvedValue(true) });
+
+            const result = await (route as any).getContacts("user-1");
+
+            expect(result).toEqual([
+                { contact: "user@example.com", type: OTPContactType.EMAIL, verified: true },
+                { contact: "+15551234567", type: OTPContactType.SMS, verified: true },
+                { contact: "+15551234567", type: OTPContactType.WHATSAPP, verified: true },
+            ]);
+        });
+
+        it("Lists it when there is no hook but core's own whatsapp field is truthy.", async () => {
+            const route = makeRoute([phone], { whatsapp: { accessToken: "t", phoneNumberId: "1" } });
+
+            const result = await (route as any).getContacts("user-1");
+
+            expect(result.map((c: any) => c.type)).toEqual([OTPContactType.SMS, OTPContactType.WHATSAPP]);
+        });
+
+        it("Leaves the SMS/e-mail contacts unchanged when WhatsApp is not configured.", async () => {
+            for (const messagingUtils of [undefined, {}, { isWhatsAppConfigured: () => false }]) {
+                const result = await (makeRoute([email, phone], messagingUtils) as any).getContacts("user-1");
+                expect(result.map((c: any) => c.type)).toEqual([OTPContactType.EMAIL, OTPContactType.SMS]);
+            }
+        });
+
+        it("Does not list WhatsApp for an unverified phone.", async () => {
+            const route = makeRoute([{ ...phone, verified: false }], { isWhatsAppConfigured: () => true });
+
+            const result = await (route as any).getContacts("user-1");
+
+            expect(result.map((c: any) => c.type)).toEqual([OTPContactType.SMS]);
+        });
+    });
+
     describe("getUser", () => {
         it("Throws if userUtils is not set.", async () => {
             const route = new TestAuthOTPRoute();
@@ -299,6 +405,33 @@ describe("BaseAuthOTPRoute Tests", () => {
             await (route as any).notifyContact({ contact: "+15551234567", type: OTPContactType.SMS }, "123456");
 
             expect(sendSMS).toHaveBeenCalledWith("login-otp", { totp: "123456" }, { to: "+15551234567" });
+        });
+
+        it("Sends a WhatsApp message when the contact type is WHATSAPP.", async () => {
+            const route = new TestAuthOTPRoute();
+            const sendWhatsApp = vi.fn().mockResolvedValue(undefined);
+            const sendSMS = vi.fn().mockResolvedValue(undefined);
+            (route as any).messagingUtils = { sendEmail: vi.fn(), sendSMS, sendWhatsApp };
+
+            await (route as any).notifyContact({ contact: "+15551234567", type: OTPContactType.WHATSAPP }, "123456");
+
+            expect(sendWhatsApp).toHaveBeenCalledWith("login-otp", { totp: "123456" }, { to: "+15551234567" });
+            expect(sendSMS).not.toHaveBeenCalled();
+        });
+
+        it("Logs, and does not crash the process, when sendWhatsApp rejects.", async () => {
+            const route = new TestAuthOTPRoute();
+            const debug = vi.fn();
+            (route as any).messagingUtils = {
+                sendWhatsApp: vi.fn().mockRejectedValue(new Error("WhatsApp is not configured.")),
+            };
+            (route as any).logger = { debug };
+
+            await (route as any).notifyContact({ contact: "+15551234567", type: OTPContactType.WHATSAPP }, "123456");
+            // Flush the rejected .catch() microtask registered inside notifyContact.
+            await new Promise((resolve) => setImmediate(resolve));
+
+            expect(debug).toHaveBeenCalledWith(expect.stringContaining("Failed to send verification WhatsApp"));
         });
 
         it("Does nothing (and does not throw) when messagingUtils is unset.", async () => {

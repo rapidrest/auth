@@ -41,8 +41,11 @@ import {
     isPasskeyRegistrationResponse,
     isPasskeyResponse,
     isValidTOTPSecret,
+    isWhatsAppConfigured,
     normalizePasswordSubmission,
     obfuscateContact,
+    parseWhatsAppMethodId,
+    toWhatsAppMethodId,
     verifyDummyPassword,
     verifyDummyTOTP,
     verifyOTP,
@@ -402,8 +405,81 @@ describe("obfuscateContact", () => {
         expect(obfuscateContact("8188675309", OTPContactType.SMS)).toBe("******5309");
     });
 
+    it("Obfuscates a WhatsApp number like an SMS one.", () => {
+        expect(obfuscateContact("8188675309", OTPContactType.WHATSAPP)).toBe("******5309");
+    });
+
     it("Returns the contact unchanged for an unrecognized type.", () => {
         expect(obfuscateContact("some-value", "bogus" as OTPContactType)).toBe("some-value");
+    });
+});
+
+describe("isWhatsAppConfigured", () => {
+    it("Is false when there is no messaging utils.", async () => {
+        expect(await isWhatsAppConfigured(undefined)).toBe(false);
+    });
+
+    it("Uses the isWhatsAppConfigured() hook when present, awaiting an async result.", async () => {
+        expect(await isWhatsAppConfigured({ isWhatsAppConfigured: () => true } as any)).toBe(true);
+        expect(await isWhatsAppConfigured({ isWhatsAppConfigured: async () => true } as any)).toBe(true);
+        expect(await isWhatsAppConfigured({ isWhatsAppConfigured: () => false } as any)).toBe(false);
+        expect(await isWhatsAppConfigured({ isWhatsAppConfigured: async () => false } as any)).toBe(false);
+    });
+
+    it("Calls the hook on the messaging utils itself and re-checks it on every call (runtime changes are seen).", async () => {
+        let configured = false;
+        const messagingUtils: any = {
+            isWhatsAppConfigured() {
+                return this === messagingUtils && configured;
+            },
+        };
+
+        expect(await isWhatsAppConfigured(messagingUtils)).toBe(false);
+        configured = true;
+        expect(await isWhatsAppConfigured(messagingUtils)).toBe(true);
+    });
+
+    it("Treats a hook's answer as authoritative over core's own whatsapp field.", async () => {
+        const hookFalse: any = { isWhatsAppConfigured: () => false, whatsapp: { accessToken: "t" } };
+        const hookTrue: any = { isWhatsAppConfigured: () => true };
+
+        expect(await isWhatsAppConfigured(hookFalse)).toBe(false);
+        expect(await isWhatsAppConfigured(hookTrue)).toBe(true);
+    });
+
+    it("Treats a hook that throws or rejects as not configured.", async () => {
+        const throws: any = {
+            isWhatsAppConfigured: () => {
+                throw new Error("boom");
+            },
+        };
+        const rejects: any = { isWhatsAppConfigured: () => Promise.reject(new Error("boom")) };
+
+        expect(await isWhatsAppConfigured(throws)).toBe(false);
+        expect(await isWhatsAppConfigured(rejects)).toBe(false);
+    });
+
+    it("Falls back to core's private whatsapp field when there is no hook.", async () => {
+        expect(await isWhatsAppConfigured({ whatsapp: { accessToken: "t", phoneNumberId: "1" } } as any)).toBe(true);
+        expect(await isWhatsAppConfigured({ whatsapp: undefined } as any)).toBe(false);
+        expect(await isWhatsAppConfigured({} as any)).toBe(false);
+    });
+});
+
+describe("WhatsApp method ids", () => {
+    it("Derives a distinct id from the alias uid.", () => {
+        expect(toWhatsAppMethodId("alias-1")).toBe("alias-1:whatsapp");
+        expect(toWhatsAppMethodId("alias-1")).not.toBe("alias-1");
+    });
+
+    it("Round-trips through parseWhatsAppMethodId().", () => {
+        expect(parseWhatsAppMethodId(toWhatsAppMethodId("alias-1"))).toBe("alias-1");
+    });
+
+    it("Returns undefined for an id that is not a WhatsApp method id, including the bare suffix.", () => {
+        expect(parseWhatsAppMethodId("alias-1")).toBeUndefined();
+        expect(parseWhatsAppMethodId(":whatsapp")).toBeUndefined();
+        expect(parseWhatsAppMethodId("")).toBeUndefined();
     });
 });
 

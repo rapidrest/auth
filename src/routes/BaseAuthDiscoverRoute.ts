@@ -2,10 +2,10 @@
 // Copyright (C) 2026 Jean-Philippe Steinmetz
 // SPDX-License-Identifier: MPL-2.0
 ///////////////////////////////////////////////////////////////////////////////
-import { ObjectDecorators } from "@rapidrest/core";
+import { MessagingUtils, ObjectDecorators } from "@rapidrest/core";
 import { RouteDecorators, DocDecorators, HttpRequest, RepoUtils, ObjectFactory, RateLimiter } from "@rapidrest/service-core";
 import { Alias, AliasType, Secret, SecretType, User } from "../models/types.js";
-import { obfuscateContact } from "../auth/shared.js";
+import { isWhatsAppConfigured, obfuscateContact } from "../auth/shared.js";
 import { OTPContactType } from "../auth/types.js";
 import { UserUtils } from "./UserUtils.js";
 
@@ -18,6 +18,13 @@ export interface DiscoveredOtpContact {
     /** The contact, obfuscated (e.g. `j***n@example.com`, `***1234`) — never the real value. */
     contact: string;
     type: "email" | "phone";
+    /**
+     * Set to `"whatsapp"` on the extra hint listed for a verified phone contact when its code can also be
+     * delivered over WhatsApp (only while WhatsApp is configured). Absent on every other hint - a hint with no
+     * `channel` is delivered over the contact type's default channel (e-mail or SMS), exactly as before. Pass
+     * the same value as `channel` to `BaseAuthOTPRoute` to have the code sent over that channel.
+     */
+    channel?: "whatsapp";
 }
 
 /** The set of sign-in methods available for a claimed account identifier. */
@@ -56,6 +63,12 @@ export abstract class BaseAuthDiscoverRoute<U extends User, A extends Alias, S e
 
     protected aliasRepo?: RepoUtils<A>;
     protected secretRepo?: RepoUtils<S>;
+
+    /**
+     * Consulted only to learn whether WhatsApp is configured - see `isWhatsAppConfigured()`.
+     */
+    @Inject(MessagingUtils)
+    protected messagingUtils?: MessagingUtils;
 
     @Inject(RateLimiter)
     protected rateLimiter?: RateLimiter;
@@ -134,12 +147,23 @@ export abstract class BaseAuthDiscoverRoute<U extends User, A extends Alias, S e
                 this.aliasRepo?.find({ userUid: user.uid, verified: true }, { ignoreACL: true }) ?? Promise.resolve([]),
             ]);
 
-            const otp: DiscoveredOtpContact[] = verifiedAliases
-                .filter((a) => a.type === AliasType.EMAIL || a.type === AliasType.PHONE)
-                .map((a) => ({
+            const whatsApp: boolean = await isWhatsAppConfigured(this.messagingUtils);
+            const otp: DiscoveredOtpContact[] = [];
+            for (const a of verifiedAliases.filter((a) => a.type === AliasType.EMAIL || a.type === AliasType.PHONE)) {
+                otp.push({
                     contact: obfuscateContact(a.alias, this.convertAliasType(a.type)),
                     type: a.type as "email" | "phone",
-                }));
+                });
+                // A verified phone can also receive its code over WhatsApp. Listed as its own hint right after
+                // the phone's SMS one, which stays exactly as it was.
+                if (whatsApp && a.type === AliasType.PHONE) {
+                    otp.push({
+                        contact: obfuscateContact(a.alias, OTPContactType.WHATSAPP),
+                        type: "phone",
+                        channel: "whatsapp",
+                    });
+                }
+            }
 
             return { password, totp, passkey, fido2, otp };
         } catch {

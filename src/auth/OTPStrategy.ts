@@ -34,8 +34,12 @@ export class OTPStrategyOptions {
      * Retrieves the user's contact information for a given id.
      * NOTE: You must override this function when using this strategy.
      * @param id The unique id of the contact to retrieve.
+     * @param channel The delivery channel the client asked for in the challenge request's optional `channel`
+     * field (e.g. `"whatsapp"`), if any. An implementation must only honor a channel that is actually
+     * available for the contact, and return `undefined` (which sends nothing) or the contact's default channel
+     * otherwise - never a channel/contact other than the one requested for `id`.
      */
-    public getContact(id: string): Promise<OTPContact | undefined> {
+    public getContact(id: string, channel?: string): Promise<OTPContact | undefined> {
         throw new Error("Did you forget to override OTPStrategyOptions.getContact?");
     }
     /**
@@ -78,14 +82,15 @@ export class OTPStrategyOptions {
  *
  * 1. Discovery - The client requests a list of contacts for a given user id. The `getContacts()` callback is used to
  * return the list of contacts.
- * 2. Challenge - The client requests a OTP token to be sent to the contact with a specified id. The
+ * 2. Challenge - The client requests a OTP token to be sent to the contact with a specified id, optionally naming
+ * the delivery `channel` (e.g. `whatsapp`) when the contact supports more than one. The
  * OTP token is generated and sent to the contact using the `notify()` callback and stored in the session.
  * 3. Verify - The client submits the OTP token and contact id. The OTP token is verified against the one stored in the
  * session, and the associated user is resolved using the `getUser()` callback.
  *
  * The client sends request data either in the `Authorization` header or the request body in standard form-data format
  * (e.g. `id=<id>&token=<otp>`). For example, the initial challenge request (step 2) can be sent as
- * `Authorization: otp id=<contact_id>`. The final verification request (step 3) is then sent as
+ * `Authorization: otp id=<contact_id>` (or `id=<contact_id>&channel=whatsapp`). The final verification request (step 3) is then sent as
  * `Authorization: otp id=<contact_id>&token=<otp>`.
  *
  * WARNING: Allowing discovery (setting `OTPStrategyOptions.allowDiscovery` to `true`) is a potential side-channel
@@ -171,7 +176,10 @@ export class OTPStrategy implements AuthStrategy {
             await this.options.checkRateLimit(payload.id, req);
         }
 
-        const contact: OTPContact | undefined = await this.options.getContact(payload.id);
+        const contact: OTPContact | undefined = await this.options.getContact(
+            payload.id,
+            typeof payload.channel === "string" ? payload.channel : undefined,
+        );
         if (contact) {
             const token: string = await generateOTP(req, payload);
             await this.options.notifyContact(contact, token);
