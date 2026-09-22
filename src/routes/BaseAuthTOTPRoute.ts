@@ -187,11 +187,15 @@ export abstract class BaseAuthTOTPRoute<U extends User, A extends Alias, S exten
                 throw new ApiError(ApiErrors.AUTH_FAILED, 401, "This code has already been used.");
             }
             totpData.lastTimeStep = timeStep;
+            // lastUsedAt is merged into this same write rather than touched via a separate
+            // touchSecretLastUsedAt() call - a second independent write here would race this one on
+            // `version` (see touchSecretLastUsedAt()'s own doc comment).
             await this.secretRepo.update(
                 {
                     uid: secret.uid,
                     version: secret.version,
                     data: secret.data,
+                    lastUsedAt: new Date().toISOString(),
                 } as S,
                 secret,
                 { ignoreACL: true, recordEvent: false },

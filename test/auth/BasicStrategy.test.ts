@@ -59,7 +59,7 @@ describe("BasicStrategy Tests", () => {
 
             const result = await strategy.authenticate(req, makeRes());
 
-            expect(options.verify).toHaveBeenCalledWith("user-uid-1", "secret");
+            expect(options.verify).toHaveBeenCalledWith("user-uid-1", "secret", req);
             expect(result).toEqual({
                 data: { id: "user-uid-1", password: "secret" },
                 method: "basic",

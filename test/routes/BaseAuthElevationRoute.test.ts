@@ -1402,7 +1402,7 @@ describe("BaseAuthElevationRoute Tests", () => {
 
             expect(secret.data.counter).toBe(5);
             expect(update).toHaveBeenCalledWith(
-                { uid: "secret-1", version: 1, data: secret.data },
+                { uid: "secret-1", version: 1, data: secret.data, lastUsedAt: expect.any(String) },
                 secret,
                 { ignoreACL: true, recordEvent: false },
             );
@@ -1586,6 +1586,48 @@ describe("BaseAuthElevationRoute Tests", () => {
             await expect((route as any).verify("user1", "correct-password")).rejects.toThrow(
                 /must be of type string/,
             );
+        });
+
+        it("Touches only the matched password secret's lastUsedAt on success.", async () => {
+            const route = new TestAuthElevationRoute();
+            const argon2 = await import("argon2");
+            const shared = await import("../../src/auth/shared.js");
+            const config = new (await import("../../src/auth/types.js")).PasswordConfig();
+            const touchSpy = vi.spyOn(shared, "touchSecretLastUsedAt").mockResolvedValue(undefined);
+            const secretRepo = {
+                find: vi.fn().mockResolvedValue([
+                    { uid: "pw-1", data: await argon2.hash(await shared.normalizePasswordSubmission("another-password", "user-uid-1", config)) },
+                    { uid: "pw-2", data: await argon2.hash(await shared.normalizePasswordSubmission("correct-password", "user-uid-1", config)) },
+                ]),
+            };
+            (route as any).secretRepo = secretRepo;
+            (route as any).logger = { debug: vi.fn() };
+            (route as any).userUtils = { lookup: vi.fn().mockResolvedValue({ uid: "user-uid-1" }) };
+
+            const user = await (route as any).verify("user1", "correct-password");
+
+            expect(user).toEqual({ uid: "user-uid-1" });
+            // Only the matched secret (pw-2) is touched - not pw-1, which never matched.
+            expect(touchSpy).toHaveBeenCalledTimes(1);
+            expect(touchSpy).toHaveBeenCalledWith(secretRepo, "pw-2", (route as any).logger);
+        });
+
+        it("Still resolves the user on a matched password even when touchSecretLastUsedAt() itself rejects.", async () => {
+            const route = new TestAuthElevationRoute();
+            const argon2 = await import("argon2");
+            const shared = await import("../../src/auth/shared.js");
+            const config = new (await import("../../src/auth/types.js")).PasswordConfig();
+            vi.spyOn(shared, "touchSecretLastUsedAt").mockRejectedValue(new Error("datastore unavailable"));
+            (route as any).secretRepo = {
+                find: vi.fn().mockResolvedValue([
+                    { uid: "pw-1", data: await argon2.hash(await shared.normalizePasswordSubmission("correct-password", "user-uid-1", config)) },
+                ]),
+            };
+            (route as any).userUtils = { lookup: vi.fn().mockResolvedValue({ uid: "user-uid-1" }) };
+
+            const user = await (route as any).verify("user1", "correct-password");
+
+            expect(user).toEqual({ uid: "user-uid-1" });
         });
     });
 });

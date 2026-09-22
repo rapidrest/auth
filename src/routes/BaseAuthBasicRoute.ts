@@ -2,11 +2,12 @@
 // Copyright (C) 2026 Jean-Philippe Steinmetz
 // SPDX-License-Identifier: MPL-2.0
 ///////////////////////////////////////////////////////////////////////////////
-import { JWTUser, ObjectDecorators } from "@rapidrest/core";
+import { EventUtils, JWTUser, ObjectDecorators } from "@rapidrest/core";
 import {
     RouteDecorators,
     DocDecorators,
     HttpResponse,
+    NetUtils,
     RepoUtils,
     AuthMiddleware,
     ObjectFactory,
@@ -15,7 +16,14 @@ import {
 } from "@rapidrest/service-core";
 import { Alias, AuthResult, Secret, SecretType, User } from "../models/types.js";
 import { BasicStrategy, BasicStrategyOptions } from "../auth/BasicStrategy.js";
-import { importArgon2, normalizePasswordSubmission, verifyDummyPassword, WeakClientHashError } from "../auth/shared.js";
+import { AuthEventType } from "../auth/events.js";
+import {
+    importArgon2,
+    normalizePasswordSubmission,
+    touchSecretLastUsedAt,
+    verifyDummyPassword,
+    WeakClientHashError,
+} from "../auth/shared.js";
 import { PasswordConfig } from "../auth/types.js";
 import { TokenUtils } from "../auth/TokenUtils.js";
 import { UserUtils } from "./UserUtils.js";
@@ -26,7 +34,17 @@ const { Auth, Get, Request, Response } = RouteDecorators;
 const AuthUser = RouteDecorators.User;
 
 /**
+ * Authenticates a user via HTTP Basic (RFC 7617) against their stored `password`/`app-password` secrets.
+ * This is the route a downstream service with no interactive UI - e.g. a mail server validating a legacy
+ * mail client's credentials against this authorization server - would call.
  *
+ * An account with `requireMFA` set cannot complete a real password login here (Basic auth has no way to
+ * prompt for a second factor), UNLESS the submitted value matches one of the account's own `app-password`
+ * secrets (see `SecretType.APP_PASSWORD`, `BaseSecretRoute.validateAppPasswordCreate()`). That bypass is
+ * the entire point of app passwords: a standing, individually-revocable, high-entropy credential the user
+ * explicitly creates for one Basic-auth-only client that can't do MFA, so enabling that one client doesn't
+ * require disabling MFA for the account as a whole. A real password remains subject to `requireMFA` here
+ * exactly as before - the bypass only ever applies to an `app-password` secret.
  *
  * @author Jean-Philippe Steinmetz
  */
@@ -37,6 +55,17 @@ export abstract class BaseAuthBasicRoute<U extends User, S extends Secret, A ext
 
     // Automatically injected by ObjectFactory on instantiation
     private _objectFactory?: ObjectFactory;
+
+    /**
+     * Set to `false` to disable the `app-password` bypass below deployment-wide. An already-created app
+     * password stops authenticating (falling through to the normal `requireMFA`/password checks, which
+     * then reject it since it isn't a `password`-type secret) but is not deleted - re-enabling this
+     * restores it exactly as it was. See `BaseSecretRoute.appPasswordEnabled`, which independently gates
+     * *creating* new app passwords - the two are meant to be kept in sync, but this route reads its own
+     * copy of the config so authentication doesn't depend on `BaseSecretRoute` being mounted.
+     */
+    @Config("auth:app_password:enabled", true)
+    protected appPasswordEnabled: boolean = true;
 
     @Inject(AuthMiddleware)
     protected authMiddleware?: AuthMiddleware;
@@ -57,6 +86,9 @@ export abstract class BaseAuthBasicRoute<U extends User, S extends Secret, A ext
 
     @Inject(TokenUtils)
     protected tokenUtils?: TokenUtils;
+
+    @Config("trusted_proxies", [])
+    protected trustedProxies: string[] = [];
 
     protected userUtils?: UserUtils<U, A>;
 
@@ -89,7 +121,7 @@ export abstract class BaseAuthBasicRoute<U extends User, S extends Secret, A ext
         const options: BasicStrategyOptions = new BasicStrategyOptions();
         options.checkRateLimit = (identifier: string, req: HttpRequest) =>
             this.rateLimiter!.checkAndIncrement(identifier, undefined, req);
-        options.verify = async (name: string, password: string): Promise<JWTUser | undefined> => {
+        options.verify = async (name: string, password: string, req?: HttpRequest): Promise<JWTUser | undefined> => {
             if (!this.secretRepo) {
                 throw new Error("Secret repository not set.");
             }
@@ -108,10 +140,54 @@ export abstract class BaseAuthBasicRoute<U extends User, S extends Secret, A ext
                 throw new Error("Invalid name or password");
             }
 
-            // If MFA is required on this account, this auth route cannot be used. Automatically reject.
-            // Shares the same generic message and dummy-Argon2 timing delay as every other rejection path
-            // in this function - a distinct "requires MFA" message would let an attacker enumerate valid
-            // usernames (and which ones have MFA enabled) purely from the error text.
+            // An app password (see SecretType.APP_PASSWORD) intentionally bypasses the requireMFA gate
+            // right below - that bypass is the entire point of the feature: a legacy Basic-auth client
+            // (e.g. a downstream mail server validating credentials) can't complete an MFA challenge, so a
+            // user creates a distinct, individually-revocable, high-entropy credential scoped to exactly
+            // this one bypass rather than disabling MFA for the account as a whole. Checked here, before
+            // requireMFA, so a match returns immediately regardless of that flag. Verified with a plain
+            // argon2 comparison - never normalizePasswordSubmission() - since an app password is always
+            // pasted as literal plaintext by a legacy client; there's no client-hashing concept for it.
+            if (this.appPasswordEnabled) {
+                const appPasswordSecrets: Secret[] = await this.secretRepo.find(
+                    { userUid: user.uid, type: SecretType.APP_PASSWORD },
+                    { ignoreACL: true },
+                );
+
+                if (appPasswordSecrets.length === 0) {
+                    // No app password to check against - burn the same amount of time as a real
+                    // verification so this case isn't distinguishable via timing from a wrong app
+                    // password. No userUid/config passed - app passwords have no client-hashing concept
+                    // to equalize against (see verifyDummyPassword()'s own doc comment).
+                    await verifyDummyPassword(password);
+                } else {
+                    const argon = await importArgon2();
+                    for (const secret of appPasswordSecrets) {
+                        if (await argon.verify(secret.data, password)) {
+                            touchSecretLastUsedAt(this.secretRepo, secret.uid).catch(() => undefined);
+                            // The single most security-relevant new signal this feature adds: a match here
+                            // means requireMFA was just bypassed for this login. Fired in addition to the
+                            // generic SESSION_CREATED that fires later via TokenUtils.createAuthResult() -
+                            // that one says "a login happened", this one says specifically "MFA was
+                            // bypassed for it".
+                            EventUtils.record({
+                                type: AuthEventType.APP_PASSWORD_USED,
+                                userUid: user.uid,
+                                ip: req ? NetUtils.getIPAddress(req, this.trustedProxies) : undefined,
+                                secretUid: secret.uid,
+                                path: req?.path,
+                            }).catch(() => undefined);
+                            return user;
+                        }
+                    }
+                }
+            }
+
+            // If MFA is required on this account, this auth route cannot be used unless an app password
+            // already matched above. Automatically reject. Shares the same generic message and
+            // dummy-Argon2 timing delay as every other rejection path in this function - a distinct
+            // "requires MFA" message would let an attacker enumerate valid usernames (and which ones have
+            // MFA enabled) purely from the error text.
             if (user.requireMFA) {
                 await verifyDummyPassword(password, user.uid, this.passwordConfig);
                 throw new Error("Invalid name or password");
@@ -146,6 +222,7 @@ export abstract class BaseAuthBasicRoute<U extends User, S extends Secret, A ext
                         const argon = await importArgon2();
                         success = await argon.verify(secret.data, normalized);
                         if (success) {
+                            touchSecretLastUsedAt(this.secretRepo, secret.uid).catch(() => undefined);
                             break;
                         }
                     }

@@ -209,11 +209,15 @@ export abstract class BaseAuthPasskeyRoute<U extends User, A extends Alias, S ex
         const secret: S | undefined = await this.secretRepo.findOne(credentialId, { ignoreACL: true });
         if (secret) {
             (secret.data as StoredPasskeyCredential).counter = newCounter;
+            // lastUsedAt is merged into this same write rather than touched via a separate
+            // touchSecretLastUsedAt() call - a second independent write here would race this one on
+            // `version` (see touchSecretLastUsedAt()'s own doc comment).
             await this.secretRepo.update(
                 {
                     uid: secret.uid,
                     version: secret.version,
                     data: secret.data,
+                    lastUsedAt: new Date().toISOString(),
                 } as S,
                 secret,
                 { ignoreACL: true, recordEvent: false },

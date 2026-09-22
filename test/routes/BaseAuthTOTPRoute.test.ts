@@ -138,7 +138,7 @@ describe("BaseAuthTOTPRoute Tests", () => {
 
             expect(secret.data.lastTimeStep).toBe(42);
             expect(update).toHaveBeenCalledWith(
-                { uid: "secret-1", version: 1, data: secret.data },
+                { uid: "secret-1", version: 1, data: secret.data, lastUsedAt: expect.any(String) },
                 secret,
                 { ignoreACL: true, recordEvent: false },
             );

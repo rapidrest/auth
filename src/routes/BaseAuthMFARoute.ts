@@ -2,12 +2,13 @@
 // Copyright (C) 2026 Jean-Philippe Steinmetz
 // SPDX-License-Identifier: MPL-2.0
 ///////////////////////////////////////////////////////////////////////////////
-import { ApiError, JWTUser, MessagingUtils, ObjectDecorators } from "@rapidrest/core";
+import { ApiError, EventUtils, JWTUser, MessagingUtils, ObjectDecorators } from "@rapidrest/core";
 import {
     ApiErrors,
     RouteDecorators,
     DocDecorators,
     HttpResponse,
+    NetUtils,
     RepoUtils,
     AuthMiddleware,
     ObjectFactory,
@@ -26,12 +27,14 @@ import {
     TOTPConfig,
     TOTPSecret,
 } from "../auth/types.js";
+import { AuthEventType } from "../auth/events.js";
 import {
     importArgon2,
     isWhatsAppConfigured,
     normalizePasswordSubmission,
     parseWhatsAppMethodId,
     toWhatsAppMethodId,
+    touchSecretLastUsedAt,
     verifyDummyPassword,
     WeakClientHashError,
 } from "../auth/shared.js";
@@ -105,6 +108,9 @@ export abstract class BaseAuthMFARoute<U extends User, S extends Secret, A exten
      */
     @Config("auth:totp")
     protected totpConfig: TOTPConfig = { issuer: "rapidrest" };
+
+    @Config("trusted_proxies", [])
+    protected trustedProxies: string[] = [];
 
     protected userRepo?: RepoUtils<U>;
 
@@ -499,11 +505,15 @@ export abstract class BaseAuthMFARoute<U extends User, S extends Secret, A exten
         const secret: S | undefined = await this.secretRepo.findOne(credentialId, { ignoreACL: true });
         if (secret) {
             (secret.data as StoredPasskeyCredential).counter = newCounter;
+            // lastUsedAt is merged into this same write rather than touched via a separate
+            // touchSecretLastUsedAt() call - a second independent write here would race this one on
+            // `version` (see touchSecretLastUsedAt()'s own doc comment).
             await this.secretRepo.update(
                 {
                     uid: secret.uid,
                     version: secret.version,
                     data: secret.data,
+                    lastUsedAt: new Date().toISOString(),
                 } as S,
                 secret,
                 { ignoreACL: true, recordEvent: false },
@@ -537,11 +547,15 @@ export abstract class BaseAuthMFARoute<U extends User, S extends Secret, A exten
                 throw new ApiError(ApiErrors.AUTH_FAILED, 401, "This code has already been used.");
             }
             totpData.lastTimeStep = timeStep;
+            // lastUsedAt is merged into this same write rather than touched via a separate
+            // touchSecretLastUsedAt() call - a second independent write here would race this one on
+            // `version` (see touchSecretLastUsedAt()'s own doc comment).
             await this.secretRepo.update(
                 {
                     uid: secret.uid,
                     version: secret.version,
                     data: secret.data,
+                    lastUsedAt: new Date().toISOString(),
                 } as S,
                 secret,
                 { ignoreACL: true, recordEvent: false },
@@ -562,8 +576,10 @@ export abstract class BaseAuthMFARoute<U extends User, S extends Secret, A exten
      * that's already been spent.
      * @param uid The unique id of the `recovery-codes` secret the matched entry belongs to.
      * @param codeIndex The index, within that secret's `codes` array, of the entry that was matched.
+     * @param req The source HTTP request, used only to record the source IP on the `auth.recovery_code.used`
+     * event below.
      */
-    protected async consumeRecoveryCode(uid: string, codeIndex: number): Promise<void> {
+    protected async consumeRecoveryCode(uid: string, codeIndex: number, req?: HttpRequest): Promise<void> {
         if (!this.secretRepo) {
             throw new Error("secretRepo is not set.");
         }
@@ -575,15 +591,25 @@ export abstract class BaseAuthMFARoute<U extends User, S extends Secret, A exten
                 throw new ApiError(ApiErrors.AUTH_FAILED, 401, "This recovery code has already been used.");
             }
             entry.usedAt = new Date().toISOString();
+            // lastUsedAt is merged into this same write rather than touched via a separate
+            // touchSecretLastUsedAt() call - a second independent write here would race this one on
+            // `version` (see touchSecretLastUsedAt()'s own doc comment).
             await this.secretRepo.update(
                 {
                     uid: secret.uid,
                     version: secret.version,
                     data: secret.data,
+                    lastUsedAt: new Date().toISOString(),
                 } as S,
                 secret,
                 { ignoreACL: true, recordEvent: false },
             );
+
+            EventUtils.record({
+                type: AuthEventType.RECOVERY_CODE_USED,
+                userUid: secret.userUid,
+                ip: req ? NetUtils.getIPAddress(req, this.trustedProxies) : undefined,
+            }).catch(() => undefined);
         }
     }
 
@@ -633,6 +659,7 @@ export abstract class BaseAuthMFARoute<U extends User, S extends Secret, A exten
                     const argon = await importArgon2();
                     success = await argon.verify(secret.data, normalized);
                     if (success) {
+                        touchSecretLastUsedAt(this.secretRepo, secret.uid, this.logger).catch(() => undefined);
                         break;
                     }
                 }

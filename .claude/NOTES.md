@@ -66,7 +66,164 @@ Keep entries terse — this is a reference, not a transcript.
 
 ## Session Log
 
-### 2026-09-21 (latest) — WhatsApp as an OTP delivery channel for verified phones
+### 2026-09-22 (latest) — `Secret.lastUsedAt` + secret lifecycle/use audit events (follow-up to app passwords)
+
+Requested as a same-day follow-up to app passwords (see the dated entry directly below): standard
+security-hygiene additions now that a `requireMFA`-bypassing credential type exists - (1) a `lastUsedAt`
+timestamp on every secret, (2) new `AuthEventType`s for security-relevant secret lifecycle/use, (3)
+explicitly nothing admin-facing (that's `auth-server`'s job). Read `src/auth/events.ts`'s existing
+`EventUtils.record()` call sites and every `updateCredentialCounter()`/`updateSecretTimeStep()` copy across
+`BaseAuthMFARoute`/`BaseAuthElevationRoute`/`BaseAuthFIDO2Route`/`BaseAuthPasskeyRoute`/`BaseAuthTOTPRoute`
+first, per this repo's usual practice, before writing anything.
+
+- **`Secret.lastUsedAt?: string`** (ISO-8601, like `usedAt` on a `RecoveryCodesSecret` code entry - NOT
+  like `BaseEntity.dateCreated`, which is typed `Date`). **Absent/`undefined` for "never used" in a freshly
+  constructed object or on Mongo** (an unset field simply isn't stored) **but reads back as `null`, not
+  `undefined`, once round-tripped through the SQL tier** - confirmed by a real round-trip test, not
+  assumed; this is pre-existing behavior every other optional `Secret` field (e.g. `hint`) already has on
+  SQL, not something new this change introduces. Added to `SecretSQL`/`SecretMongo` as a plain nullable
+  column, identical to how `hint` is declared/copied in each constructor.
+- **`touchSecretLastUsedAt(secretRepo, uid, logger?)`** added to `src/auth/shared.ts` (not duplicated per
+  route class, unlike `updateCredentialCounter()`/`updateSecretTimeStep()`, which already exist as ~4/~3
+  near-identical per-route copies) - re-`findOne`s by uid (`ignoreACL: true`), writes a minimal
+  `{uid, version, lastUsedAt}` patch via `update()` with `{ignoreACL: true, recordEvent: false}`, and
+  **swallows every failure internally** (try/catch, optional `logger?.debug()` trace) so it never rejects -
+  callers may `.catch(() => undefined)` it purely for lint (`no-floating-promises`)/defense-in-depth, not
+  because it can actually throw.
+- **lastUsedAt call sites - all confirmed via `grep -n "updateCredentialCounter\|lastTimeStep\|consumeRecoveryCode\|argon.verify" src/routes/*.ts`, matching the task brief's own list exactly (nothing missed):**
+  - `BaseAuthBasicRoute.verify()`: both the app-password match branch and the real-password match branch
+    call `touchSecretLastUsedAt()` standalone (fire-and-forget) on the one matched secret only.
+  - `BaseAuthMFARoute`/`BaseAuthElevationRoute.verify()` (phase-1/elevation password check): same standalone
+    fire-and-forget call on the matched password secret.
+  - `updateCredentialCounter()` (×4: `BaseAuthMFARoute`/`BaseAuthElevationRoute`/`BaseAuthFIDO2Route`/
+    `BaseAuthPasskeyRoute`), `updateSecretTimeStep()` (×3: the same first two plus `BaseAuthTOTPRoute`), and
+    `BaseAuthMFARoute.consumeRecoveryCode()`: `lastUsedAt: new Date().toISOString()` **merged into the
+    existing single `update()` call** these methods already make, rather than a second independent
+    `touchSecretLastUsedAt()` call - a second write would race the first on `version` (stale-`version`
+    conflict) since the first write already bumps it. This means these six merged-write call sites inherit
+    the *existing*, pre-established all-or-nothing failure semantics of that write (already true before
+    this change, e.g. TOTP replay-protection persistence was already required-not-best-effort) - a
+    deliberate, documented tradeoff, not an oversight. Only the two genuinely-new standalone call sites
+    above (`BaseAuthBasicRoute`, `BaseAuthMFARoute`/`BaseAuthElevationRoute.verify()`) needed the
+    best-effort try/catch wrapper, since only they had no pre-existing write to piggyback on.
+  - `BaseAuthTOTPRoute` (direct `/auth/totp`) confirmed to independently verify via its own
+    `getSecrets()`/`updateSecretTimeStep()` - not merely reachable through MFA - so it's a real, distinct
+    call site, not a duplicate of `BaseAuthMFARoute`'s.
+- **New `AuthEventType` values** (`src/auth/events.ts`), all best-effort/fire-and-forget
+  (`EventUtils.record({...}).catch(() => undefined)`) exactly like the pre-existing ones:
+  - `PASSWORD_CHANGED = "auth.password.changed"` - fired from `BaseSecretRoute.create()` for a `password`
+    secret, and from `update()` when `"data" in obj` for an existing `password` secret (captured *before*
+    `validateUpdate()` runs, since that reassigns `obj.data` in place but never removes the key - so a
+    hint-only rename, which never sends a `data` key at all, correctly never fires this). Payload:
+    `{userUid, ip}`.
+  - `APP_PASSWORD_CREATED = "auth.app_password.created"` / `APP_PASSWORD_REMOVED = "auth.app_password.removed"`
+    - fired from `BaseSecretRoute.create()`/`delete()`, gated on `SecretType.APP_PASSWORD` specifically as a
+    parallel `else if` alongside the existing `isMFASecretType(obj.type)` branch - **not** added to
+    `isMFASecretType()` itself, which stays exactly "counts as a second factor" (app passwords explicitly
+    don't). Payload: `{userUid, ip, secretType}`, matching `MFA_ENROLLED`/`MFA_REMOVED`'s own shape.
+  - `APP_PASSWORD_USED = "auth.app_password.used"` - fired from `BaseAuthBasicRoute`'s app-password match
+    branch, in addition to the generic `SESSION_CREATED` that still fires later via
+    `TokenUtils.createAuthResult()` once `authenticate()` runs - intentional, not a duplicate: one says "a
+    login happened", this one says specifically "MFA was bypassed for it". Payload:
+    `{userUid, ip, secretUid, path}`. Needed threading an optional 3rd `req` parameter through
+    `BasicStrategyOptions.verify()`/`BasicStrategy.authenticate()` (backward compatible - optional, and
+    `verifySync()`/`authenticateSync()` deliberately left untouched since `BaseAuthBasicRoute` never
+    overrides that sync path).
+  - `RECOVERY_CODE_USED = "auth.recovery_code.used"` - fired from `BaseAuthMFARoute.consumeRecoveryCode()`
+    only (confirmed `BaseAuthElevationRoute` has no recovery-code case at all - recovery codes are
+    deliberately excluded from elevation, per its own existing doc comment - so there's only one copy of
+    this method in the whole library). Payload: `{userUid, ip}` - `ip` needed threading an optional 3rd
+    `req` parameter through `MFAStrategyOptions.consumeRecoveryCode()` and its one call site in
+    `MFAStrategy.verifyRecoveryCode()`, which already had `req` in scope right there, so this was a small,
+    proportionate addition rather than a disproportionate refactor.
+- **Test coverage note**: this repo's `vitest.config.ts` requires 100% statements/functions/lines and 95%
+  branches *globally*, not per-file - several `.catch(() => undefined)` arrow callbacks are only
+  reachable by mocking the *shared helper itself* to reject (e.g. `vi.spyOn(sharedModule,
+  "touchSecretLastUsedAt").mockRejectedValue(...)`), since `touchSecretLastUsedAt()` is designed to never
+  actually reject on its own - mocking only the underlying `secretRepo.update()` to throw exercises its
+  *internal* catch, not the outer call-site `.catch()`. Mirrors the existing convention of a dedicated
+  "Does not throw when EventUtils.record() itself rejects" test per call site. Also fixed ~9 pre-existing
+  unit tests across `BaseAuthMFARoute`/`BaseAuthElevationRoute`/`BaseAuthFIDO2Route`/`BaseAuthPasskeyRoute`/
+  `BaseAuthTOTPRoute`/`BasicStrategy`/`MFAStrategy`/`BaseSecretRoute` whose exact-object `toHaveBeenCalledWith()`
+  assertions on a merged `update()` call, or on the now-3-arg `verify()`/`consumeRecoveryCode()`, broke as a
+  direct, expected consequence of this change - not a regression in anything else.
+- Full suite (`npx vitest run`): **2162 passed, 1 skipped, 0 failed** across 109 files. Coverage: statements
+  100%, functions 100%, lines 100%, branches 95.59% (≥ the 95% gate). `npx tsc --noEmit` and
+  `npx eslint ./src ./test` both clean. `junit.xml` restored via `git checkout -- junit.xml` after the run
+  per the tracked-file convention.
+- Updated `README.md` (`Secret`/`App passwords`/Security Features bullets), `RELEASE_NOTES.md`'s
+  `## Unreleased`, and `CHANGELOG.md`'s `## [Unreleased]` `### Added`. Not committed - per the
+  commit-approval convention, awaiting explicit ask. Did not touch `auth-server` (a parallel agent owns the
+  client-side/admin UI for this same follow-up there) - this repo only had to produce the raw
+  `lastUsedAt` field and audit events for that UI to eventually consume.
+
+### 2026-09-22 — App passwords (Basic-auth-only, requireMFA-bypassing credential)
+
+Requested for the auth-server integration (a downstream mail server needs to validate legacy client
+credentials via `/auth/basic` without an interactive MFA prompt). Investigated the actual code first
+(`types.ts`, `shared.ts`'s `generateRecoveryCodes()`, `BaseSecretRoute.ts`, `BaseAuthBasicRoute.ts`) rather
+than trusting the task's own summary, per this repo's usual practice - it held up.
+
+- **Exact `SecretType` value: `"app-password"`** (`SecretType.APP_PASSWORD`, kebab-case like
+  `"recovery-codes"`). `data` is a plain argon2 hash string, same shape as `PASSWORD` - no new `auth/types.ts`
+  interface needed (unlike `RecoveryCodesSecret`/`TOTPSecret`).
+- **Config key: `auth:app_password:enabled`, default `true`.** Declared independently on both
+  `BaseSecretRoute` (gates *creating* new ones - `validateAppPasswordCreate()`) and `BaseAuthBasicRoute`
+  (gates the `requireMFA` bypass in `verify()`) - two separate `@Config`-bound fields reading the same
+  config path, not one shared source, so `BaseAuthBasicRoute` doesn't need `BaseSecretRoute` mounted.
+  Disabling it never deletes an existing app password - a disabled-then-reenabled one just works again.
+- **One-time plaintext response field: `password`** (top-level, alongside the rest of the `Secret` fields;
+  `data` is deleted). Mirrors `RecoveryCodesSecret`'s `codes` field exactly - stashed on
+  `(req as any).generatedAppPassword` by `validateAppPasswordCreate()`, consumed once by
+  `sanitizeSecretForResponse()`, never persisted, never recoverable after that one response.
+- **`hint` is required** (not optional, unlike every other secret type) - trimmed, 1-100 chars after
+  trimming - since an account can accumulate several app passwords and the label is the only way to tell
+  them apart later. Any caller-supplied `data` is silently discarded and regenerated server-side, same
+  reasoning/pattern as `generateRecoveryCodes()`.
+- **`generateAppPassword()` in `shared.ts`**: single value (not a batch, unlike recovery codes), Crockford
+  Base32 (`RECOVERY_CODE_ALPHABET`, reused not re-declared), 30 characters (150 bits - recovery codes are
+  10 chars/50 bits, deliberately much shorter-lived than a standing credential) grouped in dashes of 5 to
+  match recovery codes' own readability convention.
+- **`BaseAuthBasicRoute.verify()` ordering (the security-critical part): app-password check runs
+  immediately after the "user not found" dummy-timing branch and BEFORE the `requireMFA` gate; the existing
+  real-password path (requireMFA check + `PASSWORD`-secret loop) is completely unchanged below it.** A
+  match returns the user immediately, which is the intentional `requireMFA` bypass - that's the entire
+  point of the feature. Verified with a **plain `argon.verify(secret.data, password)`** - never
+  `normalizePasswordSubmission()` - since an app password is only ever pasted as literal plaintext by a
+  legacy client; there's no client-hashing concept for it. Timing-safety mirrors the existing
+  `PASSWORD`-secret loop's own shape exactly: zero app-password secrets burns one `verifyDummyPassword(password)`
+  call (no `userUid`/`config` args, since there's no normalization branch to equalize against); one or more
+  triggers real per-candidate `argon.verify()` calls, no additional dummy burn. This means the *presence vs.
+  absence* of app-password secrets on an account is theoretically a (very weak) timing signal on top of the
+  existing `requireMFA`-vs-not signal `verifyDummyPassword()` already protects - deliberately accepted, not
+  missed; equalizing it would need a fixed-shape dummy-vs-real burn independent of candidate count, which
+  the existing `PASSWORD` loop doesn't do either.
+- **`validateUpdate()`'s switch**: added an `APP_PASSWORD` case that throws immutable-data-cannot-be-modified,
+  identically to FIDO2/PASSKEY/RECOVERY_CODES. Confirmed (not just assumed) that a hint-only update (no
+  `data` key in the request body) bypasses the whole switch via the pre-existing `if ("data" in obj)` gate -
+  so renaming an app password without rotating it already works for free, and has a regression test proving
+  it (`validateUpdate` > "Allows renaming...").
+- **Deliberately NOT built (scope decisions, not oversights - don't rediscover these):**
+  - **Not added to `isMFASecretType()`.** An app password must never be offered/counted as a second factor.
+    Confirmed `PASSWORD` secrets already fire no `auth.mfa.enrolled`/`auth.mfa.removed` event either (same
+    array exclusion), so `APP_PASSWORD` firing none is consistent with existing behavior, not a new gap.
+  - **No admin-facing exposure, no usage-count limit, no "last used" timestamp, no new `AuthEventType`.**
+    Flagged to JP as possible follow-ups (audit-log visibility into app-password creation/use would be the
+    most obviously useful one if this feature sees real adoption), but out of scope for this pass.
+    **Superseded 2026-09-22 (later the same day)** - the "last used" timestamp and new `AuthEventType`s were
+    built as the very next follow-up; see the dated entry directly above this one (this file's newest-first
+    order) for what actually shipped. Admin-facing exposure is still out of scope for this repo (an
+    `auth-server` concern).
+- Full `yarn test:prod`-equivalent run (`npx vitest run` + `npx tsc --noEmit` + `npx eslint ./src ./test`):
+  see this session's own summary for the exact pass/fail counts and coverage numbers at the time this was
+  written - re-run before relying on this note if it's been a while.
+- Updated `README.md` (new "App passwords" subsection under Route Handlers, plus the `Secret`/`BaseSecretRoute`
+  bullet lists and a new Security Features bullet), `RELEASE_NOTES.md`'s `## Unreleased`, and `CHANGELOG.md`'s
+  `## [Unreleased]` `### Added` per the doc-ownership/pre-release-changelog conventions above. Not committed -
+  per the commit-approval convention, awaiting explicit ask. Did not touch `auth-server` (a parallel agent
+  owns the client-side UI for this same feature there).
+
+### 2026-09-21 — WhatsApp as an OTP delivery channel for verified phones
 
 Requested by JP for the auth-server (uses `@rapidrest/core` 6.x `MessagingUtils.sendWhatsApp()`). Decisions:
 

@@ -151,6 +151,41 @@ describe("BaseSecretRoute Tests", () => {
                 route.delete("id-1", undefined, undefined, req, { uid: "user-1" } as any),
             ).resolves.toBeUndefined();
         });
+
+        it("Records an auth.app_password.removed event when the deleted secret is an APP_PASSWORD secret.", async () => {
+            vi.spyOn(ModelRoute.prototype as any, "doDelete").mockResolvedValue(undefined);
+            const route = new TestSecretRoute();
+            const findOne = vi
+                .fn()
+                .mockResolvedValue({ uid: "id-1", type: SecretType.APP_PASSWORD, userUid: "user-1" });
+            (route as any).repoUtils = { findOne };
+            const spy = vi.spyOn(EventUtils, "record").mockResolvedValue(undefined);
+            const req: any = { socket: { remoteAddress: "1.2.3.4" } };
+
+            await route.delete("id-1", undefined, undefined, req, { uid: "user-1" } as any);
+
+            expect(spy).toHaveBeenCalledWith({
+                type: AuthEventType.APP_PASSWORD_REMOVED,
+                userUid: "user-1",
+                ip: "1.2.3.4",
+                secretType: SecretType.APP_PASSWORD,
+            });
+        });
+
+        it("Does not throw when EventUtils.record() itself rejects for an APP_PASSWORD removal.", async () => {
+            vi.spyOn(ModelRoute.prototype as any, "doDelete").mockResolvedValue(undefined);
+            const route = new TestSecretRoute();
+            const findOne = vi
+                .fn()
+                .mockResolvedValue({ uid: "id-1", type: SecretType.APP_PASSWORD, userUid: "user-1" });
+            (route as any).repoUtils = { findOne };
+            vi.spyOn(EventUtils, "record").mockRejectedValue(new Error("telemetry down"));
+            const req: any = {};
+
+            await expect(
+                route.delete("id-1", undefined, undefined, req, { uid: "user-1" } as any),
+            ).resolves.toBeUndefined();
+        });
     });
 
     describe("exists", () => {
@@ -370,6 +405,46 @@ describe("BaseSecretRoute Tests", () => {
             expect(result.data).toBeUndefined();
         });
 
+        // Regression: the hashed `data` persisted for an app password must never be returned - only the
+        // plaintext `validateAppPasswordCreate()` stashed on `req`, and only this once (it's never
+        // persisted, so it can't be recovered on any later read - see findById()/find()'s cleanData()).
+        it("Attaches the plaintext password from req and strips the hashed data for an APP_PASSWORD result.", async () => {
+            vi.spyOn(ModelRoute.prototype as any, "doCreate").mockResolvedValue({
+                type: SecretType.APP_PASSWORD,
+                hint: "My mail client",
+                data: "$argon2id$fake-hash",
+            });
+            const route = new TestSecretRoute();
+            const req: any = { generatedAppPassword: "ABCDE-FGHJK-MNPQR-STVWX-YZ012-34567" };
+
+            const result: any = await route.create({} as any, req);
+
+            expect(result.password).toBe("ABCDE-FGHJK-MNPQR-STVWX-YZ012-34567");
+            expect(result.data).toBeUndefined();
+        });
+
+        it("Does not record an auth.mfa.enrolled event for an APP_PASSWORD secret (not treated as MFA enrollment) - records auth.app_password.created instead.", async () => {
+            vi.spyOn(ModelRoute.prototype as any, "doCreate").mockResolvedValue({
+                type: SecretType.APP_PASSWORD,
+                userUid: "user-1",
+                hint: "My mail client",
+                data: "$argon2id$fake-hash",
+            });
+            const route = new TestSecretRoute();
+            const spy = vi.spyOn(EventUtils, "record").mockResolvedValue(undefined);
+            const req: any = { generatedAppPassword: "ABCDE-FGHJK-MNPQR-STVWX-YZ012-34567" };
+
+            await route.create({} as any, req);
+
+            expect(spy).not.toHaveBeenCalledWith(expect.objectContaining({ type: AuthEventType.MFA_ENROLLED }));
+            expect(spy).toHaveBeenCalledWith({
+                type: AuthEventType.APP_PASSWORD_CREATED,
+                userUid: "user-1",
+                ip: undefined,
+                secretType: SecretType.APP_PASSWORD,
+            });
+        });
+
         it("Records an auth.mfa.enrolled event for a TOTP secret, including the caller's source IP.", async () => {
             vi.spyOn(ModelRoute.prototype as any, "doCreate").mockResolvedValue({
                 type: SecretType.TOTP,
@@ -390,7 +465,7 @@ describe("BaseSecretRoute Tests", () => {
             });
         });
 
-        it("Does not record an auth.mfa.enrolled event for a PASSWORD secret.", async () => {
+        it("Does not record an auth.mfa.enrolled event for a PASSWORD secret - records auth.password.changed instead.", async () => {
             vi.spyOn(ModelRoute.prototype as any, "doCreate").mockResolvedValue({
                 type: SecretType.PASSWORD,
                 userUid: "user-1",
@@ -401,7 +476,12 @@ describe("BaseSecretRoute Tests", () => {
 
             await route.create({} as any, {} as any);
 
-            expect(spy).not.toHaveBeenCalled();
+            expect(spy).not.toHaveBeenCalledWith(expect.objectContaining({ type: AuthEventType.MFA_ENROLLED }));
+            expect(spy).toHaveBeenCalledWith({
+                type: AuthEventType.PASSWORD_CHANGED,
+                userUid: "user-1",
+                ip: undefined,
+            });
         });
 
         it("Does not throw when EventUtils.record() itself rejects.", async () => {
@@ -414,6 +494,32 @@ describe("BaseSecretRoute Tests", () => {
             vi.spyOn(EventUtils, "record").mockRejectedValue(new Error("telemetry down"));
 
             await expect(route.create({} as any, {} as any)).resolves.toBeDefined();
+        });
+
+        it("Does not throw when EventUtils.record() itself rejects while recording auth.password.changed.", async () => {
+            vi.spyOn(ModelRoute.prototype as any, "doCreate").mockResolvedValue({
+                type: SecretType.PASSWORD,
+                userUid: "user-1",
+                data: "hash",
+            });
+            const route = new TestSecretRoute();
+            vi.spyOn(EventUtils, "record").mockRejectedValue(new Error("telemetry down"));
+
+            await expect(route.create({} as any, {} as any)).resolves.toBeDefined();
+        });
+
+        it("Does not throw when EventUtils.record() itself rejects while recording auth.app_password.created.", async () => {
+            vi.spyOn(ModelRoute.prototype as any, "doCreate").mockResolvedValue({
+                type: SecretType.APP_PASSWORD,
+                userUid: "user-1",
+                hint: "My mail client",
+                data: "$argon2id$fake-hash",
+            });
+            const route = new TestSecretRoute();
+            vi.spyOn(EventUtils, "record").mockRejectedValue(new Error("telemetry down"));
+            const req: any = { generatedAppPassword: "ABCDE-FGHJK-MNPQR-STVWX-YZ012-34567" };
+
+            await expect(route.create({} as any, req)).resolves.toBeDefined();
         });
     });
 
@@ -534,6 +640,17 @@ describe("BaseSecretRoute Tests", () => {
             await expect((route as any).validateCreate(obj, {} as any)).rejects.toThrow(/must specify string data/);
         });
 
+        it("Delegates APP_PASSWORD secrets to validateAppPasswordCreate().", async () => {
+            const route = new TestSecretRoute();
+            const spy = vi.spyOn(route as any, "validateAppPasswordCreate").mockResolvedValue(undefined);
+            const obj: any = { type: SecretType.APP_PASSWORD, hint: "My mail client" };
+            const req: any = {};
+
+            await (route as any).validateCreate(obj, req);
+
+            expect(spy).toHaveBeenCalledWith(obj, req);
+        });
+
         it("Delegates FIDO2 secrets to validateWebAuthnCreate() with fido2Config.", async () => {
             const route = new TestSecretRoute();
             const spy = vi.spyOn(route as any, "validateWebAuthnCreate").mockResolvedValue(undefined);
@@ -610,6 +727,15 @@ describe("BaseSecretRoute Tests", () => {
 
             await expect(
                 (route as any).validateCreate(obj, {}, { uid: "attacker-uid", roles: [] }),
+            ).rejects.toThrow(/does not have permission/);
+        });
+
+        it("Rejects creating an app password for another user's uid without a trusted role (ownership enforced the same as every other secret type).", async () => {
+            const route = new TestSecretRoute();
+            const obj: any = { type: SecretType.APP_PASSWORD, hint: "My mail client", userUid: "victim-uid" };
+
+            await expect(
+                (route as any).validateCreate(obj, {} as any, { uid: "attacker-uid", roles: [] }),
             ).rejects.toThrow(/does not have permission/);
         });
 
@@ -922,6 +1048,122 @@ describe("BaseSecretRoute Tests", () => {
         });
     });
 
+    describe("validateAppPasswordCreate", () => {
+        it("Generates a plaintext app password, persists only its argon2 hash, and stashes the plaintext on req.", async () => {
+            const route = new TestSecretRoute();
+            const obj: any = { type: SecretType.APP_PASSWORD, hint: "My mail client" };
+            const req: any = {};
+
+            await (route as any).validateAppPasswordCreate(obj, req);
+
+            expect(typeof req.generatedAppPassword).toBe("string");
+            expect(obj.data).not.toBe(req.generatedAppPassword);
+            expect(typeof obj.data).toBe("string");
+            const argon = await import("argon2");
+            await expect(argon.verify(obj.data, req.generatedAppPassword)).resolves.toBe(true);
+        });
+
+        // 30 Crockford Base32 characters (5 bits each) grouped in 5s - well above the 128-bit margin
+        // expected of a standing credential.
+        it("Generates a high-entropy value grouped for readability, matching generateAppPassword()'s shape.", async () => {
+            const route = new TestSecretRoute();
+            const obj: any = { type: SecretType.APP_PASSWORD, hint: "My mail client" };
+            const req: any = {};
+
+            await (route as any).validateAppPasswordCreate(obj, req);
+
+            expect(req.generatedAppPassword).toMatch(/^[0-9A-HJKMNP-TV-Z]{5}(-[0-9A-HJKMNP-TV-Z]{5}){5}$/);
+        });
+
+        it("Trims the hint.", async () => {
+            const route = new TestSecretRoute();
+            const obj: any = { type: SecretType.APP_PASSWORD, hint: "  My mail client  " };
+            const req: any = {};
+
+            await (route as any).validateAppPasswordCreate(obj, req);
+
+            expect(obj.hint).toBe("My mail client");
+        });
+
+        it("Rejects a missing hint.", async () => {
+            const route = new TestSecretRoute();
+            const obj: any = { type: SecretType.APP_PASSWORD };
+
+            await expect((route as any).validateAppPasswordCreate(obj, {} as any)).rejects.toThrow(
+                /must specify a non-empty 'hint'/,
+            );
+        });
+
+        it("Rejects a blank (whitespace-only) hint.", async () => {
+            const route = new TestSecretRoute();
+            const obj: any = { type: SecretType.APP_PASSWORD, hint: "   " };
+
+            await expect((route as any).validateAppPasswordCreate(obj, {} as any)).rejects.toThrow(
+                /must specify a non-empty 'hint'/,
+            );
+        });
+
+        it("Rejects a hint longer than 100 characters.", async () => {
+            const route = new TestSecretRoute();
+            const obj: any = { type: SecretType.APP_PASSWORD, hint: "x".repeat(101) };
+
+            await expect((route as any).validateAppPasswordCreate(obj, {} as any)).rejects.toThrow(
+                /must be at most 100 characters/,
+            );
+        });
+
+        it("Accepts a hint exactly 100 characters long.", async () => {
+            const route = new TestSecretRoute();
+            const obj: any = { type: SecretType.APP_PASSWORD, hint: "x".repeat(100) };
+
+            await expect((route as any).validateAppPasswordCreate(obj, {} as any)).resolves.toBeUndefined();
+        });
+
+        it("Discards any client-supplied data entirely, always generating a fresh password.", async () => {
+            const route = new TestSecretRoute();
+            const obj: any = {
+                type: SecretType.APP_PASSWORD,
+                hint: "My mail client",
+                data: "attacker-controlled-hash",
+            };
+            const req: any = {};
+
+            await (route as any).validateAppPasswordCreate(obj, req);
+
+            expect(obj.data).not.toBe("attacker-controlled-hash");
+            const argon = await import("argon2");
+            await expect(argon.verify(obj.data, req.generatedAppPassword)).resolves.toBe(true);
+        });
+
+        it("Rejects creation when appPasswordEnabled is false, without generating a password.", async () => {
+            const route = new TestSecretRoute();
+            (route as any).appPasswordEnabled = false;
+            const obj: any = { type: SecretType.APP_PASSWORD, hint: "My mail client" };
+            const req: any = {};
+
+            await expect((route as any).validateAppPasswordCreate(obj, req)).rejects.toThrow(
+                /does not allow creating app passwords/,
+            );
+            expect(req.generatedAppPassword).toBeUndefined();
+        });
+
+        it("Hashes the password using the configured argon2 cost parameters.", async () => {
+            const route = new TestSecretRoute();
+            (route as any).passwordConfig = {
+                ...new PasswordConfig(),
+                hash_memory_cost: 1024,
+                hash_time_cost: 2,
+                hash_parallelism: 1,
+            };
+            const obj: any = { type: SecretType.APP_PASSWORD, hint: "My mail client" };
+            const req: any = {};
+
+            await (route as any).validateAppPasswordCreate(obj, req);
+
+            expect(obj.data).toContain("m=1024,p=1,t=2");
+        });
+    });
+
     describe("update", () => {
         it("Throws INTERNAL_ERROR when repoUtils is not set.", async () => {
             const route = new TestSecretRoute();
@@ -994,6 +1236,90 @@ describe("BaseSecretRoute Tests", () => {
             } as any);
 
             expect(result.data.uri).toMatch(/^otpauth:\/\/totp\//);
+        });
+
+        it("Records an auth.password.changed event when a PASSWORD secret's data is actually changed.", async () => {
+            const existing = { uid: "id-1", type: SecretType.PASSWORD, userUid: "u1", data: "old-hash" };
+            const findOne = vi.fn().mockResolvedValue(existing);
+            vi.spyOn(ModelRoute.prototype as any, "doUpdate").mockResolvedValue({
+                uid: "id-1",
+                type: SecretType.PASSWORD,
+                userUid: "u1",
+                data: "new-hash",
+            });
+            const route = new TestSecretRoute();
+            (route as any).repoUtils = { findOne };
+            vi.spyOn(route as any, "validateUpdate").mockResolvedValue(undefined);
+            const spy = vi.spyOn(EventUtils, "record").mockResolvedValue(undefined);
+            const req: any = { socket: { remoteAddress: "1.2.3.4" } };
+
+            await route.update("id-1", { uid: "id-1", data: "new-password" } as any, req, { uid: "u1" } as any);
+
+            expect(spy).toHaveBeenCalledWith({
+                type: AuthEventType.PASSWORD_CHANGED,
+                userUid: "u1",
+                ip: "1.2.3.4",
+            });
+        });
+
+        it("Does not record an auth.password.changed event for a hint-only rename (no `data` key submitted).", async () => {
+            const existing = { uid: "id-1", type: SecretType.PASSWORD, userUid: "u1", data: "old-hash" };
+            const findOne = vi.fn().mockResolvedValue(existing);
+            vi.spyOn(ModelRoute.prototype as any, "doUpdate").mockResolvedValue({
+                uid: "id-1",
+                type: SecretType.PASSWORD,
+                userUid: "u1",
+                hint: "renamed",
+                data: "old-hash",
+            });
+            const route = new TestSecretRoute();
+            (route as any).repoUtils = { findOne };
+            vi.spyOn(route as any, "validateUpdate").mockResolvedValue(undefined);
+            const spy = vi.spyOn(EventUtils, "record").mockResolvedValue(undefined);
+
+            await route.update("id-1", { uid: "id-1", hint: "renamed" } as any, {} as any, { uid: "u1" } as any);
+
+            expect(spy).not.toHaveBeenCalledWith(expect.objectContaining({ type: AuthEventType.PASSWORD_CHANGED }));
+        });
+
+        it("Does not record an auth.password.changed event when updating a non-PASSWORD secret's data (e.g. TOTP).", async () => {
+            const existing = { uid: "id-1", type: SecretType.TOTP, userUid: "u1" };
+            const findOne = vi.fn().mockResolvedValue(existing);
+            vi.spyOn(ModelRoute.prototype as any, "doUpdate").mockResolvedValue({
+                uid: "id-1",
+                type: SecretType.TOTP,
+                userUid: "u1",
+                data: { secret: "JBSWY3DPEHPK3PXP", digits: 6, period: 30, algorithm: "sha1" },
+            });
+            const route = new TestSecretRoute();
+            (route as any).repoUtils = { findOne };
+            vi.spyOn(route as any, "validateUpdate").mockResolvedValue(undefined);
+            const spy = vi.spyOn(EventUtils, "record").mockResolvedValue(undefined);
+
+            await route.update("id-1", { uid: "id-1", data: "JBSWY3DPEHPK3PXP" } as any, {} as any, {
+                uid: "u1",
+            } as any);
+
+            expect(spy).not.toHaveBeenCalledWith(expect.objectContaining({ type: AuthEventType.PASSWORD_CHANGED }));
+        });
+
+        it("Does not throw when EventUtils.record() itself rejects while recording auth.password.changed.", async () => {
+            const existing = { uid: "id-1", type: SecretType.PASSWORD, userUid: "u1", data: "old-hash" };
+            const findOne = vi.fn().mockResolvedValue(existing);
+            vi.spyOn(ModelRoute.prototype as any, "doUpdate").mockResolvedValue({
+                uid: "id-1",
+                type: SecretType.PASSWORD,
+                userUid: "u1",
+                data: "new-hash",
+            });
+            const route = new TestSecretRoute();
+            (route as any).repoUtils = { findOne };
+            vi.spyOn(route as any, "validateUpdate").mockResolvedValue(undefined);
+            vi.spyOn(EventUtils, "record").mockRejectedValue(new Error("telemetry down"));
+
+            await expect(
+                route.update("id-1", { uid: "id-1", data: "new-password" } as any, {} as any, { uid: "u1" } as any),
+            ).resolves.toBeDefined();
         });
     });
 
@@ -1084,6 +1410,25 @@ describe("BaseSecretRoute Tests", () => {
             await expect((route as any).validateUpdate(obj, existing, { uid: "u1" })).rejects.toThrow(
                 /must specify string data/,
             );
+        });
+
+        it("Rejects modifying an APP_PASSWORD secret's data, even when obj.type is omitted.", async () => {
+            const route = new TestSecretRoute();
+            const existing: any = { uid: "id-1", type: SecretType.APP_PASSWORD, userUid: "u1" };
+            const obj: any = { uid: "id-1", data: "attacker-controlled-hash" };
+
+            await expect((route as any).validateUpdate(obj, existing, { uid: "u1" })).rejects.toThrow(
+                /App passwords cannot be modified/,
+            );
+        });
+
+        it("Allows renaming (hint-only update) an APP_PASSWORD secret without rotating it, since no `data` key bypasses the switch entirely.", async () => {
+            const route = new TestSecretRoute();
+            const existing: any = { uid: "id-1", type: SecretType.APP_PASSWORD, userUid: "u1", hint: "old hint" };
+            const obj: any = { uid: "id-1", hint: "new hint" };
+
+            await expect((route as any).validateUpdate(obj, existing, { uid: "u1" })).resolves.toBeUndefined();
+            expect(obj.data).toBeUndefined();
         });
 
         it("Rejects modifying a FIDO2 secret's data, even when obj.type is omitted.", async () => {

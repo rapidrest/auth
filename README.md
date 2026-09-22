@@ -27,6 +27,8 @@ For complete documentation please visit [RapidREST.dev](https://rapidrest.dev).
 ### Security Features
 
 * Rate limiting on every credential-verification endpoint, layered per-identifier and per-source-IP (reverse-proxy aware) — via `@rapidrest/service-core`'s `RateLimiter`
+* App passwords — user-generated, individually-revocable Basic-auth-only credentials for legacy clients that can't complete an MFA challenge
+* Secret usage tracking (`Secret.lastUsedAt`) and security event hooks for secret lifecycle/use (password changed, app password created/removed/used, recovery code used), alongside the existing login/registration/elevation/MFA events — see `AuthEventType`
 * MFA recovery/backup codes as a first-class secondary authentication method
 * Account elevation (`@RequiresElevation`) for step-up re-verification before sensitive actions
 * Session revocation ("log out everywhere") that invalidates every outstanding refresh token for an account
@@ -43,7 +45,7 @@ with either `Mongo` or `SQL` at the end of the name (e.g. `Alias` becomes `Alias
 
 * `User` - Describes a single user account
 * `Alias` - Describes an alternate identifying name (aka: alias) for a user account (e.g. email, phone, third-party OAuth ID)
-* `Secret` - Stores secrets used to authenticate user accounts (e.g. `fido2`, `passkey`, `password`, `totp`, `recovery-codes` secrets)
+* `Secret` - Stores secrets used to authenticate user accounts (e.g. `app-password`, `fido2`, `passkey`, `password`, `totp`, `recovery-codes` secrets). Tracks `lastUsedAt`, the last time the secret successfully authenticated (unset if never)
 * `Profile` - Stores additional, personally identifying, information about a user (e.g. birthdate, legal name, verified contacts, preferences)
 
 ### Route Handlers
@@ -56,7 +58,7 @@ with either `Mongo` or `SQL` at the end of the name (e.g. `BaseAliasRoute` becom
 * `BaseAliasRoute` - Provides full CRUD operations for the `Alias` data model
 * `BaseProfileRoute` - Provides full CRUD operations for the `Profile` data model
 * `BaseSecretRoute` - Provides full CRUD operations for the `Secret` data model. Additionally includes endpoints for registration of 
-`fido2`, `passkey`, `totp` and `recovery-codes` secrets.
+`app-password`, `fido2`, `passkey`, `totp` and `recovery-codes` secrets.
 * `BaseUserRoute` - Provides full CRUD operations for the `User` data model
 
 #### Authentication Strategies
@@ -77,6 +79,30 @@ with either `Mongo` or `SQL` at the end of the name (e.g. `BaseAliasRoute` becom
 * `BaseAuthLogoutRoute` - Clears the authentication cookie, if cookie-based token issuance is enabled
 * `BaseAuthRefreshRoute` - Issues a new access token from a valid refresh token
 * `BaseRegistrationRoute` - Self-service account registration via OTP-verified email or phone
+
+#### App passwords
+
+A user can generate a standing `app-password` secret (`SecretType.APP_PASSWORD`) for a single legacy
+Basic-auth client — e.g. an old mail client — that can't complete an MFA challenge, without disabling MFA
+for the account as a whole:
+
+* Created via `POST /secrets` with `{ type: "app-password", hint: "<label>" }` - a `hint` is required (an
+  account may have several) and any client-supplied `data` is discarded; the server generates a
+  high-entropy value and returns it once, as `password`, in the create response. It is never returned
+  again by any later read.
+* Controlled by `auth:app_password:enabled` (default `true`) on both `BaseSecretRoute` (gates creating new
+  ones) and `BaseAuthBasicRoute` (gates the bypass below). Disabling it does not delete any existing app
+  password.
+* `BaseAuthBasicRoute` checks an account's app passwords before its `requireMFA` gate, so a matching app
+  password authenticates even when the account requires MFA - a real password remains subject to
+  `requireMFA` exactly as before. A downstream Basic-auth consumer (e.g. a mail server validating
+  credentials against this authorization server) gets this for free just by calling `/auth/basic` as today.
+* Revoked independently of the account's password/MFA by deleting the `Secret` (`DELETE /secrets/:id`); its
+  `data` cannot be changed once created (`PUT` on it 400s) - delete and create a new one to rotate it. A
+  hint-only `PUT` (renaming it) is unaffected.
+* A successful match updates the secret's `lastUsedAt` and records an `auth.app_password.used` event
+  (`AuthEventType.APP_PASSWORD_USED`) - the signal that `requireMFA` was bypassed for that login - in
+  addition to the generic `auth.session.created` event every successful login fires.
 
 #### WhatsApp one-time codes
 

@@ -46,6 +46,7 @@ import {
     obfuscateContact,
     parseWhatsAppMethodId,
     toWhatsAppMethodId,
+    touchSecretLastUsedAt,
     verifyDummyPassword,
     verifyDummyTOTP,
     verifyOTP,
@@ -1193,6 +1194,67 @@ describe("generatePassword", () => {
     it("Generates distinct passwords across calls.", () => {
         const config = makePasswordConfig();
         expect(generatePassword(config)).not.toBe(generatePassword(config));
+    });
+});
+
+describe("touchSecretLastUsedAt", () => {
+    it("Is a no-op when secretRepo is undefined.", async () => {
+        await touchSecretLastUsedAt(undefined, "secret-1");
+        // No assertion beyond "did not throw" - there's nothing else to observe with no repo at all.
+    });
+
+    it("Does nothing (does not call update) when no matching secret is found.", async () => {
+        const findOne = vi.fn().mockResolvedValue(undefined);
+        const update = vi.fn();
+        const secretRepo: any = { findOne, update };
+
+        await touchSecretLastUsedAt(secretRepo, "secret-1");
+
+        expect(findOne).toHaveBeenCalledWith("secret-1", { ignoreACL: true });
+        expect(update).not.toHaveBeenCalled();
+    });
+
+    it("Persists a fresh ISO-8601 lastUsedAt on the matched secret via a minimal partial update.", async () => {
+        const secret = { uid: "secret-1", version: 3 };
+        const findOne = vi.fn().mockResolvedValue(secret);
+        const update = vi.fn().mockResolvedValue(undefined);
+        const secretRepo: any = { findOne, update };
+
+        const before = Date.now();
+        await touchSecretLastUsedAt(secretRepo, "secret-1");
+        const after = Date.now();
+
+        expect(update).toHaveBeenCalledTimes(1);
+        const [patch, existing, options] = update.mock.calls[0];
+        expect(patch.uid).toBe("secret-1");
+        expect(patch.version).toBe(3);
+        expect(typeof patch.lastUsedAt).toBe("string");
+        expect(Date.parse(patch.lastUsedAt)).toBeGreaterThanOrEqual(before);
+        expect(Date.parse(patch.lastUsedAt)).toBeLessThanOrEqual(after);
+        expect(existing).toBe(secret);
+        expect(options).toEqual({ ignoreACL: true, recordEvent: false });
+    });
+
+    it("Swallows a findOne() failure without throwing, and logs it via the given logger.", async () => {
+        const findOne = vi.fn().mockRejectedValue(new Error("datastore unavailable"));
+        const update = vi.fn();
+        const secretRepo: any = { findOne, update };
+        const logger = { debug: vi.fn(), warn: vi.fn() };
+
+        await expect(touchSecretLastUsedAt(secretRepo, "secret-1", logger)).resolves.toBeUndefined();
+
+        expect(update).not.toHaveBeenCalled();
+        expect(logger.debug).toHaveBeenCalledTimes(1);
+        expect(logger.debug.mock.calls[0][0]).toMatch(/Failed to persist 'lastUsedAt'/);
+    });
+
+    it("Swallows an update() failure without throwing, even with no logger supplied.", async () => {
+        const secret = { uid: "secret-1", version: 1 };
+        const findOne = vi.fn().mockResolvedValue(secret);
+        const update = vi.fn().mockRejectedValue(new Error("version conflict"));
+        const secretRepo: any = { findOne, update };
+
+        await expect(touchSecretLastUsedAt(secretRepo, "secret-1")).resolves.toBeUndefined();
     });
 });
 

@@ -889,7 +889,7 @@ describe("MFAStrategy Tests", () => {
 
             await strategy.authenticate(req, makeRes());
 
-            expect(options.consumeRecoveryCode).toHaveBeenCalledWith("secret-1", 1);
+            expect(options.consumeRecoveryCode).toHaveBeenCalledWith("secret-1", 1, req);
         });
 
         it("Skips already-used codes when matching, and does not resurrect a used one.", async () => {

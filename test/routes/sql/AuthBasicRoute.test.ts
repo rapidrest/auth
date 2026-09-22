@@ -25,6 +25,13 @@ import { SecretType } from "../../../src/models/types.js";
 import { normalizePasswordSubmission } from "../../../src/auth/shared.js";
 import { PasswordConfig } from "../../../src/auth/types.js";
 
+// An app password is checked with a plain argon2 comparison - never normalizePasswordSubmission() - since
+// it's always pasted as literal plaintext by a legacy Basic-auth client. See BaseSecretRoute's own
+// app-password tests for the real create-time hashing path this mirrors.
+const hashAppPasswordForLogin = async function (plaintext: string): Promise<string> {
+    return argon2.hash(plaintext);
+};
+
 // Stored hashes must be of the canonical (would-be client-hashed) form of a plaintext password, not
 // the plaintext itself — see normalizePasswordSubmission() in shared.ts, which
 // BaseSecretRoute.processPasswordSecret() applies to every password created/changed through the real
@@ -96,6 +103,48 @@ describe("Route:AuthBasicSQL Tests", () => {
         const obj: SecretSQL = new SecretSQL({
             data: await hashPasswordForLogin("password", userUid),
             type: SecretType.PASSWORD,
+            userUid,
+            ...data,
+        });
+
+        const result: SecretSQL = await secretRepo.save(obj);
+
+        const records: ACLRecord[] = [];
+
+        // Owner has CRUD access
+        records.push({
+            userOrRoleId: obj.userUid,
+            actions: [
+                ACLAction.COUNT,
+                ACLAction.CREATE,
+                ACLAction.DELETE,
+                ACLAction.EXISTS,
+                ACLAction.LIST,
+                ACLAction.READ,
+                ACLAction.TRUNCATE,
+                ACLAction.UPDATE,
+            ],
+        });
+
+        const acl: any = {
+            uid: result.uid,
+            dateCreated: new Date(),
+            dateModified: new Date(),
+            version: 0,
+            records,
+            parentUid: "SecretSQL",
+        };
+        await aclRepo.save(acl);
+
+        return result;
+    };
+
+    const createAppPasswordSQL = async function (plaintext: string, data?: any): Promise<SecretSQL> {
+        const userUid: string = data?.userUid ?? uuid.v4();
+        const obj: SecretSQL = new SecretSQL({
+            data: await hashAppPasswordForLogin(plaintext),
+            hint: "My mail client",
+            type: SecretType.APP_PASSWORD,
             userUid,
             ...data,
         });
@@ -248,5 +297,149 @@ describe("Route:AuthBasicSQL Tests", () => {
         expect(result.status).toBeGreaterThanOrEqual(200);
         expect(result.status).toBeLessThan(300);
         expect(result.body).toHaveProperty("token");
+    });
+
+    describe("app passwords", () => {
+        // Core feature proof: an app password authenticates via Basic auth even when requireMFA is set,
+        // intentionally bypassing the gate a real password remains subject to (see the test above).
+        it("Can authenticate with a valid app password when the account requires MFA.", async () => {
+            const user: UserSQL = await createUserSQL({ requireMFA: true });
+            await createAppPasswordSQL("ABCDE-FGHJK-MNPQR-STVWX-YZ012-34567", { userUid: user.uid });
+
+            const result = await request(server.getApplication())
+                .get(baseUrl)
+                .set(
+                    "Authorization",
+                    `basic ${Buffer.from(user.uid + ":ABCDE-FGHJK-MNPQR-STVWX-YZ012-34567").toString("base64")}`,
+                );
+
+            expect(result.status).toBeGreaterThanOrEqual(200);
+            expect(result.status).toBeLessThan(300);
+            expect(result.body).toHaveProperty("token");
+        });
+
+        it("Can authenticate with a valid app password when the account does not require MFA.", async () => {
+            const user: UserSQL = await createUserSQL({ requireMFA: false });
+            await createAppPasswordSQL("ABCDE-FGHJK-MNPQR-STVWX-YZ012-34567", { userUid: user.uid });
+
+            const result = await request(server.getApplication())
+                .get(baseUrl)
+                .set(
+                    "Authorization",
+                    `basic ${Buffer.from(user.uid + ":ABCDE-FGHJK-MNPQR-STVWX-YZ012-34567").toString("base64")}`,
+                );
+
+            expect(result.status).toBeGreaterThanOrEqual(200);
+            expect(result.status).toBeLessThan(300);
+            expect(result.body).toHaveProperty("token");
+        });
+
+        it("Cannot authenticate with a wrong app password value - falls through and is rejected.", async () => {
+            const user: UserSQL = await createUserSQL({ requireMFA: true });
+            await createAppPasswordSQL("ABCDE-FGHJK-MNPQR-STVWX-YZ012-34567", { userUid: user.uid });
+
+            const result = await request(server.getApplication())
+                .get(baseUrl)
+                .set(
+                    "Authorization",
+                    `basic ${Buffer.from(user.uid + ":WRONG-FGHJK-MNPQR-STVWX-YZ012-34567").toString("base64")}`,
+                );
+
+            expect(result.status).toBe(401);
+        });
+
+        // Regression: a real password must still honor requireMFA exactly as before - app-password support
+        // must not accidentally loosen that gate for a genuine password submission.
+        it("A real password is still rejected via basic auth when the account requires MFA, unaffected by app-password support.", async () => {
+            const user: UserSQL = await createUserSQL({ requireMFA: true });
+            await createSecretSQL({ userUid: user.uid });
+            await createAppPasswordSQL("ABCDE-FGHJK-MNPQR-STVWX-YZ012-34567", { userUid: user.uid });
+
+            const result = await request(server.getApplication())
+                .get(baseUrl)
+                .set("Authorization", `basic ${Buffer.from(user.uid + ":password").toString("base64")}`);
+
+            expect(result.status).toBe(401);
+        });
+
+        it("Can authenticate with any of multiple app passwords on the same account, each independently.", async () => {
+            const user: UserSQL = await createUserSQL();
+            await createAppPasswordSQL("FIRST-FGHJK-MNPQR-STVWX-YZ012-34567", { userUid: user.uid });
+            await createAppPasswordSQL("SECND-FGHJK-MNPQR-STVWX-YZ012-34567", { userUid: user.uid });
+
+            for (const plaintext of ["FIRST-FGHJK-MNPQR-STVWX-YZ012-34567", "SECND-FGHJK-MNPQR-STVWX-YZ012-34567"]) {
+                const result = await request(server.getApplication())
+                    .get(baseUrl)
+                    .set("Authorization", `basic ${Buffer.from(user.uid + ":" + plaintext).toString("base64")}`);
+
+                expect(result.status).toBeGreaterThanOrEqual(200);
+                expect(result.status).toBeLessThan(300);
+            }
+        });
+
+        // Each app password is independently revocable: deleting one must not affect the others.
+        it("Revoking (deleting) one app password does not affect another app password on the same account.", async () => {
+            const user: UserSQL = await createUserSQL();
+            const revoked: SecretSQL = await createAppPasswordSQL("REVKD-FGHJK-MNPQR-STVWX-YZ012-34567", {
+                userUid: user.uid,
+            });
+            await createAppPasswordSQL("KEPTX-FGHJK-MNPQR-STVWX-YZ012-34567", { userUid: user.uid });
+
+            await secretRepo.delete({ uid: revoked.uid });
+
+            const revokedResult = await request(server.getApplication())
+                .get(baseUrl)
+                .set(
+                    "Authorization",
+                    `basic ${Buffer.from(user.uid + ":REVKD-FGHJK-MNPQR-STVWX-YZ012-34567").toString("base64")}`,
+                );
+            expect(revokedResult.status).toBe(401);
+
+            const keptResult = await request(server.getApplication())
+                .get(baseUrl)
+                .set(
+                    "Authorization",
+                    `basic ${Buffer.from(user.uid + ":KEPTX-FGHJK-MNPQR-STVWX-YZ012-34567").toString("base64")}`,
+                );
+            expect(keptResult.status).toBeGreaterThanOrEqual(200);
+            expect(keptResult.status).toBeLessThan(300);
+        });
+
+        // lastUsedAt persistence is best-effort/fire-and-forget (see touchSecretLastUsedAt() in shared.ts) -
+        // it isn't guaranteed to have landed by the time the HTTP response comes back, so this polls briefly
+        // rather than asserting immediately after the request resolves.
+        it("Persists lastUsedAt on only the matched app password after a successful login, leaving an unused one untouched.", async () => {
+            const user: UserSQL = await createUserSQL();
+            const used: SecretSQL = await createAppPasswordSQL("USEDX-FGHJK-MNPQR-STVWX-YZ012-34567", {
+                userUid: user.uid,
+            });
+            const unused: SecretSQL = await createAppPasswordSQL("OTHER-FGHJK-MNPQR-STVWX-YZ012-34567", {
+                userUid: user.uid,
+            });
+            // A never-set nullable column round-trips through TypeORM as `null`, not `undefined` - same as
+            // every other optional Secret field (e.g. `hint`) already behaves in this tier.
+            expect(used.lastUsedAt).toBeNull();
+
+            const result = await request(server.getApplication())
+                .get(baseUrl)
+                .set(
+                    "Authorization",
+                    `basic ${Buffer.from(user.uid + ":USEDX-FGHJK-MNPQR-STVWX-YZ012-34567").toString("base64")}`,
+                );
+            expect(result.status).toBeGreaterThanOrEqual(200);
+            expect(result.status).toBeLessThan(300);
+
+            let updated: SecretSQL | null = null;
+            for (let i = 0; i < 20 && !updated?.lastUsedAt; i++) {
+                updated = await secretRepo.findOne({ where: { uid: used.uid } });
+                if (!updated?.lastUsedAt) {
+                    await new Promise((resolve) => setTimeout(resolve, 25));
+                }
+            }
+
+            expect(updated?.lastUsedAt).toEqual(expect.any(String));
+            const stillUnused: SecretSQL | null = await secretRepo.findOne({ where: { uid: unused.uid } });
+            expect(stillUnused?.lastUsedAt).toBeNull();
+        });
     });
 });

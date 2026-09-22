@@ -122,6 +122,7 @@ export interface Profile extends BaseEntity {
  *
  */
 export enum SecretType {
+    APP_PASSWORD = "app-password",
     FIDO2 = "fido2",
     PASSKEY = "passkey",
     PASSWORD = "password",
@@ -134,6 +135,7 @@ export enum SecretType {
  * to authenticate the user with the system.
  *
  * Supported types of secrets:
+ * * `app-password`
  * * `fido2`
  * * `openid`
  * * `password`
@@ -153,6 +155,12 @@ export interface Secret extends BaseEntity {
      * A short textual description that gives the user a hint about what the secret is.
      */
     hint?: string;
+
+    /**
+     * The ISO-8601 timestamp of the last time this secret was used to successfully authenticate; unset
+     * if it never has been.
+     */
+    lastUsedAt?: string;
 
     /**
      * The type of secret (e.g. `fido2`, `openid`, `password`, `passkey`, `totp`)

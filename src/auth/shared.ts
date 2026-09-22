@@ -4,7 +4,8 @@
 ////////////////////////////////////////////////////////////////////////////////
 import * as crypto from "crypto";
 import { ApiError, MessagingUtils } from "@rapidrest/core";
-import { ApiErrors, HttpRequest } from "@rapidrest/service-core";
+import { ApiErrors, HttpRequest, RepoUtils } from "@rapidrest/service-core";
+import { Secret } from "../models/types.js";
 import {
     OTPContactType,
     PasskeyConfig,
@@ -520,6 +521,46 @@ export const generateRecoveryCodes = function (): string[] {
         codes.push(`${raw.slice(0, 5)}-${raw.slice(5)}`);
     }
     return codes;
+};
+
+///////////////////////////////////////////////////////////////////////////////
+// APP PASSWORDS
+///////////////////////////////////////////////////////////////////////////////
+
+/**
+ * The number of Crockford Base32 characters (see `RECOVERY_CODE_ALPHABET`) in a generated app password.
+ * At 5 bits/character, 30 characters yields 150 bits of entropy - well above the 128-bit margin expected
+ * of a standing, indefinitely-reusable credential (unlike a `generateRecoveryCodes()` code, which only
+ * needs to resist a handful of guesses before its single use is spent).
+ */
+const APP_PASSWORD_LENGTH = 30;
+/**
+ * The number of characters per dash-separated group in a generated app password's plaintext rendering -
+ * matches `generateRecoveryCodes()`'s own grouping so both stay easy to eyeball-verify a character at a
+ * time, which a user may need to do once before pasting the value into a legacy client's password field.
+ */
+const APP_PASSWORD_GROUP_SIZE = 5;
+
+/**
+ * Generates a single, high-entropy plaintext app password (see `SecretType.APP_PASSWORD`) - a standing,
+ * individually-revocable credential a user creates on demand for one legacy Basic-auth client (e.g. an
+ * old mail client) that can't complete an MFA challenge. Unlike `generateRecoveryCodes()`, this returns
+ * exactly one value rather than a batch - the right shape for a credential meant to keep working
+ * indefinitely (until explicitly revoked) rather than be spent on first use. Shown to the user exactly
+ * once, at creation time (see `BaseSecretRoute.validateAppPasswordCreate()`) - only its argon2 hash is
+ * ever persisted.
+ */
+export const generateAppPassword = function (): string {
+    let raw = "";
+    for (let i = 0; i < APP_PASSWORD_LENGTH; i++) {
+        raw += RECOVERY_CODE_ALPHABET[crypto.randomInt(RECOVERY_CODE_ALPHABET.length)];
+    }
+
+    const groups: string[] = [];
+    for (let i = 0; i < raw.length; i += APP_PASSWORD_GROUP_SIZE) {
+        groups.push(raw.slice(i, i + APP_PASSWORD_GROUP_SIZE));
+    }
+    return groups.join("-");
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1113,5 +1154,54 @@ export const importSimpleWebAuthn = async function (): Promise<any> {
             "This feature requires the optional peer dependency '@simplewebauthn/server'. Install it with: " +
                 "yarn add @simplewebauthn/server",
         );
+    }
+};
+
+///////////////////////////////////////////////////////////////////////////////
+// SECRET USAGE TRACKING
+///////////////////////////////////////////////////////////////////////////////
+
+/**
+ * Best-effort persists the current time as `Secret.lastUsedAt` on the identified secret, for observability
+ * into when each stored credential was last used to successfully authenticate. Re-fetches the secret by
+ * `uid` and writes a minimal partial update (`{uid, version, lastUsedAt}`), mirroring the exact
+ * `findOne`-then-partial-`update()` pattern the various `updateCredentialCounter()`/`updateSecretTimeStep()`
+ * route methods already use elsewhere in this library.
+ *
+ * A call site that already performs its own `findOne`-then-`update()` round trip for the same secret in the
+ * same request (e.g. `updateCredentialCounter()`, `updateSecretTimeStep()`, `consumeRecoveryCode()`) should
+ * merge `lastUsedAt` into that existing write instead of calling this - a second independent write here
+ * would race the first on `version` and either lose or fail spuriously. This helper is for the call sites
+ * that have no such write of their own (a plain `password`/`app-password` match).
+ *
+ * Deliberately swallows every failure - a missing secret, a stale `version` conflict, a transient datastore
+ * error - rather than letting it propagate. Persisting this timestamp is a nice-to-have audit signal, never
+ * something that should be allowed to fail an otherwise-successful authentication; callers can invoke this
+ * without awaiting it, or `.catch()` it, either way it never rejects.
+ *
+ * @param secretRepo The repository to persist the update through. A no-op if `undefined`.
+ * @param uid The unique id of the secret that was just used to authenticate.
+ * @param logger An optional `@Logger`-injected logger to trace a swallowed failure onto, at `debug` level -
+ * only passed by a call site whose class already has one (not every route does).
+ */
+export const touchSecretLastUsedAt = async function <S extends Secret>(
+    secretRepo: RepoUtils<S> | undefined,
+    uid: string,
+    logger?: any,
+): Promise<void> {
+    if (!secretRepo) {
+        return;
+    }
+    try {
+        const secret: S | undefined = await secretRepo.findOne(uid, { ignoreACL: true });
+        if (secret) {
+            await secretRepo.update(
+                { uid: secret.uid, version: secret.version, lastUsedAt: new Date().toISOString() } as Partial<S>,
+                secret,
+                { ignoreACL: true, recordEvent: false },
+            );
+        }
+    } catch (err) {
+        logger?.debug(`[touchSecretLastUsedAt] Failed to persist 'lastUsedAt' for secret ${uid}: ${err}`);
     }
 };

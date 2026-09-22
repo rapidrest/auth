@@ -5,8 +5,10 @@
 // Isolated unit tests for BaseAuthBasicRoute — no HTTP server, no database. ObjectFactory and
 // AuthMiddleware are mocked directly so initialize() and the verify() closure it builds can be
 // exercised (including their defensive "not set" guards) without a full Server/route-scan.
+import { EventUtils } from "@rapidrest/core";
 import { RepoUtils } from "@rapidrest/service-core";
 import { BasicStrategy, BasicStrategyOptions } from "../../src/auth/BasicStrategy.js";
+import { AuthEventType } from "../../src/auth/events.js";
 import { BaseAuthBasicRoute } from "../../src/routes/BaseAuthBasicRoute.js";
 import { UserUtils } from "../../src/routes/UserUtils.js";
 import { SecretType } from "../../src/models/types.js";
@@ -153,20 +155,26 @@ describe("BaseAuthBasicRoute Tests", () => {
 
         // Regression/coverage: `requireMFA` accounts must reject basic auth entirely rather than let a
         // correct password succeed, since basic auth has no way to prompt for a second factor.
-        it("Throws when the account requires MFA, even before checking any stored password.", async () => {
+        it("Throws when the account requires MFA and no app password matches, without ever checking any PASSWORD secret.", async () => {
             const { userUtils, secretRepo, verify } = await setupRoute();
             userUtils.lookup.mockResolvedValue({ uid: "user-uid-1", requireMFA: true });
+            // No app passwords on this account - the app-password check below finds nothing to match.
+            secretRepo.find.mockResolvedValue([]);
 
             await expect(verify("user1", "pass1")).rejects.toThrow(/Invalid name or password/);
-            expect(secretRepo.find).not.toHaveBeenCalled();
+            expect(secretRepo.find).not.toHaveBeenCalledWith(
+                expect.objectContaining({ type: SecretType.PASSWORD }),
+                expect.anything(),
+            );
         });
 
         // The message and timing must match every other rejection path in this function (unknown user, no
         // password secret, wrong password) - a distinct "requires MFA" message would let an attacker
         // enumerate valid usernames, and which of them have MFA enabled, purely from the error text.
         it("Performs a dummy Argon2 verification when the account requires MFA, to equalize response timing and error message with other rejection paths.", async () => {
-            const { userUtils, verify } = await setupRoute();
+            const { userUtils, secretRepo, verify } = await setupRoute();
             userUtils.lookup.mockResolvedValue({ uid: "user-uid-1", requireMFA: true });
+            secretRepo.find.mockResolvedValue([]);
             const shared = await import("../../src/auth/shared.js");
             const verifyDummySpy = vi.spyOn(shared, "verifyDummyPassword");
 
@@ -255,9 +263,290 @@ describe("BaseAuthBasicRoute Tests", () => {
         it("Propagates a non-WeakClientHashError thrown while normalizing, rather than swallowing it.", async () => {
             const { userUtils, secretRepo, verify } = await setupRoute();
             userUtils.lookup.mockResolvedValue({ uid: 123 as any });
-            secretRepo.find.mockResolvedValue([{ data: "some-hash" }]);
+            // No app passwords - so the app-password check below (a plain argon2 comparison, no
+            // normalization involved) finds nothing to match and falls through to the real password check.
+            secretRepo.find.mockImplementation(async (query: any) =>
+                query.type === SecretType.APP_PASSWORD ? [] : [{ data: "some-hash" }],
+            );
 
             await expect(verify("user1", "correct-password")).rejects.toThrow(/must be of type string/);
+        });
+
+        describe("app passwords", () => {
+            // Core feature proof: an app password authenticates even when requireMFA is set, intentionally
+            // bypassing the gate a real password is subject to a few lines below.
+            it("Resolves the user via a matching app password even when requireMFA is true.", async () => {
+                const { userUtils, secretRepo, verify } = await setupRoute();
+                const argon2 = await import("argon2");
+                userUtils.lookup.mockResolvedValue({ uid: "user-uid-1", requireMFA: true });
+                secretRepo.find.mockImplementation(async (query: any) =>
+                    query.type === SecretType.APP_PASSWORD
+                        ? [{ data: await argon2.hash("ABCDE-FGHJK-MNPQR-STVWX-YZ012-34567") }]
+                        : [],
+                );
+
+                const user = await verify("user1", "ABCDE-FGHJK-MNPQR-STVWX-YZ012-34567");
+
+                expect(user).toEqual({ uid: "user-uid-1", requireMFA: true });
+                expect(secretRepo.find).toHaveBeenCalledWith(
+                    { userUid: "user-uid-1", type: SecretType.APP_PASSWORD },
+                    { ignoreACL: true },
+                );
+            });
+
+            it("Resolves the user via a matching app password when requireMFA is false too.", async () => {
+                const { userUtils, secretRepo, verify } = await setupRoute();
+                const argon2 = await import("argon2");
+                userUtils.lookup.mockResolvedValue({ uid: "user-uid-1", requireMFA: false });
+                secretRepo.find.mockImplementation(async (query: any) =>
+                    query.type === SecretType.APP_PASSWORD
+                        ? [{ data: await argon2.hash("ABCDE-FGHJK-MNPQR-STVWX-YZ012-34567") }]
+                        : [],
+                );
+
+                const user = await verify("user1", "ABCDE-FGHJK-MNPQR-STVWX-YZ012-34567");
+
+                expect(user).toEqual({ uid: "user-uid-1", requireMFA: false });
+            });
+
+            it("Resolves the user when any of several app passwords matches, and each is checked with a plain argon2 comparison (never normalizePasswordSubmission()).", async () => {
+                const { userUtils, secretRepo, verify } = await setupRoute();
+                const argon2 = await import("argon2");
+                userUtils.lookup.mockResolvedValue({ uid: "user-uid-1" });
+                secretRepo.find.mockImplementation(async (query: any) =>
+                    query.type === SecretType.APP_PASSWORD
+                        ? [{ data: await argon2.hash("first-app-password") }, { data: await argon2.hash("second-app-password") }]
+                        : [],
+                );
+
+                const user = await verify("user1", "second-app-password");
+
+                expect(user).toEqual({ uid: "user-uid-1" });
+            });
+
+            it("Falls through to the normal requireMFA/password checks (and ultimately rejects) when the submitted value doesn't match any app password.", async () => {
+                const { userUtils, secretRepo, verify } = await setupRoute();
+                const argon2 = await import("argon2");
+                userUtils.lookup.mockResolvedValue({ uid: "user-uid-1", requireMFA: true });
+                secretRepo.find.mockImplementation(async (query: any) =>
+                    query.type === SecretType.APP_PASSWORD ? [{ data: await argon2.hash("real-app-password") }] : [],
+                );
+
+                await expect(verify("user1", "wrong-app-password")).rejects.toThrow(/Invalid name or password/);
+            });
+
+            it("A real password is still rejected when requireMFA is true, unaffected by app-password support (existing behavior preserved).", async () => {
+                const { userUtils, secretRepo, verify } = await setupRoute();
+                const shared = await import("../../src/auth/shared.js");
+                const argon2 = await import("argon2");
+                userUtils.lookup.mockResolvedValue({ uid: "user-uid-1", requireMFA: true });
+                const canonical = await shared.normalizePasswordSubmission(
+                    "correct-password",
+                    "user-uid-1",
+                    new (await import("../../src/auth/types.js")).PasswordConfig(),
+                );
+                secretRepo.find.mockImplementation(async (query: any) =>
+                    query.type === SecretType.APP_PASSWORD ? [] : [{ data: await argon2.hash(canonical) }],
+                );
+
+                await expect(verify("user1", "correct-password")).rejects.toThrow(/Invalid name or password/);
+            });
+
+            it("Performs a dummy Argon2 verification when the account has no app-password secrets, to equalize response timing.", async () => {
+                const { userUtils, secretRepo, verify } = await setupRoute();
+                userUtils.lookup.mockResolvedValue({ uid: "user-uid-1", requireMFA: true });
+                secretRepo.find.mockResolvedValue([]);
+                const shared = await import("../../src/auth/shared.js");
+                const verifyDummySpy = vi.spyOn(shared, "verifyDummyPassword");
+
+                await expect(verify("user1", "some-value")).rejects.toThrow(/Invalid name or password/);
+
+                // No userUid/config - app passwords have no client-hashing concept to equalize against.
+                expect(verifyDummySpy).toHaveBeenCalledWith("some-value");
+            });
+
+            it("Does not check app passwords at all when appPasswordEnabled is false.", async () => {
+                const { route, userUtils, secretRepo, verify } = await setupRoute();
+                (route as any).appPasswordEnabled = false;
+                userUtils.lookup.mockResolvedValue({ uid: "user-uid-1", requireMFA: true });
+
+                await expect(verify("user1", "some-value")).rejects.toThrow(/Invalid name or password/);
+
+                expect(secretRepo.find).not.toHaveBeenCalledWith(
+                    expect.objectContaining({ type: SecretType.APP_PASSWORD }),
+                    expect.anything(),
+                );
+            });
+
+            // Regression: disabling app passwords deployment-wide must stop an already-created one from
+            // authenticating - it falls through to the normal password path, which correctly rejects it
+            // since it's stored under SecretType.APP_PASSWORD, not SecretType.PASSWORD. Real-password auth
+            // itself must be unaffected by the flag.
+            it("Stops a previously-valid app password from authenticating once appPasswordEnabled is false, without affecting real-password auth.", async () => {
+                const { route, userUtils, secretRepo, verify } = await setupRoute();
+                (route as any).appPasswordEnabled = false;
+                const argon2 = await import("argon2");
+                const shared = await import("../../src/auth/shared.js");
+                userUtils.lookup.mockResolvedValue({ uid: "user-uid-1", requireMFA: false });
+                const canonical = await shared.normalizePasswordSubmission(
+                    "correct-password",
+                    "user-uid-1",
+                    new (await import("../../src/auth/types.js")).PasswordConfig(),
+                );
+                secretRepo.find.mockImplementation(async (query: any) =>
+                    query.type === SecretType.PASSWORD ? [{ data: await argon2.hash(canonical) }] : [],
+                );
+
+                // The app password itself no longer authenticates...
+                await expect(verify("user1", "ABCDE-FGHJK-MNPQR-STVWX-YZ012-34567")).rejects.toThrow(
+                    /Invalid name or password/,
+                );
+                // ...but the real password still does.
+                const user = await verify("user1", "correct-password");
+                expect(user).toEqual({ uid: "user-uid-1", requireMFA: false });
+            });
+
+            // lastUsedAt + auth.app_password.used - the single most security-relevant new signal this
+            // feature adds (a match here means requireMFA was bypassed for this login).
+            it("Touches only the matched app password's lastUsedAt, and records an auth.app_password.used event, on a successful match.", async () => {
+                const { userUtils, secretRepo, verify } = await setupRoute();
+                const argon2 = await import("argon2");
+                const shared = await import("../../src/auth/shared.js");
+                const touchSpy = vi.spyOn(shared, "touchSecretLastUsedAt").mockResolvedValue(undefined);
+                const eventSpy = vi.spyOn(EventUtils, "record").mockResolvedValue(undefined);
+                userUtils.lookup.mockResolvedValue({ uid: "user-uid-1" });
+                secretRepo.find.mockImplementation(async (query: any) =>
+                    query.type === SecretType.APP_PASSWORD
+                        ? [
+                              { uid: "app-pw-1", data: await argon2.hash("first-app-password") },
+                              { uid: "app-pw-2", data: await argon2.hash("second-app-password") },
+                          ]
+                        : [],
+                );
+                const req: any = { path: "/auth/basic", socket: { remoteAddress: "1.2.3.4" }, headers: {} };
+
+                const user = await verify("user1", "second-app-password", req);
+
+                expect(user).toEqual({ uid: "user-uid-1" });
+                // Only the matched secret (app-pw-2) is touched - not app-pw-1, which was never used.
+                expect(touchSpy).toHaveBeenCalledTimes(1);
+                expect(touchSpy).toHaveBeenCalledWith(secretRepo, "app-pw-2");
+                expect(eventSpy).toHaveBeenCalledWith({
+                    type: AuthEventType.APP_PASSWORD_USED,
+                    userUid: "user-uid-1",
+                    ip: expect.any(String),
+                    secretUid: "app-pw-2",
+                    path: "/auth/basic",
+                });
+            });
+
+            it("Does not record an auth.app_password.used event when the app password does not match.", async () => {
+                const { userUtils, secretRepo, verify } = await setupRoute();
+                const argon2 = await import("argon2");
+                const eventSpy = vi.spyOn(EventUtils, "record").mockResolvedValue(undefined);
+                userUtils.lookup.mockResolvedValue({ uid: "user-uid-1", requireMFA: true });
+                secretRepo.find.mockImplementation(async (query: any) =>
+                    query.type === SecretType.APP_PASSWORD ? [{ data: await argon2.hash("real-app-password") }] : [],
+                );
+
+                await expect(verify("user1", "wrong-app-password")).rejects.toThrow(/Invalid name or password/);
+
+                expect(eventSpy).not.toHaveBeenCalledWith(
+                    expect.objectContaining({ type: AuthEventType.APP_PASSWORD_USED }),
+                );
+            });
+
+            it("Does not record an auth.app_password.used event when a real password authenticates instead.", async () => {
+                const { userUtils, secretRepo, verify } = await setupRoute();
+                const argon2 = await import("argon2");
+                const shared = await import("../../src/auth/shared.js");
+                const eventSpy = vi.spyOn(EventUtils, "record").mockResolvedValue(undefined);
+                userUtils.lookup.mockResolvedValue({ uid: "user-uid-1", requireMFA: false });
+                const canonical = await shared.normalizePasswordSubmission(
+                    "correct-password",
+                    "user-uid-1",
+                    new (await import("../../src/auth/types.js")).PasswordConfig(),
+                );
+                secretRepo.find.mockImplementation(async (query: any) =>
+                    query.type === SecretType.PASSWORD ? [{ data: await argon2.hash(canonical) }] : [],
+                );
+
+                const user = await verify("user1", "correct-password");
+
+                expect(user).toEqual({ uid: "user-uid-1", requireMFA: false });
+                expect(eventSpy).not.toHaveBeenCalledWith(
+                    expect.objectContaining({ type: AuthEventType.APP_PASSWORD_USED }),
+                );
+            });
+
+            it("Still resolves the user via a matching app password even when EventUtils.record() itself rejects.", async () => {
+                const { userUtils, secretRepo, verify } = await setupRoute();
+                const argon2 = await import("argon2");
+                vi.spyOn(EventUtils, "record").mockRejectedValue(new Error("telemetry down"));
+                userUtils.lookup.mockResolvedValue({ uid: "user-uid-1" });
+                secretRepo.find.mockImplementation(async (query: any) =>
+                    query.type === SecretType.APP_PASSWORD
+                        ? [{ uid: "app-pw-1", data: await argon2.hash("app-password-value") }]
+                        : [],
+                );
+
+                const user = await verify("user1", "app-password-value");
+
+                expect(user).toEqual({ uid: "user-uid-1" });
+            });
+
+            it("Still resolves the user via a matching app password even when touchSecretLastUsedAt() itself rejects.", async () => {
+                const { userUtils, secretRepo, verify } = await setupRoute();
+                const argon2 = await import("argon2");
+                const shared = await import("../../src/auth/shared.js");
+                vi.spyOn(shared, "touchSecretLastUsedAt").mockRejectedValue(new Error("datastore unavailable"));
+                userUtils.lookup.mockResolvedValue({ uid: "user-uid-1" });
+                secretRepo.find.mockImplementation(async (query: any) =>
+                    query.type === SecretType.APP_PASSWORD
+                        ? [{ uid: "app-pw-1", data: await argon2.hash("app-password-value") }]
+                        : [],
+                );
+
+                const user = await verify("user1", "app-password-value");
+
+                expect(user).toEqual({ uid: "user-uid-1" });
+            });
+        });
+
+        it("Touches the matched password secret's lastUsedAt on a successful real-password login.", async () => {
+            const { userUtils, secretRepo, verify } = await setupRoute();
+            const argon2 = await import("argon2");
+            const shared = await import("../../src/auth/shared.js");
+            const config = new (await import("../../src/auth/types.js")).PasswordConfig();
+            const touchSpy = vi.spyOn(shared, "touchSecretLastUsedAt").mockResolvedValue(undefined);
+            userUtils.lookup.mockResolvedValue({ uid: "user-uid-1" });
+            secretRepo.find.mockResolvedValue([
+                { uid: "pw-1", data: await argon2.hash(await shared.normalizePasswordSubmission("another-password", "user-uid-1", config)) },
+                { uid: "pw-2", data: await argon2.hash(await shared.normalizePasswordSubmission("correct-password", "user-uid-1", config)) },
+            ]);
+
+            const user = await verify("user1", "correct-password");
+
+            expect(user).toEqual({ uid: "user-uid-1" });
+            // Only the matched secret (pw-2) is touched - not pw-1, which never matched.
+            expect(touchSpy).toHaveBeenCalledTimes(1);
+            expect(touchSpy).toHaveBeenCalledWith(secretRepo, "pw-2");
+        });
+
+        it("Still resolves the user via a matching real password even when touchSecretLastUsedAt() itself rejects.", async () => {
+            const { userUtils, secretRepo, verify } = await setupRoute();
+            const argon2 = await import("argon2");
+            const shared = await import("../../src/auth/shared.js");
+            const config = new (await import("../../src/auth/types.js")).PasswordConfig();
+            vi.spyOn(shared, "touchSecretLastUsedAt").mockRejectedValue(new Error("datastore unavailable"));
+            userUtils.lookup.mockResolvedValue({ uid: "user-uid-1" });
+            secretRepo.find.mockResolvedValue([
+                { uid: "pw-1", data: await argon2.hash(await shared.normalizePasswordSubmission("correct-password", "user-uid-1", config)) },
+            ]);
+
+            const user = await verify("user1", "correct-password");
+
+            expect(user).toEqual({ uid: "user-uid-1" });
         });
     });
 });

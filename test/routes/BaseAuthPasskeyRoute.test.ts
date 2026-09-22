@@ -230,7 +230,7 @@ describe("BaseAuthPasskeyRoute Tests", () => {
 
             expect(secret.data.counter).toBe(5);
             expect(update).toHaveBeenCalledWith(
-                { uid: "secret-1", version: 1, data: secret.data },
+                { uid: "secret-1", version: 1, data: secret.data, lastUsedAt: expect.any(String) },
                 secret,
                 { ignoreACL: true, recordEvent: false },
             );

@@ -19,6 +19,7 @@ import { ApiError, EventUtils, JWTUser, ObjectDecorators, UserUtils } from "@rap
 import {
     decryptTOTPSecret,
     encryptTOTPSecret,
+    generateAppPassword,
     generatePasskeyRegistrationOptions,
     generateRecoveryCodes,
     generateTOTPURI,
@@ -101,6 +102,15 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
     @Config("auth:password", new PasswordConfig())
     protected passwordConfig: PasswordConfig = new PasswordConfig();
 
+    /**
+     * Set to `false` to disable app passwords (see `SecretType.APP_PASSWORD`) deployment-wide. Turning
+     * this off refuses creation of new app passwords (see `validateAppPasswordCreate()`) and stops any
+     * existing app-password secret from authenticating (see `BaseAuthBasicRoute`) - it does not delete
+     * any already-created app password, so re-enabling this restores them exactly as they were.
+     */
+    @Config("auth:app_password:enabled", true)
+    protected appPasswordEnabled: boolean = true;
+
     @Config("trusted_proxies", [])
     protected trustedProxies: string[] = [];
 
@@ -162,6 +172,9 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
         this.enforceOwnership(obj, user);
 
         switch (obj.type) {
+            case SecretType.APP_PASSWORD:
+                await this.validateAppPasswordCreate(obj, req);
+                break;
             case SecretType.FIDO2:
                 await this.validateWebAuthnCreate(obj, req, this.fido2Config);
                 break;
@@ -275,6 +288,48 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
             }
             throw err;
         }
+    }
+
+    /**
+     * Validates a new `app-password` secret's `hint` and generates the credential itself, discarding any
+     * client-supplied `data` entirely - like recovery codes, there's no legitimate reason for a caller to
+     * bring their own value here; accepting one would let an attacker who can currently write to this
+     * secret type plant a known credential for later use. A `hint` is required (not merely optional, as it
+     * is for other secret types) since an account may accumulate several app passwords over time - the
+     * label is the only way a user tells them apart again later, once the plaintext itself is gone.
+     *
+     * Only the generated password's argon2 hash is persisted; the plaintext is stashed on `req` so
+     * `sanitizeSecretForResponse()` can return it to the caller exactly once, in the `create()` response -
+     * it can never be retrieved again after that, since it's never written to the datastore.
+     *
+     * @param obj The secret being created.
+     * @param req The source HTTP request, used to stash the plaintext app password for the `create()`
+     * response only.
+     */
+    protected async validateAppPasswordCreate(obj: Partial<T>, req: HttpRequest): Promise<void> {
+        if (!this.appPasswordEnabled) {
+            throw new ApiError(ApiErrors.INVALID_REQUEST, 400, "This server does not allow creating app passwords.");
+        }
+
+        const hint: string | undefined = typeof obj.hint === "string" ? obj.hint.trim() : undefined;
+        if (!hint) {
+            throw new ApiError(
+                ApiErrors.INVALID_REQUEST,
+                400,
+                "A secret of type 'app-password' must specify a non-empty 'hint' to tell it apart from " +
+                    "other app passwords later.",
+            );
+        }
+        if (hint.length > 100) {
+            throw new ApiError(ApiErrors.INVALID_REQUEST, 400, "The 'hint' for an app password must be at most 100 characters.");
+        }
+        obj.hint = hint;
+
+        const plaintext: string = generateAppPassword();
+        const argon = await importArgon2();
+        obj.data = await argon.hash(plaintext, this.argon2Options());
+
+        (req as any).generatedAppPassword = plaintext;
     }
 
     /**
@@ -522,6 +577,21 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
                     ip: NetUtils.getIPAddress(req, this.trustedProxies),
                     secretType: obj.type,
                 }).catch(() => undefined);
+            } else if (obj.type === SecretType.PASSWORD) {
+                EventUtils.record({
+                    type: AuthEventType.PASSWORD_CHANGED,
+                    userUid: obj.userUid,
+                    ip: NetUtils.getIPAddress(req, this.trustedProxies),
+                }).catch(() => undefined);
+            } else if (obj.type === SecretType.APP_PASSWORD) {
+                // Not part of isMFASecretType() - an app password is deliberately never counted as a
+                // second factor - so it gets its own event pair rather than reusing MFA_ENROLLED/MFA_REMOVED.
+                EventUtils.record({
+                    type: AuthEventType.APP_PASSWORD_CREATED,
+                    userUid: obj.userUid,
+                    ip: NetUtils.getIPAddress(req, this.trustedProxies),
+                    secretType: obj.type,
+                }).catch(() => undefined);
             }
         }
 
@@ -572,6 +642,11 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
             // plaintext it stashed on `req`, and only this once; it isn't recoverable after this response.
             (obj as any).codes = (req as any)?.generatedRecoveryCodes;
             delete obj.data;
+        } else if (obj.type === SecretType.APP_PASSWORD) {
+            // The hashed `data` persisted by validateAppPasswordCreate() is never returned - only the
+            // plaintext it stashed on `req`, and only this once; it isn't recoverable after this response.
+            (obj as any).password = (req as any)?.generatedAppPassword;
+            delete obj.data;
         }
         return obj;
     }
@@ -598,6 +673,13 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
         if (existing && this.isMFASecretType(existing.type)) {
             EventUtils.record({
                 type: AuthEventType.MFA_REMOVED,
+                userUid: existing.userUid,
+                ip: NetUtils.getIPAddress(req, this.trustedProxies),
+                secretType: existing.type,
+            }).catch(() => undefined);
+        } else if (existing && existing.type === SecretType.APP_PASSWORD) {
+            EventUtils.record({
+                type: AuthEventType.APP_PASSWORD_REMOVED,
                 userUid: existing.userUid,
                 ip: NetUtils.getIPAddress(req, this.trustedProxies),
                 secretType: existing.type,
@@ -699,6 +781,17 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
             // FIDO2/Passkey immutability, TOTP secret validation) and persisting `obj.data` completely
             // unvalidated.
             switch (existing.type) {
+                case SecretType.APP_PASSWORD:
+                    // Do not allow changing an app password's value - a client-supplied value here would
+                    // write attacker-controlled plaintext straight into `data` unhashed (validateCreate()'s
+                    // hashing only runs on create). App passwords must be deleted and re-created to rotate
+                    // them (a hint-only update, with no `data` key, still works - see the `"data" in obj`
+                    // gate above).
+                    throw new ApiError(
+                        ApiErrors.INVALID_REQUEST,
+                        400,
+                        "App passwords cannot be modified. Delete and create a new secret to rotate them.",
+                    );
                 case SecretType.FIDO2:
                     // Do not allow changing FIDO2 data. FIDO2 secrets must be re-created.
                     throw new ApiError(
@@ -753,9 +846,23 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
             throw new ApiError(ApiErrors.NOT_FOUND, 404, ApiErrorMessages.NOT_FOUND);
         }
 
+        // Captured before validateUpdate() runs - it reassigns obj.data (e.g. to the freshly-hashed
+        // value) but never removes the key, so this still correctly reflects whether the caller actually
+        // submitted a new `data` value, as opposed to e.g. a hint-only rename.
+        const isPasswordDataChange: boolean = existing.type === SecretType.PASSWORD && "data" in obj;
+
         await this.validateUpdate(obj, existing, user);
 
         const result: T = await super.doUpdate(id, obj, { user });
+
+        if (isPasswordDataChange) {
+            EventUtils.record({
+                type: AuthEventType.PASSWORD_CHANGED,
+                userUid: existing.userUid,
+                ip: NetUtils.getIPAddress(req, this.trustedProxies),
+            }).catch(() => undefined);
+        }
+
         return await this.sanitizeSecretForResponse(result);
     }
 }

@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+* Added app passwords — a user-generated, high-entropy `app-password` secret for a single legacy
+  Basic-auth client (e.g. an old mail client) that can't complete an MFA challenge. Unlike a real password,
+  it's allowed to authenticate via `BaseAuthBasicRoute` even when the account has `requireMFA` set, since
+  it's a distinct, individually-revocable credential scoped to Basic-auth-only flows.
+  * Created via `POST /secrets` with `{ type: "app-password", hint: "<label>" }` — a non-empty `hint` is
+    required and any client-supplied `data` is discarded. The generated plaintext is returned exactly once,
+    as `password`, in the create response.
+  * Controlled by `auth:app_password:enabled` (default `true`) on both `BaseSecretRoute` (creation) and
+    `BaseAuthBasicRoute` (the `requireMFA` bypass); disabling it does not delete any existing app password.
+  * A real password submitted via `BaseAuthBasicRoute` remains subject to `requireMFA` exactly as before —
+    the bypass only ever applies to an `app-password` secret.
+  * Added `generateAppPassword()` to `src/auth/shared.ts`.
+* Added `Secret.lastUsedAt` (an ISO-8601 string, absent/`undefined` until the secret has ever been used —
+  though a never-set nullable column round-trips as `null` on the SQL tier, same as every other optional
+  `Secret` field like `hint`), updated on every successful authentication against the matching secret:
+  a real or app password, a TOTP code, a FIDO2/passkey credential, or a recovery code. Persisted via a new
+  `touchSecretLastUsedAt()` helper in `src/auth/shared.ts` (shared by `BaseAuthBasicRoute`/`BaseAuthMFARoute`/
+  `BaseAuthElevationRoute`) or merged into an existing per-secret write (`updateCredentialCounter()`/
+  `updateSecretTimeStep()`/`consumeRecoveryCode()`) elsewhere — always best-effort, so a failure to persist
+  it never fails the authentication response itself.
+* Added five new `AuthEventType` values for secret lifecycle/use, each best-effort/fire-and-forget like the
+  existing ones: `PASSWORD_CHANGED` (a `password` secret created, or its value changed via update — not a
+  hint-only rename), `APP_PASSWORD_CREATED`/`APP_PASSWORD_REMOVED` (kept distinct from `MFA_ENROLLED`/
+  `MFA_REMOVED` since an app password is deliberately not MFA), `APP_PASSWORD_USED` (fired in addition to
+  the generic `SESSION_CREATED` on a successful app-password login — the signal that `requireMFA` was
+  bypassed), and `RECOVERY_CODE_USED`.
+
 ## v2.0.0-beta.11
 
 * Added WhatsApp as a one-time code (OTP) delivery channel for verified phone contacts, alongside SMS. It is sent through

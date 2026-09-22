@@ -44,6 +44,10 @@ export class SecretSQL extends BaseEntity implements Secret {
     @Nullable
     public hint?: string;
 
+    @Column({ nullable: true })
+    @Nullable
+    public lastUsedAt?: string;
+
     @Column({ type: "varchar" })
     public type: SecretType = SecretType.PASSWORD;
 
@@ -57,6 +61,7 @@ export class SecretSQL extends BaseEntity implements Secret {
         if (other) {
             this.data = "data" in other ? other.data : this.data;
             this.hint = "hint" in other ? other.hint : this.hint;
+            this.lastUsedAt = "lastUsedAt" in other ? other.lastUsedAt : this.lastUsedAt;
             this.type = other.type !== undefined ? other.type : this.type;
             this.userUid = other.userUid !== undefined ? other.userUid : this.userUid;
         }

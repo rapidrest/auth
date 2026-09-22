@@ -918,7 +918,7 @@ describe("BaseAuthMFARoute Tests", () => {
 
             expect(secret.data.counter).toBe(5);
             expect(update).toHaveBeenCalledWith(
-                { uid: "secret-1", version: 1, data: secret.data },
+                { uid: "secret-1", version: 1, data: secret.data, lastUsedAt: expect.any(String) },
                 secret,
                 { ignoreACL: true, recordEvent: false },
             );
@@ -955,7 +955,7 @@ describe("BaseAuthMFARoute Tests", () => {
 
             expect(secret.data.lastTimeStep).toBe(42);
             expect(update).toHaveBeenCalledWith(
-                { uid: "secret-1", version: 1, data: secret.data },
+                { uid: "secret-1", version: 1, data: secret.data, lastUsedAt: expect.any(String) },
                 secret,
                 { ignoreACL: true, recordEvent: false },
             );
@@ -1016,7 +1016,7 @@ describe("BaseAuthMFARoute Tests", () => {
             expect(typeof secret.data.codes[1].usedAt).toBe("string");
             expect(secret.data.codes[2].usedAt).toBeUndefined();
             expect(update).toHaveBeenCalledWith(
-                { uid: "secret-1", version: 1, data: secret.data },
+                { uid: "secret-1", version: 1, data: secret.data, lastUsedAt: expect.any(String) },
                 secret,
                 { ignoreACL: true, recordEvent: false },
             );
@@ -1041,6 +1041,70 @@ describe("BaseAuthMFARoute Tests", () => {
             await expect((route as any).consumeRecoveryCode("secret-1", 0)).rejects.toThrow(/already been used/);
 
             expect(update).not.toHaveBeenCalled();
+        });
+
+        it("Records an auth.recovery_code.used event on success, including the source IP when req is given.", async () => {
+            const route = new TestAuthMFARoute();
+            const secret = { uid: "secret-1", version: 1, userUid: "user-1", data: { codes: [{ hash: "hash-1" }] } };
+            const findOne = vi.fn().mockResolvedValue(secret);
+            const update = vi.fn();
+            (route as any).secretRepo = { findOne, update };
+            const eventUtils = await import("@rapidrest/core");
+            const spy = vi.spyOn(eventUtils.EventUtils, "record").mockResolvedValue(undefined);
+            const req: any = { socket: { remoteAddress: "1.2.3.4" }, headers: {} };
+
+            await (route as any).consumeRecoveryCode("secret-1", 0, req);
+
+            const authEvents = await import("../../src/auth/events.js");
+            expect(spy).toHaveBeenCalledWith({
+                type: authEvents.AuthEventType.RECOVERY_CODE_USED,
+                userUid: "user-1",
+                ip: expect.any(String),
+            });
+        });
+
+        it("Records an auth.recovery_code.used event with ip undefined when no req is given.", async () => {
+            const route = new TestAuthMFARoute();
+            const secret = { uid: "secret-1", version: 1, userUid: "user-1", data: { codes: [{ hash: "hash-1" }] } };
+            const findOne = vi.fn().mockResolvedValue(secret);
+            const update = vi.fn();
+            (route as any).secretRepo = { findOne, update };
+            const eventUtils = await import("@rapidrest/core");
+            const spy = vi.spyOn(eventUtils.EventUtils, "record").mockResolvedValue(undefined);
+
+            await (route as any).consumeRecoveryCode("secret-1", 0);
+
+            const authEvents = await import("../../src/auth/events.js");
+            expect(spy).toHaveBeenCalledWith({
+                type: authEvents.AuthEventType.RECOVERY_CODE_USED,
+                userUid: "user-1",
+                ip: undefined,
+            });
+        });
+
+        it("Does not record an auth.recovery_code.used event, and does not throw, when EventUtils.record() itself rejects.", async () => {
+            const route = new TestAuthMFARoute();
+            const secret = { uid: "secret-1", version: 1, userUid: "user-1", data: { codes: [{ hash: "hash-1" }] } };
+            const findOne = vi.fn().mockResolvedValue(secret);
+            const update = vi.fn();
+            (route as any).secretRepo = { findOne, update };
+            const eventUtils = await import("@rapidrest/core");
+            vi.spyOn(eventUtils.EventUtils, "record").mockRejectedValue(new Error("telemetry down"));
+
+            await expect((route as any).consumeRecoveryCode("secret-1", 0)).resolves.toBeUndefined();
+        });
+
+        it("Does not record an auth.recovery_code.used event when no matching secret is found.", async () => {
+            const route = new TestAuthMFARoute();
+            const findOne = vi.fn().mockResolvedValue(undefined);
+            const update = vi.fn();
+            (route as any).secretRepo = { findOne, update };
+            const eventUtils = await import("@rapidrest/core");
+            const spy = vi.spyOn(eventUtils.EventUtils, "record").mockResolvedValue(undefined);
+
+            await (route as any).consumeRecoveryCode("secret-1", 0);
+
+            expect(spy).not.toHaveBeenCalled();
         });
     });
 
@@ -1168,6 +1232,48 @@ describe("BaseAuthMFARoute Tests", () => {
             await expect((route as any).verify("user1", "correct-password")).rejects.toThrow(
                 /must be of type string/,
             );
+        });
+
+        it("Touches only the matched password secret's lastUsedAt on success.", async () => {
+            const route = new TestAuthMFARoute();
+            const argon2 = await import("argon2");
+            const shared = await import("../../src/auth/shared.js");
+            const config = new (await import("../../src/auth/types.js")).PasswordConfig();
+            const touchSpy = vi.spyOn(shared, "touchSecretLastUsedAt").mockResolvedValue(undefined);
+            const secretRepo = {
+                find: vi.fn().mockResolvedValue([
+                    { uid: "pw-1", data: await argon2.hash(await shared.normalizePasswordSubmission("another-password", "user-uid-1", config)) },
+                    { uid: "pw-2", data: await argon2.hash(await shared.normalizePasswordSubmission("correct-password", "user-uid-1", config)) },
+                ]),
+            };
+            (route as any).secretRepo = secretRepo;
+            (route as any).logger = { debug: vi.fn() };
+            (route as any).userUtils = { lookup: vi.fn().mockResolvedValue({ uid: "user-uid-1" }) };
+
+            const user = await (route as any).verify("user1", "correct-password");
+
+            expect(user).toEqual({ uid: "user-uid-1" });
+            // Only the matched secret (pw-2) is touched - not pw-1, which never matched.
+            expect(touchSpy).toHaveBeenCalledTimes(1);
+            expect(touchSpy).toHaveBeenCalledWith(secretRepo, "pw-2", (route as any).logger);
+        });
+
+        it("Still resolves the user on a matched password even when touchSecretLastUsedAt() itself rejects.", async () => {
+            const route = new TestAuthMFARoute();
+            const argon2 = await import("argon2");
+            const shared = await import("../../src/auth/shared.js");
+            const config = new (await import("../../src/auth/types.js")).PasswordConfig();
+            vi.spyOn(shared, "touchSecretLastUsedAt").mockRejectedValue(new Error("datastore unavailable"));
+            (route as any).secretRepo = {
+                find: vi.fn().mockResolvedValue([
+                    { uid: "pw-1", data: await argon2.hash(await shared.normalizePasswordSubmission("correct-password", "user-uid-1", config)) },
+                ]),
+            };
+            (route as any).userUtils = { lookup: vi.fn().mockResolvedValue({ uid: "user-uid-1" }) };
+
+            const user = await (route as any).verify("user1", "correct-password");
+
+            expect(user).toEqual({ uid: "user-uid-1" });
         });
     });
 });

@@ -40,8 +40,18 @@ export class BasicStrategyOptions {
      * no-op when not provided.
      */
     public checkRateLimitSync?(identifier: string, req: HttpRequest): void;
-    /** Override this function to handle asynchronous (non-blocking) verification of the login info. */
-    public verify(uid: string, secret: string): JWTUser | Promise<JWTUser | undefined> | undefined {
+    /**
+     * Override this function to handle asynchronous (non-blocking) verification of the login info.
+     * @param uid The claimed identifier.
+     * @param secret The submitted password/app-password to verify.
+     * @param req The source HTTP request. Optional - only passed by `authenticate()`, so it's available to
+     * an implementation that wants to record e.g. the source IP against whichever specific secret matched.
+     */
+    public verify(
+        uid: string,
+        secret: string,
+        req?: HttpRequest,
+    ): JWTUser | Promise<JWTUser | undefined> | undefined {
         throw new Error("Did you forget to override BasicStrategyOptions.verify?");
     }
     /** Override this function to handle synchronous (blocking) verification of the login info. */
@@ -77,7 +87,7 @@ export class BasicStrategy implements AuthStrategy {
             if (this.options.checkRateLimit) {
                 await this.options.checkRateLimit(payload.id, req);
             }
-            const user: JWTUser | undefined = await this.options.verify(payload.id, payload.password);
+            const user: JWTUser | undefined = await this.options.verify(payload.id, payload.password, req);
             if (user) {
                 return {
                     data,

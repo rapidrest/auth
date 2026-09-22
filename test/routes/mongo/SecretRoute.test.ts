@@ -657,6 +657,155 @@ describe("Route:SecretMongo Tests", () => {
         expect(result.status).toBe(400);
     });
 
+    it("Can create an app password (with admin token), returning the plaintext exactly once.", async () => {
+        const userUid = uuid.v4();
+
+        const result = await request(server.getApplication())
+            .post(baseUrl)
+            .set("Authorization", "jwt " + adminToken)
+            .send({ hint: "My mail client", type: SecretType.APP_PASSWORD, userUid });
+
+        expect(result.status).toBeGreaterThanOrEqual(200);
+        expect(result.status).toBeLessThan(300);
+        expect(typeof result.body.password).toBe("string");
+        expect(result.body.data).toBeUndefined();
+        expect(result.body.hint).toBe("My mail client");
+
+        // Only the argon2 hash is persisted - never the plaintext.
+        const stored: SecretMongo | null = await repo.findOne({ uid: result.body.uid } as any);
+        expect(stored).toBeDefined();
+        expect(stored?.data).not.toBe(result.body.password);
+        expect(await argon2.verify(stored!.data, result.body.password)).toBe(true);
+
+        // The plaintext is never returned again on a subsequent read.
+        const listResult = await request(server.getApplication())
+            .get(baseUrl + "/" + result.body.uid)
+            .set("Authorization", "jwt " + adminToken);
+        expect(listResult.body.password).toBeUndefined();
+        expect(listResult.body.data).toBeUndefined();
+    });
+
+    // lastUsedAt is never set at creation time - only touched on a subsequent successful authentication
+    // (see BaseAuthBasicRoute/BaseAuthMFARoute/etc.). Unlike the SQL tier, an unset field round-trips
+    // through Mongo as `undefined` (simply absent), not `null`.
+    it("Leaves lastUsedAt unset on a freshly created secret of every type.", async () => {
+        for (const [type, body] of [
+            [SecretType.PASSWORD, { type: SecretType.PASSWORD, data: "MyValidPassw0rd!", userUid: uuid.v4() }],
+            [SecretType.APP_PASSWORD, { type: SecretType.APP_PASSWORD, hint: "My mail client", userUid: uuid.v4() }],
+        ] as const) {
+            const result = await request(server.getApplication())
+                .post(baseUrl)
+                .set("Authorization", "jwt " + adminToken)
+                .send(body);
+
+            expect(result.status).toBeGreaterThanOrEqual(200);
+            expect(result.status).toBeLessThan(300);
+            expect(result.body.lastUsedAt).toBeUndefined();
+
+            const stored: SecretMongo | null = await repo.findOne({ uid: result.body.uid } as any);
+            expect(stored?.lastUsedAt).toBeUndefined();
+        }
+    });
+
+    it("Requires a non-empty hint to create an app password.", async () => {
+        const result = await request(server.getApplication())
+            .post(baseUrl)
+            .set("Authorization", "jwt " + adminToken)
+            .send({ type: SecretType.APP_PASSWORD, userUid: uuid.v4() });
+
+        expect(result.status).toBe(400);
+    });
+
+    it("Rejects a blank (whitespace-only) hint when creating an app password.", async () => {
+        const result = await request(server.getApplication())
+            .post(baseUrl)
+            .set("Authorization", "jwt " + adminToken)
+            .send({ hint: "   ", type: SecretType.APP_PASSWORD, userUid: uuid.v4() });
+
+        expect(result.status).toBe(400);
+    });
+
+    it("Rejects a hint longer than 100 characters when creating an app password.", async () => {
+        const result = await request(server.getApplication())
+            .post(baseUrl)
+            .set("Authorization", "jwt " + adminToken)
+            .send({ hint: "x".repeat(101), type: SecretType.APP_PASSWORD, userUid: uuid.v4() });
+
+        expect(result.status).toBe(400);
+    });
+
+    it("Discards any client-supplied data when creating an app password, always generating a fresh one.", async () => {
+        const result = await request(server.getApplication())
+            .post(baseUrl)
+            .set("Authorization", "jwt " + adminToken)
+            .send({
+                data: "attacker-controlled-hash",
+                hint: "My mail client",
+                type: SecretType.APP_PASSWORD,
+                userUid: uuid.v4(),
+            });
+
+        expect(result.status).toBeGreaterThanOrEqual(200);
+        expect(result.status).toBeLessThan(300);
+        expect(result.body.password).not.toBe("attacker-controlled-hash");
+
+        const stored: SecretMongo | null = await repo.findOne({ uid: result.body.uid } as any);
+        expect(stored?.data).not.toBe("attacker-controlled-hash");
+    });
+
+    it("Cannot create an app password on behalf of another user (with user token).", async () => {
+        const result = await request(server.getApplication())
+            .post(baseUrl)
+            .set("Authorization", "jwt " + userToken)
+            .send({ hint: "My mail client", type: SecretType.APP_PASSWORD, userUid: uuid.v4() });
+
+        expect(result.status).toBe(403);
+    });
+
+    it("Can rename (hint-only update) an app password without rotating it (with user token).", async () => {
+        const obj: SecretMongo = await createSecretMongo({
+            data: await argon2.hash("ABCDE-FGHJK-MNPQR-STVWX-YZ012-34567"),
+            hint: "old hint",
+            type: SecretType.APP_PASSWORD,
+            userUid: user.uid,
+        });
+        const url = baseUrl + "/" + obj.uid;
+
+        const result = await request(server.getApplication())
+            .put(url)
+            .set("Authorization", "jwt " + userToken)
+            .send({ uid: obj.uid, version: obj.version, hint: "new hint" });
+
+        expect(result.status).toBeGreaterThanOrEqual(200);
+        expect(result.status).toBeLessThan(300);
+        expect(result.body.hint).toBe("new hint");
+
+        const existing: SecretMongo | null = await repo.findOne({ uid: obj.uid } as any);
+        expect(existing?.hint).toBe("new hint");
+        // Unchanged - the stored hash was not rotated by a hint-only update.
+        expect(existing?.data).toBe(obj.data);
+    });
+
+    it("Cannot modify (rotate) an app password's data - must be deleted and re-created (with user token).", async () => {
+        const obj: SecretMongo = await createSecretMongo({
+            data: await argon2.hash("ABCDE-FGHJK-MNPQR-STVWX-YZ012-34567"),
+            hint: "My mail client",
+            type: SecretType.APP_PASSWORD,
+            userUid: user.uid,
+        });
+        const url = baseUrl + "/" + obj.uid;
+
+        const result = await request(server.getApplication())
+            .put(url)
+            .set("Authorization", "jwt " + userToken)
+            .send({ uid: obj.uid, version: obj.version, data: "attacker-controlled-hash" });
+
+        expect(result.status).toBe(400);
+
+        const existing: SecretMongo | null = await repo.findOne({ uid: obj.uid } as any);
+        expect(existing?.data).toBe(obj.data);
+    });
+
     it("Can create their own password secret (with user token).", async () => {
         const result = await request(server.getApplication())
             .post(baseUrl)

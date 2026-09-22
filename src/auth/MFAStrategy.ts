@@ -132,8 +132,10 @@ export class MFAStrategyOptions {
      * indefinitely.
      * @param uid The unique id of the secondary auth method (== the underlying secret's id) that was verified.
      * @param codeIndex The index, within that secret's `codes` array, of the entry that was matched.
+     * @param req The source HTTP request. Optional - only passed by `verifyRecoveryCode()`, so it's
+     * available to an implementation that wants to record e.g. the source IP the code was used from.
      */
-    public consumeRecoveryCode?(uid: string, codeIndex: number): Promise<void>;
+    public consumeRecoveryCode?(uid: string, codeIndex: number, req?: HttpRequest): Promise<void>;
     /**
      * Sends a notification to the specified contact with the provided MFA code.
      * NOTE: You must override this function when using this strategy.
@@ -555,7 +557,7 @@ export class MFAStrategy implements AuthStrategy {
         }
 
         if (this.options.consumeRecoveryCode) {
-            await this.options.consumeRecoveryCode(methodId, matchedIndex);
+            await this.options.consumeRecoveryCode(methodId, matchedIndex, req);
         }
 
         return await this.options.getUser(userUid);

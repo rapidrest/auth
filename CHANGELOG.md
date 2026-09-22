@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Added SecretType.APP_PASSWORD, a user-generated high-entropy credential for a single legacy Basic-auth client that can't complete an MFA challenge
+- Added generateAppPassword to src/auth/shared.ts, a single Crockford Base32 value grouped with dashes for readability
+- Added validateAppPasswordCreate to BaseSecretRoute, requiring a non-empty hint, discarding any caller-supplied data, and returning the generated plaintext exactly once as password in the create response
+- Added auth:app_password:enabled (default true) to BaseSecretRoute and BaseAuthBasicRoute, gating creation and the requireMFA bypass independently
+- Added an app-password bypass to BaseAuthBasicRoute.verify(), checked before the requireMFA gate, so a matching app password authenticates regardless of that flag while a real password remains subject to it unchanged
+- Added Secret.lastUsedAt (ISO-8601 string, unset until first use), persisted on every successful authentication against the matching secret (password, app password, TOTP, FIDO2/passkey credential, recovery code) via a best-effort, non-blocking write that never fails the authentication response
+- Added touchSecretLastUsedAt to src/auth/shared.ts, a shared best-effort helper used by BaseAuthBasicRoute/BaseAuthMFARoute/BaseAuthElevationRoute for a matched secret with no write of its own already in flight
+- Added AuthEventType.PASSWORD_CHANGED, fired from BaseSecretRoute when a password secret is created or its data is changed via update (not on a hint-only rename)
+- Added AuthEventType.APP_PASSWORD_CREATED and APP_PASSWORD_REMOVED, fired from BaseSecretRoute.create()/delete() for the app-password type, kept separate from MFA_ENROLLED/MFA_REMOVED since app passwords are deliberately not MFA
+- Added AuthEventType.APP_PASSWORD_USED, fired from BaseAuthBasicRoute on a successful app-password match, in addition to the generic SESSION_CREATED event, since it specifically signals that requireMFA was bypassed for that login
+- Added AuthEventType.RECOVERY_CODE_USED, fired from BaseAuthMFARoute.consumeRecoveryCode() on a successful recovery-code use
+- Added an optional req parameter to BasicStrategyOptions.verify and MFAStrategyOptions.consumeRecoveryCode so the source IP can be recorded on the new app-password/recovery-code events
+
 ## [2.0.0-beta.11] - 2026-09-22
 
 ### Added

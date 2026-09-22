@@ -25,4 +25,19 @@ export enum AuthEventType {
     MFA_ENROLLED = "auth.mfa.enrolled",
     /** A secondary-auth-capable secret was deleted. */
     MFA_REMOVED = "auth.mfa.removed",
+    /** A `password`-type secret was created, or an existing one's value (not just its `hint`) was changed. */
+    PASSWORD_CHANGED = "auth.password.changed",
+    /** A new `app-password` secret (see `SecretType.APP_PASSWORD`) was created. */
+    APP_PASSWORD_CREATED = "auth.app_password.created",
+    /** An `app-password` secret was deleted. */
+    APP_PASSWORD_REMOVED = "auth.app_password.removed",
+    /**
+     * An `app-password` secret was used to successfully authenticate at `/auth/basic` - the single most
+     * security-relevant signal of the three `app-password` events, since a match there means `requireMFA`
+     * was bypassed for this login. Fired in addition to `SESSION_CREATED`, which fires generically for
+     * every successful login regardless of method.
+     */
+    APP_PASSWORD_USED = "auth.app_password.used",
+    /** A `recovery-codes` secret's code was successfully used to authenticate, consuming that one code. */
+    RECOVERY_CODE_USED = "auth.recovery_code.used",
 }
