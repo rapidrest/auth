@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v2.0.0-beta.11
+
 * Added WhatsApp as a one-time code (OTP) delivery channel for verified phone contacts, alongside SMS. It is sent through
   `MessagingUtils.sendWhatsApp()` (`@rapidrest/core` 6.x) and only offered while WhatsApp is configured: the
   `MessagingUtils` instance's optional `isWhatsAppConfigured(): boolean | Promise<boolean>` hook decides when it has

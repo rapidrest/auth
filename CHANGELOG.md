@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0-beta.11] - 2026-09-22
+
+### Added
+- Added OTPContactType.WHATSAPP and mask it like SMS in obfuscateContact
+- Added a WhatsApp discover hint (channel: "whatsapp") after a verified phone's SMS hint in BaseAuthDiscoverRoute
+- Added an optional channel argument to OTPStrategy.getContact and the /auth/otp challenge request, honored only for a verified phone with WhatsApp configured
+- Added a WhatsApp OTP method (id "<alias uid>:whatsapp") alongside a verified phone's SMS method in BaseAuthMFARoute and BaseAuthElevationRoute, resolved by getMethod
+- Added isWhatsAppConfigured, toWhatsAppMethodId and parseWhatsAppMethodId to src/auth/shared.ts, offering WhatsApp only when a MessagingUtils instance's optional isWhatsAppConfigured() hook says so, or its whatsapp field is set
+
+### Changed
+- Upgraded @rapidrest/core dep
+- Send the WhatsApp OTP through MessagingUtils.sendWhatsApp, with the same catch-and-log pattern SMS uses
+- Leave contact verification and registration codes on e-mail/SMS only
+- Document the change in the README, CHANGELOG, release notes and NOTES
+
 ### Added
 - Add WhatsApp as a one-time code delivery channel for verified phone contacts, alongside SMS, offered only while WhatsApp is configured
 
@@ -171,7 +186,8 @@ tagged.
 - `PasskeyStrategy` - WebAuthn based passkey authentication
 - `TOTPStrategy` - RFC 6238 Time-Based One Time Password authentication (e.g. Google Authenticator, etc.)
 
-[Unreleased]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.10...HEAD
+[Unreleased]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.11...HEAD
+[2.0.0-beta.11]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.10...v2.0.0-beta.11
 [2.0.0-beta.10]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.9...v2.0.0-beta.10
 [2.0.0-beta.9]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.8...v2.0.0-beta.9
 [2.0.0-beta.8]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.7...v2.0.0-beta.8
