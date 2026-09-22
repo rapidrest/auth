@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0-beta.12] - 2026-09-22
+
+### Added
+- Added SecretType.APP_PASSWORD, a user-generated high-entropy secret for a single legacy Basic-auth client that can't complete an MFA challenge
+- Added generateAppPassword and validateAppPasswordCreate, requiring a non-empty hint since an account may accumulate several, discarding any caller-supplied data, and returning the plaintext exactly once
+- Added auth:app_password:enabled, read independently by BaseSecretRoute and BaseAuthBasicRoute, to turn app passwords off deployment-wide without deleting any that already exist
+- Added Secret.lastUsedAt, updated on every successful authentication against the matching secret, through a new best-effort touchSecretLastUsedAt helper or merged into an existing per-secret write where one already happens
+- Added PASSWORD_CHANGED, APP_PASSWORD_CREATED, APP_PASSWORD_REMOVED, APP_PASSWORD_USED and RECOVERY_CODE_USED audit events, fired the same fire-and-forget way as the existing ones
+- Added AuditLogUtils, a durable audit log mechanism separate from EventUtils, which is lossy best-effort telemetry never intended to guarantee anything is actually recorded
+- Added SecretType-adjacent AuthEventType.SIGNED_IN and IMPERSONATED, the two curated actions that had no event of their own before now
+- Added a parallel AuditLogUtils.record call at every existing EventUtils.record call site, awaited and logged loudly on failure rather than swallowed, so the triggering action still succeeds even when the write does not
+- Added junit.xml to gitignore
+
+### Changed
+- Let an app password authenticate through BaseAuthBasicRoute even when requireMFA is set, checked before that gate, while a real password remains subject to it exactly as before
+- Refuse changing an app password's data on update, same as FIDO2 and passkey secrets, since rotating one means deleting and creating a new one
+- Document the changes in the README, CHANGELOG, release notes and NOTES
+- Give TokenUtils.createAuthResult an optional authMethod argument, threaded through every caller with its own descriptive string, so a real sign-in can be told apart from a routine token refresh, which never passes one and so never fires SIGNED_IN
+- Fire IMPERSONATED from BaseImpersonationRoute with the admin as actorUid and the target account as userUid, closing what was previously a total gap in that route's audit trail
+- Export AuditLogUtils and AuditLogEntry from the package root, the one thing a consuming app's database-backed subclass actually needs to import
+- Document the changes in the README, CHANGELOG, release notes and NOTES
+
 ### Added
 - Added SecretType.APP_PASSWORD, a user-generated high-entropy credential for a single legacy Basic-auth client that can't complete an MFA challenge
 - Added generateAppPassword to src/auth/shared.ts, a single Crockford Base32 value grouped with dashes for readability
@@ -205,7 +227,8 @@ tagged.
 - `PasskeyStrategy` - WebAuthn based passkey authentication
 - `TOTPStrategy` - RFC 6238 Time-Based One Time Password authentication (e.g. Google Authenticator, etc.)
 
-[Unreleased]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.11...HEAD
+[Unreleased]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.12...HEAD
+[2.0.0-beta.12]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.11...v2.0.0-beta.12
 [2.0.0-beta.11]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.10...v2.0.0-beta.11
 [2.0.0-beta.10]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.9...v2.0.0-beta.10
 [2.0.0-beta.9]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.8...v2.0.0-beta.9

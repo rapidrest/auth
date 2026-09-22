@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v2.0.0-beta.12
+
 * Added app passwords — a user-generated, high-entropy `app-password` secret for a single legacy
   Basic-auth client (e.g. an old mail client) that can't complete an MFA challenge. Unlike a real password,
   it's allowed to authenticate via `BaseAuthBasicRoute` even when the account has `requireMFA` set, since
