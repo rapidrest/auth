@@ -15,6 +15,7 @@ import {
     RouteDecorators,
 } from "@rapidrest/service-core";
 import { Alias, Profile, Secret, User } from "../models/types.js";
+import { AuditLogUtils } from "../auth/AuditLogUtils.js";
 import { AuthEventType } from "../auth/events.js";
 import { TokenUtils } from "../auth/TokenUtils.js";
 
@@ -54,6 +55,9 @@ export abstract class BaseAccountRoute<U extends User, A extends Alias, P extend
 
     @Inject(TokenUtils)
     protected tokenUtils?: TokenUtils;
+
+    @Inject(AuditLogUtils)
+    protected auditLogUtils?: AuditLogUtils;
 
     @Inject(RateLimiter)
     protected rateLimiter?: RateLimiter;
@@ -141,6 +145,18 @@ export abstract class BaseAccountRoute<U extends User, A extends Alias, P extend
             userUid: eUser.uid,
             deletedBy: user.uid,
         }).catch(() => undefined);
+
+        try {
+            await this.auditLogUtils?.record({
+                type: AuthEventType.ACCOUNT_DELETED,
+                userUid: eUser.uid,
+                actorUid: user.uid !== eUser.uid ? user.uid : undefined,
+                ip: NetUtils.getIPAddress(req, this.trustedProxies),
+                path: req.path,
+            });
+        } catch (err) {
+            this.logger?.error(`[AuditLog] Failed to record ${AuthEventType.ACCOUNT_DELETED} for '${eUser.uid}': ${err}`);
+        }
     }
 
     @Summary("Get Account Data")
@@ -226,6 +242,18 @@ export abstract class BaseAccountRoute<U extends User, A extends Alias, P extend
             userUid: eUser.uid,
             revokedBy: user.uid,
         }).catch(() => undefined);
+
+        try {
+            await this.auditLogUtils?.record({
+                type: AuthEventType.SESSIONS_REVOKED,
+                userUid: eUser.uid,
+                actorUid: user.uid !== eUser.uid ? user.uid : undefined,
+                ip: NetUtils.getIPAddress(req, this.trustedProxies),
+                path: req.path,
+            });
+        } catch (err) {
+            this.logger?.error(`[AuditLog] Failed to record ${AuthEventType.SESSIONS_REVOKED} for '${eUser.uid}': ${err}`);
+        }
     }
 
     /**

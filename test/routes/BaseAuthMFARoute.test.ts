@@ -1106,6 +1106,44 @@ describe("BaseAuthMFARoute Tests", () => {
 
             expect(spy).not.toHaveBeenCalled();
         });
+
+        it("Also records an auth.recovery_code.used entry via AuditLogUtils, including the request path.", async () => {
+            const route = new TestAuthMFARoute();
+            const secret = { uid: "secret-1", version: 1, userUid: "user-1", data: { codes: [{ hash: "hash-1" }] } };
+            const findOne = vi.fn().mockResolvedValue(secret);
+            const update = vi.fn();
+            (route as any).secretRepo = { findOne, update };
+            const auditLogUtils = { record: vi.fn().mockResolvedValue(undefined) };
+            (route as any).auditLogUtils = auditLogUtils;
+            const req: any = { path: "/auth/mfa", socket: { remoteAddress: "1.2.3.4" }, headers: {} };
+
+            await (route as any).consumeRecoveryCode("secret-1", 0, req);
+
+            const authEvents = await import("../../src/auth/events.js");
+            expect(auditLogUtils.record).toHaveBeenCalledWith({
+                type: authEvents.AuthEventType.RECOVERY_CODE_USED,
+                userUid: "user-1",
+                ip: expect.any(String),
+                path: "/auth/mfa",
+            });
+        });
+
+        it("Does not throw, and logs loudly, when AuditLogUtils.record() itself rejects.", async () => {
+            const route = new TestAuthMFARoute();
+            const secret = { uid: "secret-1", version: 1, userUid: "user-1", data: { codes: [{ hash: "hash-1" }] } };
+            const findOne = vi.fn().mockResolvedValue(secret);
+            const update = vi.fn();
+            (route as any).secretRepo = { findOne, update };
+            const error = vi.fn();
+            (route as any).logger = { error };
+            (route as any).auditLogUtils = { record: vi.fn().mockRejectedValue(new Error("db down")) };
+
+            await expect((route as any).consumeRecoveryCode("secret-1", 0)).resolves.toBeUndefined();
+
+            const authEvents = await import("../../src/auth/events.js");
+            expect(error).toHaveBeenCalledTimes(1);
+            expect(error.mock.calls[0][0]).toContain(authEvents.AuthEventType.RECOVERY_CODE_USED);
+        });
     });
 
     describe("verify", () => {
@@ -1274,6 +1312,23 @@ describe("BaseAuthMFARoute Tests", () => {
             const user = await (route as any).verify("user1", "correct-password");
 
             expect(user).toEqual({ uid: "user-uid-1" });
+        });
+    });
+
+    describe("authenticate", () => {
+        // A generic "mfa" authMethod - see the comment above this call site for why per-factor detail
+        // isn't reliably derivable here; RECOVERY_CODE_USED already covers that one case separately.
+        it("Passes authMethod 'mfa' to createAuthResult.", async () => {
+            const route = new TestAuthMFARoute();
+            const createAuthResult = vi.fn().mockResolvedValue({ token: "t", refresh: "r", user: {} });
+            (route as any).tokenUtils = { createAuthResult };
+            const user: any = { uid: "user-uid-1" };
+            const req: any = { headers: {} };
+            const res: any = {};
+
+            await route.authenticate(user, req, res);
+
+            expect(createAuthResult).toHaveBeenCalledWith(user, [], req, res, false, false, "mfa");
         });
     });
 });

@@ -335,6 +335,53 @@ describe("BaseAuthElevationRoute Tests", () => {
 
             await expect(route.elevate({ password: "correct" }, jwtUser, req, makeRes())).resolves.toBeDefined();
         });
+
+        it("Also records an auth.elevated entry via AuditLogUtils.", async () => {
+            const route = new TestAuthElevationRoute();
+            (route as any).tokenUtils = { createAuthResult: vi.fn().mockResolvedValue({}) };
+            const auditLogUtils = { record: vi.fn().mockResolvedValue(undefined) };
+            (route as any).auditLogUtils = auditLogUtils;
+            vi.spyOn(route as any, "verifyPasswordOnly").mockResolvedValue(jwtUser);
+            const req = makeReq({ body: { password: "correct" }, socket: { remoteAddress: "1.2.3.4" } });
+
+            await route.elevate({ password: "correct" }, jwtUser, req, makeRes());
+
+            expect(auditLogUtils.record).toHaveBeenCalledWith({
+                type: AuthEventType.ELEVATED,
+                userUid: jwtUser.uid,
+                ip: "1.2.3.4",
+                path: "/auth/elevate",
+                method: "password",
+            });
+        });
+
+        it("Does not pass an authMethod to createAuthResult, so TokenUtils never fires a duplicate SIGNED_IN entry for elevation.", async () => {
+            const route = new TestAuthElevationRoute();
+            const createAuthResult = vi.fn().mockResolvedValue({});
+            (route as any).tokenUtils = { createAuthResult };
+            vi.spyOn(route as any, "verifyPasswordOnly").mockResolvedValue(jwtUser);
+            const req = makeReq({ body: { password: "correct" } });
+
+            await route.elevate({ password: "correct" }, jwtUser, req, makeRes());
+
+            expect(createAuthResult.mock.calls[0]).toHaveLength(5);
+        });
+
+        it("Still resolves the AuthResult even when AuditLogUtils.record() itself rejects, and logs the failure loudly.", async () => {
+            const route = new TestAuthElevationRoute();
+            const createAuthResult = vi.fn().mockResolvedValue({ token: "tok" });
+            (route as any).tokenUtils = { createAuthResult };
+            const error = vi.fn();
+            (route as any).logger = { error };
+            (route as any).auditLogUtils = { record: vi.fn().mockRejectedValue(new Error("db down")) };
+            vi.spyOn(route as any, "verifyPasswordOnly").mockResolvedValue(jwtUser);
+            const req = makeReq({ body: { password: "correct" } });
+
+            await expect(route.elevate({ password: "correct" }, jwtUser, req, makeRes())).resolves.toBeDefined();
+
+            expect(error).toHaveBeenCalledTimes(1);
+            expect(error.mock.calls[0][0]).toContain(AuthEventType.ELEVATED);
+        });
     });
 
     describe("beginChallenge", () => {

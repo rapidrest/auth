@@ -28,6 +28,27 @@
   `MFA_REMOVED` since an app password is deliberately not MFA), `APP_PASSWORD_USED` (fired in addition to
   the generic `SESSION_CREATED` on a successful app-password login — the signal that `requireMFA` was
   bypassed), and `RECOVERY_CODE_USED`.
+* Added a durable audit-log mechanism, `AuditLogUtils` (`src/auth/AuditLogUtils.ts`), separate from
+  `EventUtils`: the latter is lossy, best-effort telemetry (silently discarded end to end with no
+  `telemetry_services:url`/listener configured), unsuitable for a real audit trail. The base
+  `AuditLogUtils.record(entry)` just logs via `@Logger` — already an improvement over `EventUtils`'s silent
+  no-op — and a consuming app registers a database-backed subclass under the same class name for a durable,
+  queryable trail, the same dependency-injection swap already used for `MessagingUtils`.
+  * `AuditLogEntry`: `{ type, userUid?, actorUid?, ip?, path?, method?, data? }` — `type` reuses the
+    matching `AuthEventType` string value; `actorUid` is only set when it differs from `userUid` (e.g. a
+    trusted-role holder acting on another account), unifying `BaseAccountRoute`'s previously separate
+    `deletedBy`/`revokedBy` fields under one name for this mechanism.
+  * Added two new `AuthEventType` values, `AuditLogUtils`-only: `SIGNED_IN` (a genuine new sign-in of any
+    kind — password, app-password, MFA, passkey, FIDO2, TOTP, OTP, an OIDC provider, or registration —
+    fired from `TokenUtils.createAuthResult()` whenever it's given a new `authMethod` argument; deliberately
+    excludes a routine token refresh, and excludes elevation/impersonation, which get their own more
+    specific entries) and `IMPERSONATED` (an admin began impersonating another account — previously no
+    audit trail existed for this at all).
+  * A parallel `AuditLogUtils.record()` call was added alongside every existing `EventUtils.record()` call
+    site (`ACCOUNT_DELETED`, `SESSIONS_REVOKED`, `ELEVATED`, `APP_PASSWORD_USED`, `RECOVERY_CODE_USED`,
+    `REGISTRATION_COMPLETED`, `MFA_ENROLLED`/`MFA_REMOVED`, `PASSWORD_CHANGED`,
+    `APP_PASSWORD_CREATED`/`APP_PASSWORD_REMOVED`) — always fail-open (the triggering action still
+    succeeds), with a write failure logged loudly rather than silently swallowed.
 
 ## v2.0.0-beta.11
 

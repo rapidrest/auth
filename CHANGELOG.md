@@ -20,6 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added AuthEventType.APP_PASSWORD_USED, fired from BaseAuthBasicRoute on a successful app-password match, in addition to the generic SESSION_CREATED event, since it specifically signals that requireMFA was bypassed for that login
 - Added AuthEventType.RECOVERY_CODE_USED, fired from BaseAuthMFARoute.consumeRecoveryCode() on a successful recovery-code use
 - Added an optional req parameter to BasicStrategyOptions.verify and MFAStrategyOptions.consumeRecoveryCode so the source IP can be recorded on the new app-password/recovery-code events
+- Added AuditLogUtils (src/auth/AuditLogUtils.ts), a separate durable audit-log mechanism for security-relevant actions - the base implementation logs via @Logger, and a consuming app registers a database-backed subclass under the same class name to make it durable, the same DI-swap pattern MessagingUtils already uses
+- Added the AuditLogEntry interface ({type, userUid?, actorUid?, ip?, path?, method?, data?}), recorded in parallel with every existing EventUtils.record() call site (ACCOUNT_DELETED, SESSIONS_REVOKED, ELEVATED, APP_PASSWORD_USED, RECOVERY_CODE_USED, REGISTRATION_COMPLETED, MFA_ENROLLED/MFA_REMOVED, PASSWORD_CHANGED, APP_PASSWORD_CREATED/APP_PASSWORD_REMOVED), always fail-open with the failure logged loudly rather than swallowed
+- Added AuthEventType.SIGNED_IN, fired from TokenUtils.createAuthResult() via AuditLogUtils whenever it's given an authMethod - a genuine new sign-in of any kind, deliberately excluding token refresh, elevation and impersonation
+- Added AuthEventType.IMPERSONATED, fired from BaseImpersonationRoute.impersonate() via AuditLogUtils with actorUid/userUid distinguishing the impersonator from the impersonated account - previously impersonation had no audit trail at all
+- Added an authMethod parameter to TokenUtils.createAuthResult(), threaded through every sign-in route (password, app-password, mfa, passkey, fido2, totp, otp, oidc:<provider>, registration) to drive the new SIGNED_IN entry; BaseAuthRefreshRoute deliberately omits it
 
 ## [2.0.0-beta.11] - 2026-09-22
 

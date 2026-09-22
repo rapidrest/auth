@@ -27,6 +27,7 @@ import {
     TOTPConfig,
     TOTPSecret,
 } from "../auth/types.js";
+import { AuditLogUtils } from "../auth/AuditLogUtils.js";
 import { AuthEventType } from "../auth/events.js";
 import {
     importArgon2,
@@ -60,6 +61,9 @@ export abstract class BaseAuthMFARoute<U extends User, S extends Secret, A exten
     private _objectFactory?: ObjectFactory;
 
     protected aliasRepo?: RepoUtils<A>;
+
+    @Inject(AuditLogUtils)
+    protected auditLogUtils?: AuditLogUtils;
 
     @Inject(AuthMiddleware)
     protected authMiddleware?: AuthMiddleware;
@@ -193,7 +197,12 @@ export abstract class BaseAuthMFARoute<U extends User, S extends Secret, A exten
         @Request req: HttpRequest,
         @Response res: HttpResponse,
     ): Promise<AuthResult | undefined> {
-        return await this.tokenUtils!.createAuthResult(user, this.defaultScopes, req, res);
+        // A generic "mfa" authMethod, not per-factor: MFAStrategy's session-tracked `mfaMethodType` isn't
+        // reliably readable here - it's deleted before returning for TOTP/RECOVERY_CODE but left in place
+        // for OTP/FIDO2 (pre-existing, inconsistent state cleanup in MFAStrategy, not something to build a
+        // SIGNED_IN authMethod on top of). RECOVERY_CODE_USED (see consumeRecoveryCode() below) already
+        // captures the specific-factor detail for that one case.
+        return await this.tokenUtils!.createAuthResult(user, this.defaultScopes, req, res, false, false, "mfa");
     }
 
     protected convertAliasToMethod(alias: Alias, obfuscate?: boolean): MFAMethod | undefined {
@@ -610,6 +619,18 @@ export abstract class BaseAuthMFARoute<U extends User, S extends Secret, A exten
                 userUid: secret.userUid,
                 ip: req ? NetUtils.getIPAddress(req, this.trustedProxies) : undefined,
             }).catch(() => undefined);
+            try {
+                await this.auditLogUtils?.record({
+                    type: AuthEventType.RECOVERY_CODE_USED,
+                    userUid: secret.userUid,
+                    ip: req ? NetUtils.getIPAddress(req, this.trustedProxies) : undefined,
+                    path: req?.path,
+                });
+            } catch (err) {
+                this.logger?.error(
+                    `[AuditLog] Failed to record ${AuthEventType.RECOVERY_CODE_USED} for '${secret.userUid}': ${err}`,
+                );
+            }
         }
     }
 

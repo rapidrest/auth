@@ -149,7 +149,7 @@ export abstract class BaseAuthFIDO2Route<U extends User, A extends Alias, S exte
         @Request req: HttpRequest,
         @Response res: HttpResponse,
     ): Promise<AuthResult | undefined> {
-        return await this.tokenUtils!.createAuthResult(user, this.defaultScopes, req, res);
+        return await this.tokenUtils!.createAuthResult(user, this.defaultScopes, req, res, false, false, "fido2");
     }
 
     protected async getCredentialById(credentialId: string): Promise<StoredPasskeyCredential | undefined> {

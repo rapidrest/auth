@@ -9,11 +9,14 @@ import {
     DocDecorators,
     HttpRequest,
     HttpResponse,
+    NetUtils,
     ObjectFactory,
     RepoUtils,
     RouteDecorators,
 } from "@rapidrest/service-core";
 import { AuthResult, User } from "../models/types.js";
+import { AuditLogUtils } from "../auth/AuditLogUtils.js";
+import { AuthEventType } from "../auth/events.js";
 import { TokenUtils } from "../auth/TokenUtils.js";
 const { Description, Returns, Summary } = DocDecorators;
 const { Config, Init, Inject, Logger } = ObjectDecorators;
@@ -48,6 +51,9 @@ export abstract class BaseImpersonationRoute<U extends User> {
     @Config("auth")
     private authConfig?: JWTUtilsConfig;
 
+    @Inject(AuditLogUtils)
+    protected auditLogUtils?: AuditLogUtils;
+
     @Config("auth:default_scopes", [])
     protected defaultScopes: string[] = [];
 
@@ -63,6 +69,9 @@ export abstract class BaseImpersonationRoute<U extends User> {
 
     @Inject(TokenUtils)
     protected tokenUtils?: TokenUtils;
+
+    @Config("trusted_proxies", [])
+    protected trustedProxies: string[] = [];
 
     @Config("trusted_roles", ["admin"])
     private trustedRoles: string[] = ["admin"];
@@ -151,6 +160,22 @@ export abstract class BaseImpersonationRoute<U extends User> {
         );
 
         this.logger?.warn(`[Impersonation] '${user.uid}' started impersonating '${body.userUid}'.`);
+
+        // Closes a previously total gap: before this, impersonation had no audit trail at all via either
+        // sink. `actorUid` is always the impersonator here (never equal to `toImpersonate.uid` - a caller
+        // can't target their own uid through anything this route validates, but there's no legitimate
+        // reason to omit it here even if they somehow could).
+        try {
+            await this.auditLogUtils?.record({
+                type: AuthEventType.IMPERSONATED,
+                userUid: toImpersonate.uid,
+                actorUid: user.uid,
+                ip: req ? NetUtils.getIPAddress(req, this.trustedProxies) : undefined,
+                path: req?.path,
+            });
+        } catch (err) {
+            this.logger?.error(`[AuditLog] Failed to record ${AuthEventType.IMPERSONATED} for '${toImpersonate.uid}': ${err}`);
+        }
 
         return result;
     }

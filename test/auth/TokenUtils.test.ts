@@ -398,6 +398,130 @@ describe("TokenUtils Tests", () => {
             await expect(tokenUtils.createAuthResult(user, [])).resolves.toBeDefined();
         });
 
+        // SIGNED_IN is the durable AuditLogUtils counterpart of SESSION_CREATED - gated on `authMethod`
+        // actually being supplied (not on `elevated`), so a genuine new sign-in that happens to mint an
+        // elevated token (self-registration) still gets one, while a step-up elevation of an
+        // already-signed-in session (which never passes authMethod) does not double-count as a sign-in.
+        describe("SIGNED_IN audit entry", () => {
+            it("Records a SIGNED_IN entry via AuditLogUtils when authMethod is given.", async () => {
+                const tokenUtils = makeTokenUtils();
+                const auditLogUtils = { record: vi.fn().mockResolvedValue(undefined) };
+                (tokenUtils as any).auditLogUtils = auditLogUtils;
+                const req = makeReq({ path: "/auth/basic" });
+
+                await tokenUtils.createAuthResult(user, ["read"], req, undefined, false, false, "password");
+
+                expect(auditLogUtils.record).toHaveBeenCalledWith({
+                    type: AuthEventType.SIGNED_IN,
+                    userUid: user.uid,
+                    ip: "127.0.0.1",
+                    path: "/auth/basic",
+                    method: "password",
+                    data: { scopes: ["read"] },
+                });
+            });
+
+            it("Does not record SIGNED_IN when authMethod is omitted (e.g. a token refresh).", async () => {
+                const tokenUtils = makeTokenUtils();
+                const auditLogUtils = { record: vi.fn().mockResolvedValue(undefined) };
+                (tokenUtils as any).auditLogUtils = auditLogUtils;
+
+                await tokenUtils.createAuthResult(user, ["read"], makeReq());
+
+                expect(auditLogUtils.record).not.toHaveBeenCalled();
+            });
+
+            it("Does not record SIGNED_IN for an impersonated token, even if authMethod is somehow given.", async () => {
+                const tokenUtils = makeTokenUtils();
+                const auditLogUtils = { record: vi.fn().mockResolvedValue(undefined) };
+                (tokenUtils as any).auditLogUtils = auditLogUtils;
+
+                await tokenUtils.createAuthResult(user, ["read"], makeReq(), undefined, false, true, "password");
+
+                expect(auditLogUtils.record).not.toHaveBeenCalled();
+            });
+
+            it("Does not record SIGNED_IN for an elevation call that omits authMethod (BaseAuthElevationRoute's own pattern).", async () => {
+                const tokenUtils = makeTokenUtils();
+                const auditLogUtils = { record: vi.fn().mockResolvedValue(undefined) };
+                (tokenUtils as any).auditLogUtils = auditLogUtils;
+
+                await tokenUtils.createAuthResult(user, ["read"], makeReq(), undefined, true);
+
+                expect(auditLogUtils.record).not.toHaveBeenCalled();
+            });
+
+            // Regression/design intent: self-registration (BaseRegistrationRoute/BaseUserRoute) mints an
+            // elevated token AND passes authMethod - both REGISTRATION_COMPLETED and SIGNED_IN must fire,
+            // the same acceptable double-fire pattern elevation itself already uses.
+            it("Still records SIGNED_IN for a call that is both elevated and given an authMethod (self-registration).", async () => {
+                const tokenUtils = makeTokenUtils();
+                const auditLogUtils = { record: vi.fn().mockResolvedValue(undefined) };
+                (tokenUtils as any).auditLogUtils = auditLogUtils;
+
+                await tokenUtils.createAuthResult(user, ["read"], makeReq(), undefined, true, false, "registration");
+
+                expect(auditLogUtils.record).toHaveBeenCalledWith(
+                    expect.objectContaining({ type: AuthEventType.SIGNED_IN, method: "registration" }),
+                );
+            });
+
+            it("Awaits the AuditLogUtils write before resolving.", async () => {
+                const tokenUtils = makeTokenUtils();
+                let resolveRecord: () => void = () => undefined;
+                const record = vi.fn().mockImplementation(
+                    () =>
+                        new Promise<void>((resolve) => {
+                            resolveRecord = resolve;
+                        }),
+                );
+                (tokenUtils as any).auditLogUtils = { record };
+
+                let settled = false;
+                const promise = tokenUtils
+                    .createAuthResult(user, ["read"], makeReq(), undefined, false, false, "password")
+                    .then(() => {
+                        settled = true;
+                    });
+
+                // Flush microtasks (bounded, to avoid an infinite loop if something regresses) until
+                // record() has actually been invoked - createAuthResult() has a few real `await`s of its
+                // own (token signing) before it, so a fixed small number of ticks isn't reliable.
+                for (let i = 0; i < 100 && record.mock.calls.length === 0; i++) {
+                    await Promise.resolve();
+                }
+                expect(record).toHaveBeenCalledTimes(1);
+                // Still pending - the AuditLogUtils write hasn't resolved yet.
+                expect(settled).toBe(false);
+
+                resolveRecord();
+                await promise;
+                expect(settled).toBe(true);
+            });
+
+            it("Does not reject, and logs loudly (not silently), when AuditLogUtils.record() itself rejects.", async () => {
+                const tokenUtils = makeTokenUtils();
+                const error = vi.fn();
+                (tokenUtils as any).logger = { error };
+                (tokenUtils as any).auditLogUtils = { record: vi.fn().mockRejectedValue(new Error("db down")) };
+
+                await expect(
+                    tokenUtils.createAuthResult(user, ["read"], makeReq(), undefined, false, false, "password"),
+                ).resolves.toBeDefined();
+
+                expect(error).toHaveBeenCalledTimes(1);
+                expect(error.mock.calls[0][0]).toContain(AuthEventType.SIGNED_IN);
+            });
+
+            it("Does not throw when auditLogUtils is unset (optional chaining no-op).", async () => {
+                const tokenUtils = makeTokenUtils();
+
+                await expect(
+                    tokenUtils.createAuthResult(user, ["read"], makeReq(), undefined, false, false, "password"),
+                ).resolves.toBeDefined();
+            });
+        });
+
         // Regression coverage for impersonation support: `createAuthResult(..., impersonation: true)` must
         // not issue a refresh token, touch the caller's session, or record a SESSION_CREATED event - all of
         // which would either overwrite the impersonator's own real session state or create a durable

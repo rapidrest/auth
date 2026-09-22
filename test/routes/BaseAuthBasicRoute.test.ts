@@ -440,6 +440,51 @@ describe("BaseAuthBasicRoute Tests", () => {
                 });
             });
 
+            it("Also records an auth.app_password.used entry via AuditLogUtils, and stashes authMethodUsed on the request, on a successful match.", async () => {
+                const { userUtils, secretRepo, verify, route } = await setupRoute();
+                const argon2 = await import("argon2");
+                const auditLogUtils = { record: vi.fn().mockResolvedValue(undefined) };
+                (route as any).auditLogUtils = auditLogUtils;
+                userUtils.lookup.mockResolvedValue({ uid: "user-uid-1" });
+                secretRepo.find.mockImplementation(async (query: any) =>
+                    query.type === SecretType.APP_PASSWORD
+                        ? [{ uid: "app-pw-1", data: await argon2.hash("app-password-value") }]
+                        : [],
+                );
+                const req: any = { path: "/auth/basic", socket: { remoteAddress: "1.2.3.4" }, headers: {} };
+
+                await verify("user1", "app-password-value", req);
+
+                expect(auditLogUtils.record).toHaveBeenCalledWith({
+                    type: AuthEventType.APP_PASSWORD_USED,
+                    userUid: "user-uid-1",
+                    ip: expect.any(String),
+                    path: "/auth/basic",
+                    data: { secretUid: "app-pw-1" },
+                });
+                expect(req.authMethodUsed).toBe("app-password");
+            });
+
+            it("Still resolves the user via a matching app password even when AuditLogUtils.record() itself rejects, and logs the failure loudly.", async () => {
+                const { userUtils, secretRepo, verify, route } = await setupRoute();
+                const argon2 = await import("argon2");
+                const error = vi.fn();
+                (route as any).logger = { error };
+                (route as any).auditLogUtils = { record: vi.fn().mockRejectedValue(new Error("db down")) };
+                userUtils.lookup.mockResolvedValue({ uid: "user-uid-1" });
+                secretRepo.find.mockImplementation(async (query: any) =>
+                    query.type === SecretType.APP_PASSWORD
+                        ? [{ uid: "app-pw-1", data: await argon2.hash("app-password-value") }]
+                        : [],
+                );
+
+                const user = await verify("user1", "app-password-value");
+
+                expect(user).toEqual({ uid: "user-uid-1" });
+                expect(error).toHaveBeenCalledTimes(1);
+                expect(error.mock.calls[0][0]).toContain(AuthEventType.APP_PASSWORD_USED);
+            });
+
             it("Does not record an auth.app_password.used event when the app password does not match.", async () => {
                 const { userUtils, secretRepo, verify } = await setupRoute();
                 const argon2 = await import("argon2");
@@ -547,6 +592,34 @@ describe("BaseAuthBasicRoute Tests", () => {
             const user = await verify("user1", "correct-password");
 
             expect(user).toEqual({ uid: "user-uid-1" });
+        });
+    });
+
+    describe("authenticate", () => {
+        it("Passes authMethod 'password' to createAuthResult for a real password login.", async () => {
+            const route = new TestAuthBasicRoute();
+            const createAuthResult = vi.fn().mockResolvedValue({ token: "t", refresh: "r", user: {} });
+            (route as any).tokenUtils = { createAuthResult };
+            const user: any = { uid: "user-uid-1" };
+            const req: any = { headers: {} };
+            const res: any = {};
+
+            await route.authenticate(user, req, res);
+
+            expect(createAuthResult).toHaveBeenCalledWith(user, [], req, res, false, false, "password");
+        });
+
+        it("Passes authMethod 'app-password' when verify() stashed it on the request.", async () => {
+            const route = new TestAuthBasicRoute();
+            const createAuthResult = vi.fn().mockResolvedValue({ token: "t", refresh: "r", user: {} });
+            (route as any).tokenUtils = { createAuthResult };
+            const user: any = { uid: "user-uid-1" };
+            const req: any = { headers: {}, authMethodUsed: "app-password" };
+            const res: any = {};
+
+            await route.authenticate(user, req, res);
+
+            expect(createAuthResult).toHaveBeenCalledWith(user, [], req, res, false, false, "app-password");
         });
     });
 });

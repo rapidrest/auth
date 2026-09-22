@@ -32,6 +32,7 @@ import {
     verifyPasskeyRegistrationResponse,
     WeakClientHashError,
 } from "../auth/shared.js";
+import { AuditLogUtils } from "../auth/AuditLogUtils.js";
 import { AuthEventType } from "../auth/events.js";
 import {
     PasskeyConfig,
@@ -42,7 +43,7 @@ import {
     TOTPSecret,
 } from "../auth/types.js";
 
-const { Config, Init } = ObjectDecorators;
+const { Config, Init, Inject, Logger } = ObjectDecorators;
 const { Description, Returns, Summary } = DocDecorators;
 const { Auth, Delete, Get, Head, Param, Post, Put, Query, Request, RequiresElevation, Response, User, Validate } =
     RouteDecorators;
@@ -116,6 +117,12 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
 
     @Config("trusted_roles", ["admin"])
     protected trustedRoles: string[] = ["admin"];
+
+    @Logger
+    protected logger: any;
+
+    @Inject(AuditLogUtils)
+    protected auditLogUtils?: AuditLogUtils;
 
     @Init
     private init() {
@@ -570,6 +577,11 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
         const sanitized: Array<T> = [];
         for (const obj of objs) {
             sanitized.push(await this.sanitizeSecretForResponse(obj, req));
+            // Only set when the caller acted on someone else's behalf (a trusted role provisioning
+            // another account - see enforceOwnership()); matches AuditLogEntry.actorUid's own contract.
+            // Guarded with `?.` since `user` is always populated in production (this route requires
+            // `@Auth(["jwt"])`) but defensively kept optional here, matching the parameter's own type.
+            const actorUid: string | undefined = user?.uid && user.uid !== obj.userUid ? user.uid : undefined;
             if (this.isMFASecretType(obj.type)) {
                 EventUtils.record({
                     type: AuthEventType.MFA_ENROLLED,
@@ -577,12 +589,39 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
                     ip: NetUtils.getIPAddress(req, this.trustedProxies),
                     secretType: obj.type,
                 }).catch(() => undefined);
+                try {
+                    await this.auditLogUtils?.record({
+                        type: AuthEventType.MFA_ENROLLED,
+                        userUid: obj.userUid,
+                        actorUid,
+                        ip: NetUtils.getIPAddress(req, this.trustedProxies),
+                        path: req.path,
+                        data: { secretType: obj.type },
+                    });
+                } catch (err) {
+                    this.logger?.error(
+                        `[AuditLog] Failed to record ${AuthEventType.MFA_ENROLLED} for '${obj.userUid}': ${err}`,
+                    );
+                }
             } else if (obj.type === SecretType.PASSWORD) {
                 EventUtils.record({
                     type: AuthEventType.PASSWORD_CHANGED,
                     userUid: obj.userUid,
                     ip: NetUtils.getIPAddress(req, this.trustedProxies),
                 }).catch(() => undefined);
+                try {
+                    await this.auditLogUtils?.record({
+                        type: AuthEventType.PASSWORD_CHANGED,
+                        userUid: obj.userUid,
+                        actorUid,
+                        ip: NetUtils.getIPAddress(req, this.trustedProxies),
+                        path: req.path,
+                    });
+                } catch (err) {
+                    this.logger?.error(
+                        `[AuditLog] Failed to record ${AuthEventType.PASSWORD_CHANGED} for '${obj.userUid}': ${err}`,
+                    );
+                }
             } else if (obj.type === SecretType.APP_PASSWORD) {
                 // Not part of isMFASecretType() - an app password is deliberately never counted as a
                 // second factor - so it gets its own event pair rather than reusing MFA_ENROLLED/MFA_REMOVED.
@@ -592,6 +631,20 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
                     ip: NetUtils.getIPAddress(req, this.trustedProxies),
                     secretType: obj.type,
                 }).catch(() => undefined);
+                try {
+                    await this.auditLogUtils?.record({
+                        type: AuthEventType.APP_PASSWORD_CREATED,
+                        userUid: obj.userUid,
+                        actorUid,
+                        ip: NetUtils.getIPAddress(req, this.trustedProxies),
+                        path: req.path,
+                        data: { secretType: obj.type },
+                    });
+                } catch (err) {
+                    this.logger?.error(
+                        `[AuditLog] Failed to record ${AuthEventType.APP_PASSWORD_CREATED} for '${obj.userUid}': ${err}`,
+                    );
+                }
             }
         }
 
@@ -670,6 +723,11 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
 
         await super.doDelete(id, { user, req, version, purge: purge === "true" });
 
+        // Only set when the caller acted on someone else's behalf (a trusted role removing another
+        // account's secret); matches AuditLogEntry.actorUid's own contract. Guarded with `?.` for the
+        // same reason as create()'s own actorUid above.
+        const actorUid: string | undefined =
+            existing && user?.uid && user.uid !== existing.userUid ? user.uid : undefined;
         if (existing && this.isMFASecretType(existing.type)) {
             EventUtils.record({
                 type: AuthEventType.MFA_REMOVED,
@@ -677,6 +735,20 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
                 ip: NetUtils.getIPAddress(req, this.trustedProxies),
                 secretType: existing.type,
             }).catch(() => undefined);
+            try {
+                await this.auditLogUtils?.record({
+                    type: AuthEventType.MFA_REMOVED,
+                    userUid: existing.userUid,
+                    actorUid,
+                    ip: NetUtils.getIPAddress(req, this.trustedProxies),
+                    path: req.path,
+                    data: { secretType: existing.type },
+                });
+            } catch (err) {
+                this.logger?.error(
+                    `[AuditLog] Failed to record ${AuthEventType.MFA_REMOVED} for '${existing.userUid}': ${err}`,
+                );
+            }
         } else if (existing && existing.type === SecretType.APP_PASSWORD) {
             EventUtils.record({
                 type: AuthEventType.APP_PASSWORD_REMOVED,
@@ -684,6 +756,20 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
                 ip: NetUtils.getIPAddress(req, this.trustedProxies),
                 secretType: existing.type,
             }).catch(() => undefined);
+            try {
+                await this.auditLogUtils?.record({
+                    type: AuthEventType.APP_PASSWORD_REMOVED,
+                    userUid: existing.userUid,
+                    actorUid,
+                    ip: NetUtils.getIPAddress(req, this.trustedProxies),
+                    path: req.path,
+                    data: { secretType: existing.type },
+                });
+            } catch (err) {
+                this.logger?.error(
+                    `[AuditLog] Failed to record ${AuthEventType.APP_PASSWORD_REMOVED} for '${existing.userUid}': ${err}`,
+                );
+            }
         }
     }
 
@@ -861,6 +947,19 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
                 userUid: existing.userUid,
                 ip: NetUtils.getIPAddress(req, this.trustedProxies),
             }).catch(() => undefined);
+            try {
+                await this.auditLogUtils?.record({
+                    type: AuthEventType.PASSWORD_CHANGED,
+                    userUid: existing.userUid,
+                    actorUid: user?.uid && user.uid !== existing.userUid ? user.uid : undefined,
+                    ip: NetUtils.getIPAddress(req, this.trustedProxies),
+                    path: req.path,
+                });
+            } catch (err) {
+                this.logger?.error(
+                    `[AuditLog] Failed to record ${AuthEventType.PASSWORD_CHANGED} for '${existing.userUid}': ${err}`,
+                );
+            }
         }
 
         return await this.sanitizeSecretForResponse(result);

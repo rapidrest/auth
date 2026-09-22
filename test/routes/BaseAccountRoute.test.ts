@@ -313,6 +313,63 @@ describe("BaseAccountRoute Tests", () => {
 
             await expect(route.delete("me", makeReq(), user)).resolves.toBeUndefined();
         });
+
+        it("Also records an auth.account.deleted entry via AuditLogUtils, with actorUid set for a trusted caller.", async () => {
+            const route = new TestAccountRoute();
+            const eUser = { uid: "victim-uid" };
+            (route as any).userRepo = { findOne: vi.fn().mockResolvedValue(eUser), delete: vi.fn().mockResolvedValue(undefined) };
+            (route as any).aliasRepo = { truncate: vi.fn().mockResolvedValue(undefined) };
+            (route as any).secretRepo = { truncate: vi.fn().mockResolvedValue(undefined) };
+            (route as any).profileRepo = { delete: vi.fn().mockResolvedValue(undefined) };
+            const user: any = { uid: "admin-uid", roles: ["admin"] };
+            const auditLogUtils = { record: vi.fn().mockResolvedValue(undefined) };
+            (route as any).auditLogUtils = auditLogUtils;
+            const req = makeReq({ path: "/account/victim-uid" });
+
+            await route.delete("victim-uid", req, user);
+
+            expect(auditLogUtils.record).toHaveBeenCalledWith({
+                type: AuthEventType.ACCOUNT_DELETED,
+                userUid: "victim-uid",
+                actorUid: "admin-uid",
+                ip: "1.2.3.4",
+                path: "/account/victim-uid",
+            });
+        });
+
+        it("Leaves actorUid unset in the AuditLogUtils entry for a self-service account deletion.", async () => {
+            const route = new TestAccountRoute();
+            const eUser = { uid: "user-1" };
+            (route as any).userRepo = { findOne: vi.fn().mockResolvedValue(eUser), delete: vi.fn().mockResolvedValue(undefined) };
+            (route as any).aliasRepo = { truncate: vi.fn().mockResolvedValue(undefined) };
+            (route as any).secretRepo = { truncate: vi.fn().mockResolvedValue(undefined) };
+            (route as any).profileRepo = { delete: vi.fn().mockResolvedValue(undefined) };
+            const user: any = { uid: "user-1", roles: [] };
+            const auditLogUtils = { record: vi.fn().mockResolvedValue(undefined) };
+            (route as any).auditLogUtils = auditLogUtils;
+
+            await route.delete("me", makeReq(), user);
+
+            expect(auditLogUtils.record).toHaveBeenCalledWith(expect.objectContaining({ actorUid: undefined }));
+        });
+
+        it("Does not throw, and logs loudly, when AuditLogUtils.record() itself rejects.", async () => {
+            const route = new TestAccountRoute();
+            const eUser = { uid: "user-1" };
+            (route as any).userRepo = { findOne: vi.fn().mockResolvedValue(eUser), delete: vi.fn().mockResolvedValue(undefined) };
+            (route as any).aliasRepo = { truncate: vi.fn().mockResolvedValue(undefined) };
+            (route as any).secretRepo = { truncate: vi.fn().mockResolvedValue(undefined) };
+            (route as any).profileRepo = { delete: vi.fn().mockResolvedValue(undefined) };
+            const user: any = { uid: "user-1", roles: [] };
+            const error = vi.fn();
+            (route as any).logger = { error };
+            (route as any).auditLogUtils = { record: vi.fn().mockRejectedValue(new Error("db down")) };
+
+            await expect(route.delete("me", makeReq(), user)).resolves.toBeUndefined();
+
+            expect(error).toHaveBeenCalledTimes(1);
+            expect(error.mock.calls[0][0]).toContain(AuthEventType.ACCOUNT_DELETED);
+        });
     });
 
     describe("revokeSessions", () => {
@@ -392,6 +449,41 @@ describe("BaseAccountRoute Tests", () => {
             vi.spyOn(EventUtils, "record").mockRejectedValue(new Error("telemetry down"));
 
             await expect(route.revokeSessions("me", makeReq(), user)).resolves.toBeUndefined();
+        });
+
+        it("Also records an auth.sessions.revoked entry via AuditLogUtils, with actorUid set for a trusted caller.", async () => {
+            const route = new TestAccountRoute();
+            const eUser = { uid: "victim-uid", version: 1 };
+            (route as any).userRepo = { findOne: vi.fn().mockResolvedValue(eUser), update: vi.fn().mockResolvedValue(undefined) };
+            const user: any = { uid: "admin-uid", roles: ["admin"] };
+            const auditLogUtils = { record: vi.fn().mockResolvedValue(undefined) };
+            (route as any).auditLogUtils = auditLogUtils;
+            const req = makeReq({ path: "/account/victim-uid/revokeSessions" });
+
+            await route.revokeSessions("victim-uid", req, user);
+
+            expect(auditLogUtils.record).toHaveBeenCalledWith({
+                type: AuthEventType.SESSIONS_REVOKED,
+                userUid: "victim-uid",
+                actorUid: "admin-uid",
+                ip: "1.2.3.4",
+                path: "/account/victim-uid/revokeSessions",
+            });
+        });
+
+        it("Does not throw, and logs loudly, when AuditLogUtils.record() itself rejects.", async () => {
+            const route = new TestAccountRoute();
+            const eUser = { uid: "user-1", version: 3 };
+            (route as any).userRepo = { findOne: vi.fn().mockResolvedValue(eUser), update: vi.fn().mockResolvedValue(undefined) };
+            const user: any = { uid: "user-1", roles: [] };
+            const error = vi.fn();
+            (route as any).logger = { error };
+            (route as any).auditLogUtils = { record: vi.fn().mockRejectedValue(new Error("db down")) };
+
+            await expect(route.revokeSessions("me", makeReq(), user)).resolves.toBeUndefined();
+
+            expect(error).toHaveBeenCalledTimes(1);
+            expect(error.mock.calls[0][0]).toContain(AuthEventType.SESSIONS_REVOKED);
         });
     });
 });

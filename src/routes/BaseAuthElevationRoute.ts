@@ -26,6 +26,7 @@ import {
     TOTPConfig,
     TOTPSecret,
 } from "../auth/types.js";
+import { AuditLogUtils } from "../auth/AuditLogUtils.js";
 import { AuthEventType } from "../auth/events.js";
 import {
     generateOTP,
@@ -86,6 +87,9 @@ export abstract class BaseAuthElevationRoute<U extends User, S extends Secret, A
     private _objectFactory?: ObjectFactory;
 
     protected aliasRepo?: RepoUtils<A>;
+
+    @Inject(AuditLogUtils)
+    protected auditLogUtils?: AuditLogUtils;
 
     @Config("auth:default_scopes", [])
     protected defaultScopes: string[] = [];
@@ -274,6 +278,21 @@ export abstract class BaseAuthElevationRoute<U extends User, S extends Secret, A
             method,
         }).catch(() => undefined);
 
+        try {
+            await this.auditLogUtils?.record({
+                type: AuthEventType.ELEVATED,
+                userUid: verifiedUser.uid,
+                ip: NetUtils.getIPAddress(req, this.trustedProxies),
+                path: req.path,
+                method,
+            });
+        } catch (err) {
+            this.logger?.error(`[AuditLog] Failed to record ${AuthEventType.ELEVATED} for '${verifiedUser.uid}': ${err}`);
+        }
+
+        // No authMethod is passed here (deliberately) - this is a step-up re-verification of an already
+        // signed-in session, not a fresh sign-in, so it must not also fire SIGNED_IN; the ELEVATED entry
+        // just above already covers it. See TokenUtils.createAuthResult()'s own doc comment.
         return await this.tokenUtils.createAuthResult(verifiedUser, this.defaultScopes, req, res, true);
     }
 

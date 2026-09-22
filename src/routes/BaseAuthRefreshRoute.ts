@@ -137,6 +137,9 @@ export abstract class BaseAuthRefreshRoute<U extends User> {
             throw new ApiError(ApiErrors.AUTH_FAILED, 401, ApiErrorMessages.AUTH_FAILED);
         }
 
+        // Deliberately no `authMethod` argument here - a routine token refresh must never fire a SIGNED_IN
+        // audit entry (see TokenUtils.createAuthResult()'s own doc comment on why that would be
+        // indistinguishable from a real new sign-in otherwise).
         const result: AuthResult = await this.tokenUtils!.createAuthResult(user, this.defaultScopes, req, res);
         return result;
     }

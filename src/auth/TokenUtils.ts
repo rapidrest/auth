@@ -7,9 +7,10 @@ import { HttpRequest, NetUtils, type HttpResponse } from "@rapidrest/service-cor
 import parseDuration from "parse-duration";
 import * as uuid from "uuid";
 import { AuthResult } from "../models/types.js";
+import { AuditLogUtils } from "./AuditLogUtils.js";
 import { AuthEventType } from "./events.js";
 
-const { Config } = ObjectDecorators;
+const { Config, Inject, Logger } = ObjectDecorators;
 
 /**
  * Configuration options controlling the `Set-Cookie` header written alongside a newly issued JWT.
@@ -68,6 +69,12 @@ export class TokenUtils {
 
     @Config("trusted_roles", ["admin"])
     protected trustedRoles: string[] = ["admin"];
+
+    @Logger
+    protected logger: any;
+
+    @Inject(AuditLogUtils)
+    protected auditLogUtils?: AuditLogUtils;
 
     /**
      * Builds the `Set-Cookie` header value for the given token using the configured cookie options. Pass
@@ -203,6 +210,10 @@ export class TokenUtils {
      * @param elevated Set to `true` to create an elevated access token that includes trusted roles. Default is `false`.
      * @param impersonation Set to `true` to indicate that the token/session is to impersonate another user and the
      * existing session shouldn't be altered. Default is `false`.
+     * @param authMethod A short, stable identifier for how the caller authenticated (e.g. `"password"`,
+     * `"passkey"`, `"mfa"`, `"registration"`), used only to record a `SIGNED_IN` audit-log entry via
+     * `AuditLogUtils` - see the doc comment above the call below for exactly when that fires. Omit for a
+     * call that must never be counted as a sign-in (e.g. `BaseAuthRefreshRoute`'s routine token refresh).
      */
     public async createAuthResult(
         user: JWTUser,
@@ -211,6 +222,7 @@ export class TokenUtils {
         res?: HttpResponse,
         elevated: boolean = false,
         impersonation: boolean = false,
+        authMethod?: string,
     ): Promise<AuthResult> {
         const refresh: string = impersonation ? "" : await this.createRefreshToken(user, req);
         const token: string = await this.createAccessToken(user, scopes, elevated);
@@ -246,6 +258,38 @@ export class TokenUtils {
                 elevated,
                 scopes,
             }).catch(() => undefined);
+
+            // Durable SIGNED_IN audit entry for a genuine new sign-in only. Gated on `authMethod` actually
+            // being supplied rather than on `!elevated`: a flow that mints an elevated token as part of a
+            // brand-new sign-in (self-registration - see BaseRegistrationRoute/BaseUserRoute, which both
+            // pass authMethod despite elevated: true) still deserves a SIGNED_IN entry, while
+            // BaseAuthElevationRoute's step-up re-verification of an *already* signed-in session
+            // deliberately omits authMethod so it isn't double-counted as a fresh sign-in - its own
+            // dedicated ELEVATED entry (see BaseAuthElevationRoute) covers that case instead.
+            // Impersonation is excluded unconditionally by the surrounding `if`, same as SESSION_CREATED
+            // above - see IMPERSONATED for its own dedicated entry.
+            //
+            // Awaited, unlike the fire-and-forget EventUtils call above: a real durable write through
+            // RepoUtils is typically fast, and this is exactly the kind of write we want to know succeeded
+            // before responding - not best-effort telemetry, which is the entire reason this mechanism
+            // exists. A failure here is logged loudly (not swallowed) but never fails the caller's actual
+            // sign-in.
+            if (authMethod) {
+                try {
+                    await this.auditLogUtils?.record({
+                        type: AuthEventType.SIGNED_IN,
+                        userUid: user.uid,
+                        ip,
+                        path: req?.path,
+                        method: authMethod,
+                        data: { scopes },
+                    });
+                } catch (err) {
+                    this.logger?.error(
+                        `[AuditLog] Failed to record ${AuthEventType.SIGNED_IN} for '${user.uid}': ${err}`,
+                    );
+                }
+            }
         }
 
         return {

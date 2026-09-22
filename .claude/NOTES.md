@@ -66,7 +66,123 @@ Keep entries terse — this is a reference, not a transcript.
 
 ## Session Log
 
-### 2026-09-22 (latest) — `Secret.lastUsedAt` + secret lifecycle/use audit events (follow-up to app passwords)
+### 2026-09-22 (latest) — `AuditLogUtils`: a separate, durable audit-log mechanism (follow-up to the app-passwords/lastUsedAt work)
+
+Requested as a same-session follow-up, prompted by the consuming app's operator confirming a concrete fact:
+no deployment in this monorepo configures `telemetry_services:url` or registers an `EventUtils.on()`
+listener, so every `EventUtils.record()` call added by the last two follow-ups is silently discarded end to
+end today - fine for telemetry, unacceptable for audit purposes. Built a lean, `MessagingUtils`-style DI
+swap point (`AuditLogUtils`) so a consuming app (`auth-server`, built by a parallel agent in that repo) can
+plug in real durable persistence with zero changes to this library. Investigated `src/auth/events.ts`, every
+`EventUtils.record()` call site, and every `TokenUtils.createAuthResult()` caller first, per this repo's
+usual practice, before writing anything - the task's own summary of the caller list held up exactly, except
+`BaseOAuthAuthorizeRoute` (matched the `grep -rln createAuthResult` search only because its own doc comment
+*mentions* `TokenUtils.createAuthResult()` in prose - it never actually calls it, so it needed zero changes).
+
+- **New `src/auth/AuditLogUtils.ts`**: `AuditLogEntry` = `{ type: string; userUid?: string; actorUid?:
+  string; ip?: string; path?: string; method?: string; data?: Record<string, unknown>; }`. `actorUid` unifies
+  `BaseAccountRoute`'s pre-existing `deletedBy`/`revokedBy` fields under one name for this mechanism - only
+  set when it differs from `userUid`. `AuditLogUtils.record()` just logs via `@Logger` in the base
+  implementation and **never throws** (internal try/catch, belt-and-suspenders on top of every call site's
+  own guard). A consuming app registers a database-backed subclass under the exact name `AuditLogUtils` -
+  `ObjectFactory` then resolves every `@Inject(AuditLogUtils)` in this library to it, identically to how
+  `MessagingUtils` is swapped today (see `BaseSecretRoute`'s own `@Inject(MessagingUtils)` for the existing
+  precedent this mirrors).
+- **Two new `AuthEventType` values, `AuditLogUtils`-only** (not fired via `EventUtils`):
+  `SIGNED_IN = "auth.signed_in"` and `IMPERSONATED = "auth.impersonated"`.
+- **`TokenUtils.createAuthResult()` gains a trailing `authMethod?: string` parameter** (backward compatible -
+  every real call site was updated anyway). After the existing `EventUtils.record({type: SESSION_CREATED,
+  ...})` block, fires `SIGNED_IN` **awaited** (not fire-and-forget like `EventUtils`) when
+  `!impersonation && authMethod`. **Deliberately gated on `authMethod` being supplied, NOT on `!elevated`**
+  - this is a considered deviation from the task's own literal pseudocode (which said `!impersonation &&
+  !elevated && authMethod`), made necessary by a real contradiction in the brief: it also explicitly required
+  self-registration (`BaseRegistrationRoute`/`BaseUserRoute`, both of which pass `elevated: true`) to fire
+  `SIGNED_IN` *in addition to* `REGISTRATION_COMPLETED` - literally impossible under a strict `!elevated`
+  gate. Resolution: gate on `authMethod` presence alone. `BaseAuthElevationRoute` simply never passes
+  `authMethod` on its own `createAuthResult()` call (unchanged - still 5 positional args), which
+  independently achieves "no duplicate SIGNED_IN for a step-up elevation" without needing a hardcoded
+  `elevated` check in `TokenUtils` itself. Documented at length in a code comment on the call site precisely
+  because it diverges from the brief - re-read that comment before changing this logic again.
+- **`authMethod` string per caller** (all lowercase-with-hyphens, threaded as the 7th positional arg -
+  callers passing it also had to spell out `false, false` for the unchanged `elevated`/`impersonation`
+  params since JS has no way to skip positional args):
+  - `BaseAuthBasicRoute`: `"password"` or `"app-password"` - `verify()` has no way to tell `authenticate()`
+    which matched (it only returns `user`), so it stashes `(req as any).authMethodUsed` on the app-password
+    match branch (mirrors the existing `generatedAppPassword`/`generatedRecoveryCodes` req-stashing
+    convention in `BaseSecretRoute`); `authenticate()` reads it back, defaulting to `"password"`. An
+    app-password login now fires **both** `APP_PASSWORD_USED` and `SIGNED_IN` - intentional double-fire,
+    same accepted pattern as elevation's `SESSION_CREATED` + `ELEVATED`.
+  - `BaseAuthElevationRoute`: **omits `authMethod` entirely** (see the gating discussion above) - its
+    `createAuthResult()` call is byte-for-byte unchanged from before this session.
+  - `BaseAuthFIDO2Route` → `"fido2"`, `BaseAuthPasskeyRoute` → `"passkey"`, `BaseAuthTOTPRoute` → `"totp"`,
+    `BaseAuthOTPRoute` → `"otp"`.
+  - `BaseAuthMFARoute` → generic `"mfa"`, not per-factor. Investigated whether `MFAStrategy`'s
+    session-tracked `req.session.mfaMethodType` could drive a more specific value (`mfa:totp`/`mfa:fido2`/
+    etc.) - it can't reliably: `MFAStrategy.verifyTOTP()`/`verifyRecoveryCode()` both `delete
+    req.session.mfaMethodType` before returning, but `verifyOTP()`/`verifyFIDO()` don't (pre-existing
+    inconsistency in that strategy, not something this task should fix) - so the field's presence/absence at
+    the route handler doesn't reliably tell you which factor matched. `RECOVERY_CODE_USED` (already fires
+    its own event from `consumeRecoveryCode()`) separately covers that one factor's detail regardless.
+  - `BaseAuthOIDCRoute` → `` `oidc:${this.providerConfig.name}` `` (`OIDCProvider.name` is exactly the
+    per-deployment provider identifier already used to build the `provider:id` OAuth alias, e.g.
+    `"oidc:google"` for a subclass configured with `providerConfig.name = "google"`).
+  - `BaseAuthRefreshRoute` → **omitted entirely**, unchanged 4-arg call - the one call site that must never
+    fire `SIGNED_IN`. No code change was needed here at all (already correct by omission) - only a
+    clarifying comment was added.
+  - `BaseRegistrationRoute`/`BaseUserRoute` (the anonymous - i.e. self-registration - branch of `POST
+    /users` only; the admin-creates-on-behalf-of-someone-else branch returns before ever reaching
+    `createAuthResult()`, so it needed no `authMethod` decision at all) → `"registration"`, fired alongside
+    `elevated: true` per the gating resolution above.
+  - `BaseOAuthAuthorizeRoute` → **N/A, not a caller at all** (see the investigation note above) - the task
+    brief's own instruction to "read this carefully" for it turned out to be moot.
+- **The 8 pre-existing `EventUtils.record()` call sites each gained a parallel, awaited
+  `AuditLogUtils.record()` call**, reusing the same `AuthEventType` value, rebuilt into the new
+  `AuditLogEntry` shape (not a pass-through - field names differ, e.g. `actorUid` not `deletedBy`): `
+  BaseAccountRoute.delete()`/`.revokeSessions()` (`ACCOUNT_DELETED`/`SESSIONS_REVOKED`, `actorUid` set only
+  when the caller differs from the account acted on), `BaseAuthBasicRoute` (`APP_PASSWORD_USED`),
+  `BaseAuthElevationRoute` (`ELEVATED`), `BaseAuthMFARoute.consumeRecoveryCode()` (`RECOVERY_CODE_USED`),
+  `BaseRegistrationRoute` (`REGISTRATION_COMPLETED`), and `BaseSecretRoute`'s five (`MFA_ENROLLED`,
+  `MFA_REMOVED`, `PASSWORD_CHANGED` ×2 create/update, `APP_PASSWORD_CREATED`, `APP_PASSWORD_REMOVED` - all
+  six call sites gained an `actorUid` computed the same way as `BaseAccountRoute`'s, guarded with `user?.uid`
+  since a couple of this file's own pre-existing tests call `create()`/`delete()` with no `user` argument at
+  all). Every one of these (plus the brand-new `IMPERSONATED` call below) follows "fail open, log loudly":
+  `try { await this.auditLogUtils?.record(...) } catch (err) { this.logger?.error(...) }` - never
+  `.catch(() => undefined)`.
+- **`BaseImpersonationRoute.impersonate()`** gained a new, previously-nonexistent `IMPERSONATED` entry
+  (`userUid` = impersonated account, `actorUid` = the trusted-role caller) right after its existing
+  `createAuthResult(..., impersonation: true)` call - closes a real, total gap (impersonation had zero audit
+  trail via either sink before this). Needed adding `NetUtils`/`trusted_proxies` to this route, which
+  previously had neither.
+- **Await vs. fire-and-forget, deliberately inconsistent with `EventUtils`'s pattern on purpose**: every
+  `AuditLogUtils.record()` call in this session (both the new `SIGNED_IN`/`IMPERSONATED` ones and the 8
+  parallel ones) is `await`ed, unlike the neighboring `EventUtils.record().catch(() => undefined)` calls,
+  which stay fire-and-forget. Rationale: `EventUtils` is telemetry - a lost event is a shrug; `AuditLogUtils`
+  is the entire point of this feature, and a real DB write through `RepoUtils` is typically fast, so the
+  latency cost of awaiting it is an acceptable, deliberate tradeoff for actually knowing the write succeeded
+  before responding. Verified via a microtask-flushing test on `TokenUtils.createAuthResult()`
+  (`test/auth/TokenUtils.test.ts` > "Awaits the AuditLogUtils write before resolving") - a naive fixed
+  2-microtask-tick check was insufficient and had to be replaced with a bounded poll-until-called loop, since
+  `createAuthResult()` has its own real `await`s (JWT signing) ahead of the `AuditLogUtils` call.
+- **Test coverage note**: `BaseSecretRoute.test.ts` already had several pre-existing tests that call
+  `create()`/`delete()` with no `@User user` argument at all (`route.create({} as any, req)`, `route.delete(
+  "id-1", undefined, undefined, req)`) - the new `actorUid` computation (`user.uid !== obj.userUid`) crashed
+  on those with `Cannot read properties of undefined (reading 'uid')` until guarded as `user?.uid && user.uid
+  !== obj.userUid`. Caught by running the full suite, not just the new tests, before declaring this done -
+  worth remembering as a recurring pattern in this repo (see `BaseUserRoute.create()`'s own optional `user`)
+  whenever a new field derived from `user.uid` is added to an existing route method whose `@User` parameter
+  is typed non-optional but exercised as optional by existing tests/production self-registration paths.
+- Full suite, `npx tsc --noEmit`, `npx eslint ./src ./test`: see this session's own final summary for exact
+  pass/fail counts and coverage numbers at the time this was written - re-run before relying on this note if
+  it's been a while. `junit.xml` restored via `git checkout -- junit.xml` per the tracked-file convention.
+- Updated `README.md` (new "Audit logging" subsection under Route Handlers, plus a new Security Features
+  bullet), `RELEASE_NOTES.md`'s `## Unreleased`, and `CHANGELOG.md`'s `## [Unreleased]` `### Added`. Not
+  committed - per the commit-approval convention, awaiting explicit ask. Did not touch `auth-server` (a
+  parallel agent is building the consuming database-backed `AuditLogUtils` subclass and admin UI for this
+  exact mechanism there, in the same session) - this repo only had to produce the DI swap point, the curated
+  event set, and the raw `AuditLogEntry` data for that implementation to consume; the exact shape/values
+  above are what it needs to line up against.
+
+### 2026-09-22 — `Secret.lastUsedAt` + secret lifecycle/use audit events (follow-up to app passwords)
 
 Requested as a same-day follow-up to app passwords (see the dated entry directly below): standard
 security-hygiene additions now that a `requireMFA`-bypassing credential type exists - (1) a `lastUsedAt`

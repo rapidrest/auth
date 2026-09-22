@@ -186,6 +186,102 @@ describe("BaseSecretRoute Tests", () => {
                 route.delete("id-1", undefined, undefined, req, { uid: "user-1" } as any),
             ).resolves.toBeUndefined();
         });
+
+        it("Also records an auth.mfa.removed entry via AuditLogUtils, with actorUid set when a trusted caller removes another account's secret.", async () => {
+            vi.spyOn(ModelRoute.prototype as any, "doDelete").mockResolvedValue(undefined);
+            const route = new TestSecretRoute();
+            const findOne = vi.fn().mockResolvedValue({ uid: "id-1", type: SecretType.TOTP, userUid: "user-1" });
+            (route as any).repoUtils = { findOne };
+            const auditLogUtils = { record: vi.fn().mockResolvedValue(undefined) };
+            (route as any).auditLogUtils = auditLogUtils;
+            const req: any = { path: "/secrets/id-1", socket: { remoteAddress: "1.2.3.4" } };
+
+            await route.delete("id-1", undefined, undefined, req, { uid: "admin-1", roles: ["admin"] } as any);
+
+            expect(auditLogUtils.record).toHaveBeenCalledWith({
+                type: AuthEventType.MFA_REMOVED,
+                userUid: "user-1",
+                actorUid: "admin-1",
+                ip: "1.2.3.4",
+                path: "/secrets/id-1",
+                data: { secretType: SecretType.TOTP },
+            });
+        });
+
+        it("Leaves actorUid unset in the AuditLogUtils entry when the caller is deleting their own secret.", async () => {
+            vi.spyOn(ModelRoute.prototype as any, "doDelete").mockResolvedValue(undefined);
+            const route = new TestSecretRoute();
+            const findOne = vi.fn().mockResolvedValue({ uid: "id-1", type: SecretType.TOTP, userUid: "user-1" });
+            (route as any).repoUtils = { findOne };
+            const auditLogUtils = { record: vi.fn().mockResolvedValue(undefined) };
+            (route as any).auditLogUtils = auditLogUtils;
+            const req: any = {};
+
+            await route.delete("id-1", undefined, undefined, req, { uid: "user-1" } as any);
+
+            expect(auditLogUtils.record).toHaveBeenCalledWith(expect.objectContaining({ actorUid: undefined }));
+        });
+
+        it("Also records an auth.app_password.removed entry via AuditLogUtils.", async () => {
+            vi.spyOn(ModelRoute.prototype as any, "doDelete").mockResolvedValue(undefined);
+            const route = new TestSecretRoute();
+            const findOne = vi
+                .fn()
+                .mockResolvedValue({ uid: "id-1", type: SecretType.APP_PASSWORD, userUid: "user-1" });
+            (route as any).repoUtils = { findOne };
+            const auditLogUtils = { record: vi.fn().mockResolvedValue(undefined) };
+            (route as any).auditLogUtils = auditLogUtils;
+            const req: any = { path: "/secrets/id-1", socket: { remoteAddress: "1.2.3.4" } };
+
+            await route.delete("id-1", undefined, undefined, req, { uid: "user-1" } as any);
+
+            expect(auditLogUtils.record).toHaveBeenCalledWith({
+                type: AuthEventType.APP_PASSWORD_REMOVED,
+                userUid: "user-1",
+                actorUid: undefined,
+                ip: "1.2.3.4",
+                path: "/secrets/id-1",
+                data: { secretType: SecretType.APP_PASSWORD },
+            });
+        });
+
+        it("Does not throw, and logs loudly, when AuditLogUtils.record() itself rejects.", async () => {
+            vi.spyOn(ModelRoute.prototype as any, "doDelete").mockResolvedValue(undefined);
+            const route = new TestSecretRoute();
+            const findOne = vi.fn().mockResolvedValue({ uid: "id-1", type: SecretType.TOTP, userUid: "user-1" });
+            (route as any).repoUtils = { findOne };
+            const error = vi.fn();
+            (route as any).logger = { error };
+            (route as any).auditLogUtils = { record: vi.fn().mockRejectedValue(new Error("db down")) };
+            const req: any = {};
+
+            await expect(
+                route.delete("id-1", undefined, undefined, req, { uid: "user-1" } as any),
+            ).resolves.toBeUndefined();
+
+            expect(error).toHaveBeenCalledTimes(1);
+            expect(error.mock.calls[0][0]).toContain(AuthEventType.MFA_REMOVED);
+        });
+
+        it("Does not throw, and logs loudly, when AuditLogUtils.record() itself rejects for an APP_PASSWORD removal.", async () => {
+            vi.spyOn(ModelRoute.prototype as any, "doDelete").mockResolvedValue(undefined);
+            const route = new TestSecretRoute();
+            const findOne = vi
+                .fn()
+                .mockResolvedValue({ uid: "id-1", type: SecretType.APP_PASSWORD, userUid: "user-1" });
+            (route as any).repoUtils = { findOne };
+            const error = vi.fn();
+            (route as any).logger = { error };
+            (route as any).auditLogUtils = { record: vi.fn().mockRejectedValue(new Error("db down")) };
+            const req: any = {};
+
+            await expect(
+                route.delete("id-1", undefined, undefined, req, { uid: "user-1" } as any),
+            ).resolves.toBeUndefined();
+
+            expect(error).toHaveBeenCalledTimes(1);
+            expect(error.mock.calls[0][0]).toContain(AuthEventType.APP_PASSWORD_REMOVED);
+        });
     });
 
     describe("exists", () => {
@@ -520,6 +616,128 @@ describe("BaseSecretRoute Tests", () => {
             const req: any = { generatedAppPassword: "ABCDE-FGHJK-MNPQR-STVWX-YZ012-34567" };
 
             await expect(route.create({} as any, req)).resolves.toBeDefined();
+        });
+
+        it("Also records an auth.mfa.enrolled entry via AuditLogUtils for a TOTP secret.", async () => {
+            vi.spyOn(ModelRoute.prototype as any, "doCreate").mockResolvedValue({
+                type: SecretType.TOTP,
+                userUid: "user-1",
+                data: { secret: "JBSWY3DPEHPK3PXP", digits: 6, period: 30, algorithm: "sha1" },
+            });
+            const route = new TestSecretRoute();
+            const auditLogUtils = { record: vi.fn().mockResolvedValue(undefined) };
+            (route as any).auditLogUtils = auditLogUtils;
+            const req: any = { path: "/secrets", socket: { remoteAddress: "1.2.3.4" } };
+
+            await route.create({} as any, req, { uid: "user-1" } as any);
+
+            expect(auditLogUtils.record).toHaveBeenCalledWith({
+                type: AuthEventType.MFA_ENROLLED,
+                userUid: "user-1",
+                actorUid: undefined,
+                ip: "1.2.3.4",
+                path: "/secrets",
+                data: { secretType: SecretType.TOTP },
+            });
+        });
+
+        it("Also records an auth.password.changed entry via AuditLogUtils for a PASSWORD secret, with actorUid set for a trusted caller provisioning another account.", async () => {
+            vi.spyOn(ModelRoute.prototype as any, "doCreate").mockResolvedValue({
+                type: SecretType.PASSWORD,
+                userUid: "user-1",
+                data: "hash",
+            });
+            const route = new TestSecretRoute();
+            const auditLogUtils = { record: vi.fn().mockResolvedValue(undefined) };
+            (route as any).auditLogUtils = auditLogUtils;
+            const req: any = { path: "/secrets" };
+
+            await route.create({} as any, req, { uid: "admin-1", roles: ["admin"] } as any);
+
+            expect(auditLogUtils.record).toHaveBeenCalledWith({
+                type: AuthEventType.PASSWORD_CHANGED,
+                userUid: "user-1",
+                actorUid: "admin-1",
+                ip: undefined,
+                path: "/secrets",
+            });
+        });
+
+        it("Also records an auth.app_password.created entry via AuditLogUtils.", async () => {
+            vi.spyOn(ModelRoute.prototype as any, "doCreate").mockResolvedValue({
+                type: SecretType.APP_PASSWORD,
+                userUid: "user-1",
+                hint: "My mail client",
+                data: "$argon2id$fake-hash",
+            });
+            const route = new TestSecretRoute();
+            const auditLogUtils = { record: vi.fn().mockResolvedValue(undefined) };
+            (route as any).auditLogUtils = auditLogUtils;
+            const req: any = { path: "/secrets", generatedAppPassword: "ABCDE-FGHJK-MNPQR-STVWX-YZ012-34567" };
+
+            await route.create({} as any, req, { uid: "user-1" } as any);
+
+            expect(auditLogUtils.record).toHaveBeenCalledWith({
+                type: AuthEventType.APP_PASSWORD_CREATED,
+                userUid: "user-1",
+                actorUid: undefined,
+                ip: undefined,
+                path: "/secrets",
+                data: { secretType: SecretType.APP_PASSWORD },
+            });
+        });
+
+        it("Does not throw, and logs loudly, when AuditLogUtils.record() itself rejects.", async () => {
+            vi.spyOn(ModelRoute.prototype as any, "doCreate").mockResolvedValue({
+                type: SecretType.TOTP,
+                userUid: "user-1",
+                data: { secret: "JBSWY3DPEHPK3PXP", digits: 6, period: 30, algorithm: "sha1" },
+            });
+            const route = new TestSecretRoute();
+            const error = vi.fn();
+            (route as any).logger = { error };
+            (route as any).auditLogUtils = { record: vi.fn().mockRejectedValue(new Error("db down")) };
+
+            await expect(route.create({} as any, {} as any)).resolves.toBeDefined();
+
+            expect(error).toHaveBeenCalledTimes(1);
+            expect(error.mock.calls[0][0]).toContain(AuthEventType.MFA_ENROLLED);
+        });
+
+        it("Does not throw, and logs loudly, when AuditLogUtils.record() itself rejects while recording auth.password.changed.", async () => {
+            vi.spyOn(ModelRoute.prototype as any, "doCreate").mockResolvedValue({
+                type: SecretType.PASSWORD,
+                userUid: "user-1",
+                data: "hash",
+            });
+            const route = new TestSecretRoute();
+            const error = vi.fn();
+            (route as any).logger = { error };
+            (route as any).auditLogUtils = { record: vi.fn().mockRejectedValue(new Error("db down")) };
+
+            await expect(route.create({} as any, {} as any)).resolves.toBeDefined();
+
+            expect(error).toHaveBeenCalledTimes(1);
+            expect(error.mock.calls[0][0]).toContain(AuthEventType.PASSWORD_CHANGED);
+        });
+
+        it("Does not throw, and logs loudly, when AuditLogUtils.record() itself rejects while recording auth.app_password.created.", async () => {
+            vi.spyOn(ModelRoute.prototype as any, "doCreate").mockResolvedValue({
+                type: SecretType.APP_PASSWORD,
+                userUid: "user-1",
+                hint: "My mail client",
+                data: "$argon2id$fake-hash",
+            });
+            const route = new TestSecretRoute();
+            const error = vi.fn();
+            (route as any).logger = { error };
+            (route as any).auditLogUtils = { record: vi.fn().mockRejectedValue(new Error("db down")) };
+            const req: any = { generatedAppPassword: "ABCDE-FGHJK-MNPQR-STVWX-YZ012-34567" };
+
+            await expect(route.create({} as any, req)).resolves.toBeDefined();
+
+            expect(error).toHaveBeenCalledTimes(1);
+            expect(error.mock.calls[0][0]).toContain(AuthEventType.APP_PASSWORD_CREATED);
         });
     });
 
@@ -1320,6 +1538,57 @@ describe("BaseSecretRoute Tests", () => {
             await expect(
                 route.update("id-1", { uid: "id-1", data: "new-password" } as any, {} as any, { uid: "u1" } as any),
             ).resolves.toBeDefined();
+        });
+
+        it("Also records an auth.password.changed entry via AuditLogUtils when a PASSWORD secret's data is actually changed.", async () => {
+            const existing = { uid: "id-1", type: SecretType.PASSWORD, userUid: "u1", data: "old-hash" };
+            const findOne = vi.fn().mockResolvedValue(existing);
+            vi.spyOn(ModelRoute.prototype as any, "doUpdate").mockResolvedValue({
+                uid: "id-1",
+                type: SecretType.PASSWORD,
+                userUid: "u1",
+                data: "new-hash",
+            });
+            const route = new TestSecretRoute();
+            (route as any).repoUtils = { findOne };
+            vi.spyOn(route as any, "validateUpdate").mockResolvedValue(undefined);
+            const auditLogUtils = { record: vi.fn().mockResolvedValue(undefined) };
+            (route as any).auditLogUtils = auditLogUtils;
+            const req: any = { path: "/secrets/id-1", socket: { remoteAddress: "1.2.3.4" } };
+
+            await route.update("id-1", { uid: "id-1", data: "new-password" } as any, req, { uid: "u1" } as any);
+
+            expect(auditLogUtils.record).toHaveBeenCalledWith({
+                type: AuthEventType.PASSWORD_CHANGED,
+                userUid: "u1",
+                actorUid: undefined,
+                ip: "1.2.3.4",
+                path: "/secrets/id-1",
+            });
+        });
+
+        it("Does not throw, and logs loudly, when AuditLogUtils.record() itself rejects while recording auth.password.changed.", async () => {
+            const existing = { uid: "id-1", type: SecretType.PASSWORD, userUid: "u1", data: "old-hash" };
+            const findOne = vi.fn().mockResolvedValue(existing);
+            vi.spyOn(ModelRoute.prototype as any, "doUpdate").mockResolvedValue({
+                uid: "id-1",
+                type: SecretType.PASSWORD,
+                userUid: "u1",
+                data: "new-hash",
+            });
+            const route = new TestSecretRoute();
+            (route as any).repoUtils = { findOne };
+            vi.spyOn(route as any, "validateUpdate").mockResolvedValue(undefined);
+            const error = vi.fn();
+            (route as any).logger = { error };
+            (route as any).auditLogUtils = { record: vi.fn().mockRejectedValue(new Error("db down")) };
+
+            await expect(
+                route.update("id-1", { uid: "id-1", data: "new-password" } as any, {} as any, { uid: "u1" } as any),
+            ).resolves.toBeDefined();
+
+            expect(error).toHaveBeenCalledTimes(1);
+            expect(error.mock.calls[0][0]).toContain(AuthEventType.PASSWORD_CHANGED);
         });
     });
 

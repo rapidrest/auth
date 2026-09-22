@@ -140,7 +140,7 @@ export abstract class BaseAuthPasskeyRoute<U extends User, A extends Alias, S ex
         @Request req: HttpRequest,
         @Response res: HttpResponse,
     ): Promise<AuthResult | undefined> {
-        return await this.tokenUtils!.createAuthResult(user, this.defaultScopes, req, res);
+        return await this.tokenUtils!.createAuthResult(user, this.defaultScopes, req, res, false, false, "passkey");
     }
 
     protected async getCredentialById(credentialId: string): Promise<StoredPasskeyCredential | undefined> {

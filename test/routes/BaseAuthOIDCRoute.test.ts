@@ -705,6 +705,19 @@ describe("BaseAuthOIDCRoute Tests", () => {
                 expect.stringContaining(`refresh=${result?.refresh}`),
             );
         });
+
+        it("Passes authMethod 'oidc:<provider name>' to createAuthResult.", async () => {
+            const route = new TestAuthOIDCRoute();
+            const createAuthResult = vi.fn().mockResolvedValue({ token: "t", refresh: "r", user: {} });
+            (route as any).tokenUtils = { createAuthResult };
+            const user: any = { uid: "user-1" };
+            const req: any = { session: {} };
+            const res: any = { appendHeader: vi.fn() };
+
+            await route.login(user, req, res);
+
+            expect(createAuthResult).toHaveBeenCalledWith(user, [], req, res, false, false, "oidc:test-provider");
+        });
     });
 
     describe("registration disabled", () => {

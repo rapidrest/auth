@@ -722,6 +722,67 @@ describe("BaseRegistrationRoute Tests", () => {
 
             await expect((route as any).verify({ email: "user@example.com", token }, req)).resolves.toBeDefined();
         });
+
+        it("Also records an auth.registration.completed entry via AuditLogUtils.", async () => {
+            const req = makeReq({ socket: { remoteAddress: "1.2.3.4" } });
+            const token = await generateOTP(req, { id: "user@example.com" });
+
+            const route = new TestRegistrationRoute();
+            const user = { uid: "new-user-uid", roles: [], scopes: [] };
+            (route as any).aliasRepo = { find: vi.fn().mockResolvedValue([]), create: vi.fn().mockResolvedValue(undefined) };
+            (route as any).userRepo = { create: vi.fn().mockResolvedValue(user) };
+            const tokenUtils = new TokenUtils();
+            (tokenUtils as any).jwtConfig = { secret: "test-secret", refresh: { expiresIn: "14 days" } };
+            (route as any).tokenUtils = tokenUtils;
+            const auditLogUtils = { record: vi.fn().mockResolvedValue(undefined) };
+            (route as any).auditLogUtils = auditLogUtils;
+
+            await (route as any).verify({ email: "user@example.com", token }, req);
+
+            expect(auditLogUtils.record).toHaveBeenCalledWith({
+                type: AuthEventType.REGISTRATION_COMPLETED,
+                userUid: "new-user-uid",
+                ip: "1.2.3.4",
+                path: req.path,
+            });
+        });
+
+        it("Does not throw, and logs loudly, when AuditLogUtils.record() itself rejects.", async () => {
+            const req = makeReq();
+            const token = await generateOTP(req, { id: "user@example.com" });
+
+            const route = new TestRegistrationRoute();
+            const user = { uid: "new-user-uid", roles: [], scopes: [] };
+            (route as any).aliasRepo = { find: vi.fn().mockResolvedValue([]), create: vi.fn().mockResolvedValue(undefined) };
+            (route as any).userRepo = { create: vi.fn().mockResolvedValue(user) };
+            const tokenUtils = new TokenUtils();
+            (tokenUtils as any).jwtConfig = { secret: "test-secret", refresh: { expiresIn: "14 days" } };
+            (route as any).tokenUtils = tokenUtils;
+            const error = vi.fn();
+            (route as any).logger = { error };
+            (route as any).auditLogUtils = { record: vi.fn().mockRejectedValue(new Error("db down")) };
+
+            await expect((route as any).verify({ email: "user@example.com", token }, req)).resolves.toBeDefined();
+
+            expect(error).toHaveBeenCalledTimes(1);
+            expect(error.mock.calls[0][0]).toContain(AuthEventType.REGISTRATION_COMPLETED);
+        });
+
+        it("Passes authMethod 'registration' to createAuthResult, in addition to elevated: true.", async () => {
+            const req = makeReq();
+            const token = await generateOTP(req, { id: "user@example.com" });
+
+            const route = new TestRegistrationRoute();
+            const user = { uid: "new-user-uid", roles: [], scopes: [] };
+            (route as any).aliasRepo = { find: vi.fn().mockResolvedValue([]), create: vi.fn().mockResolvedValue(undefined) };
+            (route as any).userRepo = { create: vi.fn().mockResolvedValue(user) };
+            const createAuthResult = vi.fn().mockResolvedValue({ token: "t", refresh: "r", user });
+            (route as any).tokenUtils = { createAuthResult };
+
+            await (route as any).verify({ email: "user@example.com", token }, req);
+
+            expect(createAuthResult).toHaveBeenCalledWith(user, [], req, undefined, true, false, "registration");
+        });
     });
 
     describe("registration disabled", () => {

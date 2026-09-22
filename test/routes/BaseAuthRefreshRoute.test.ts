@@ -289,5 +289,23 @@ describe("BaseAuthRefreshRoute Tests", () => {
             expect(session.userUid).toBe("user-1");
             expect(session.lastAccess).toBeDefined();
         });
+
+        // The single most important new-behavior test for this follow-up: a routine token refresh must
+        // never fire a SIGNED_IN audit entry - verified by confirming this route's own call site never
+        // passes an authMethod at all (TokenUtils.createAuthResult() only fires SIGNED_IN when one is
+        // given - see its own tests for that gating logic).
+        it("Calls createAuthResult() without an authMethod argument, so refresh never fires a SIGNED_IN audit entry.", async () => {
+            const { route, userRepo, tokenUtils } = await setupRoute();
+            const session: any = { userUid: "user-1" };
+            const refresh = await tokenUtils.createRefreshToken({ uid: "user-1" } as any, { session } as any);
+            userRepo.findOne.mockResolvedValue({ uid: "user-1" });
+            const req = makeReq({ body: { token: refresh }, session });
+            const createAuthResult = vi.spyOn(tokenUtils, "createAuthResult");
+
+            await route.authenticate(req, makeRes());
+
+            expect(createAuthResult).toHaveBeenCalledTimes(1);
+            expect(createAuthResult.mock.calls[0]).toHaveLength(4);
+        });
     });
 });

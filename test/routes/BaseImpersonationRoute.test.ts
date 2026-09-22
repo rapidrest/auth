@@ -165,6 +165,40 @@ describe("BaseImpersonationRoute Tests", () => {
                 route.impersonate({ userUid: "target-1" }, makeRequest(), makeResponse(), caller),
             ).resolves.toBeDefined();
         });
+
+        // Closes a previously total gap: before this, impersonation had no audit trail at all.
+        it("Records an auth.impersonated entry via AuditLogUtils, distinguishing the impersonator (actorUid) from the impersonated account (userUid).", async () => {
+            const route = makeRoute();
+            (route as any).tokenUtils = { createAuthResult: vi.fn(async () => ({ token: "t", refresh: "", user: target })) };
+            const auditLogUtils = { record: vi.fn().mockResolvedValue(undefined) };
+            (route as any).auditLogUtils = auditLogUtils;
+            const req = makeRequest({ path: "/impersonate", socket: { remoteAddress: "1.2.3.4" } });
+
+            await route.impersonate({ userUid: "target-1" }, req, makeResponse(), caller);
+
+            expect(auditLogUtils.record).toHaveBeenCalledWith({
+                type: "auth.impersonated",
+                userUid: "target-1",
+                actorUid: "admin-1",
+                ip: "1.2.3.4",
+                path: "/impersonate",
+            });
+        });
+
+        it("Still resolves the AuthResult even when AuditLogUtils.record() itself rejects, and logs the failure loudly.", async () => {
+            const route = makeRoute();
+            (route as any).tokenUtils = { createAuthResult: vi.fn(async () => ({ token: "t", refresh: "", user: target })) };
+            const error = vi.fn();
+            (route as any).logger = { warn: vi.fn(), error };
+            (route as any).auditLogUtils = { record: vi.fn().mockRejectedValue(new Error("db down")) };
+
+            await expect(
+                route.impersonate({ userUid: "target-1" }, makeRequest(), makeResponse(), caller),
+            ).resolves.toBeDefined();
+
+            expect(error).toHaveBeenCalledTimes(1);
+            expect(error.mock.calls[0][0]).toContain("auth.impersonated");
+        });
     });
 
     describe("stopImpersonating", () => {

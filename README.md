@@ -29,6 +29,7 @@ For complete documentation please visit [RapidREST.dev](https://rapidrest.dev).
 * Rate limiting on every credential-verification endpoint, layered per-identifier and per-source-IP (reverse-proxy aware) — via `@rapidrest/service-core`'s `RateLimiter`
 * App passwords — user-generated, individually-revocable Basic-auth-only credentials for legacy clients that can't complete an MFA challenge
 * Secret usage tracking (`Secret.lastUsedAt`) and security event hooks for secret lifecycle/use (password changed, app password created/removed/used, recovery code used), alongside the existing login/registration/elevation/MFA events — see `AuthEventType`
+* Durable audit logging (`AuditLogUtils`) for a curated set of security-relevant actions — every genuine sign-in (`SIGNED_IN`, excluding token refresh), impersonation (`IMPERSONATED`), elevation, account deletion, session revocation, and secret lifecycle/use — separate from the best-effort `EventUtils` telemetry above; see "Audit logging" below
 * MFA recovery/backup codes as a first-class secondary authentication method
 * Account elevation (`@RequiresElevation`) for step-up re-verification before sensitive actions
 * Session revocation ("log out everywhere") that invalidates every outstanding refresh token for an account
@@ -103,6 +104,32 @@ for the account as a whole:
 * A successful match updates the secret's `lastUsedAt` and records an `auth.app_password.used` event
   (`AuthEventType.APP_PASSWORD_USED`) - the signal that `requireMFA` was bypassed for that login - in
   addition to the generic `auth.session.created` event every successful login fires.
+
+#### Audit logging
+
+`EventUtils.record()` (`@rapidrest/core`) is lossy, best-effort telemetry: with no `telemetry_services:url`
+configured and no `EventUtils.on()` listener registered, every event it records is silently discarded end
+to end - fine for telemetry, unacceptable for a real audit log. `AuditLogUtils` (`src/auth/AuditLogUtils.ts`)
+is a separate, dedicated mechanism for that:
+
+* The base `AuditLogUtils.record(entry: AuditLogEntry)` just logs (`@Logger`) - a real improvement over
+  `EventUtils`'s silent no-op today, visible in server logs with zero extra configuration. A consuming app
+  that wants a real, durable, queryable audit trail (strongly recommended for production) registers a
+  database-backed subclass under the same class name (`AuditLogUtils`), so `ObjectFactory` resolves every
+  `@Inject(AuditLogUtils)` in this library to that richer implementation - the same dependency-injection
+  swap already used for `MessagingUtils` - with zero code changes needed here.
+* `AuditLogEntry`: `{ type, userUid?, actorUid?, ip?, path?, method?, data? }` - `type` reuses the matching
+  `AuthEventType` string value; `actorUid` is only set when it differs from `userUid` (e.g. a trusted-role
+  holder impersonating, deleting, or revoking sessions for another account).
+* A curated set of security-relevant actions record to `AuditLogUtils`, always fail-open (a write failure
+  is logged loudly, never fails the caller's actual action): every genuine new sign-in
+  (`AuthEventType.SIGNED_IN`, fired from `TokenUtils.createAuthResult()` whenever it's given an
+  `authMethod` - deliberately excludes a routine token refresh, and excludes elevation/impersonation, which
+  get their own more specific entries below), impersonation (`AuthEventType.IMPERSONATED`, previously with
+  no audit trail at all), plus a parallel entry alongside every existing `EventUtils`-recorded event
+  (`ACCOUNT_DELETED`, `SESSIONS_REVOKED`, `ELEVATED`, `APP_PASSWORD_USED`, `RECOVERY_CODE_USED`,
+  `REGISTRATION_COMPLETED`, `MFA_ENROLLED`/`MFA_REMOVED`, `PASSWORD_CHANGED`,
+  `APP_PASSWORD_CREATED`/`APP_PASSWORD_REMOVED`).
 
 #### WhatsApp one-time codes
 

@@ -160,6 +160,8 @@ describe("BaseUserRoute Tests", () => {
                 req,
                 res,
                 true,
+                false,
+                "registration",
             );
         });
 

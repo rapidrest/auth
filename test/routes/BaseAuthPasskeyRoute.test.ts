@@ -236,4 +236,19 @@ describe("BaseAuthPasskeyRoute Tests", () => {
             );
         });
     });
+
+    describe("authenticate", () => {
+        it("Passes authMethod 'passkey' to createAuthResult.", async () => {
+            const route = new TestAuthPasskeyRoute();
+            const createAuthResult = vi.fn().mockResolvedValue({ token: "t", refresh: "r", user: {} });
+            (route as any).tokenUtils = { createAuthResult };
+            const user: any = { uid: "user-uid-1" };
+            const req: any = { headers: {} };
+            const res: any = {};
+
+            await route.authenticate(user, req, res);
+
+            expect(createAuthResult).toHaveBeenCalledWith(user, [], req, res, false, false, "passkey");
+        });
+    });
 });

@@ -18,6 +18,7 @@ import {
 import { Alias, AliasType, AuthResult, SystemSettings, User } from "../models/types.js";
 import { SystemSettingsUtils } from "./SystemSettingsUtils.js";
 import { generateOTP, verifyOTP } from "../auth/shared.js";
+import { AuditLogUtils } from "../auth/AuditLogUtils.js";
 import { AuthEventType } from "../auth/events.js";
 import { TokenUtils } from "../auth/TokenUtils.js";
 
@@ -57,6 +58,9 @@ export abstract class BaseRegistrationRoute<U extends User, A extends Alias> {
     private _objectFactory?: ObjectFactory;
 
     protected systemSettingsUtils?: SystemSettingsUtils;
+
+    @Inject(AuditLogUtils)
+    protected auditLogUtils?: AuditLogUtils;
 
     @Config("auth:default_scopes", [])
     protected defaultScopes: string[] = [];
@@ -307,8 +311,22 @@ export abstract class BaseRegistrationRoute<U extends User, A extends Alias> {
             ip: NetUtils.getIPAddress(req, this.trustedProxies),
         }).catch(() => undefined);
 
+        try {
+            await this.auditLogUtils?.record({
+                type: AuthEventType.REGISTRATION_COMPLETED,
+                userUid: user.uid,
+                ip: NetUtils.getIPAddress(req, this.trustedProxies),
+                path: req.path,
+            });
+        } catch (err) {
+            this.logger?.error(`[AuditLog] Failed to record ${AuthEventType.REGISTRATION_COMPLETED} for '${user.uid}': ${err}`);
+        }
+
         // New accounts always get an elevated token in order to ensure that they can safely create
-        // secrets (e.g. MFA setup) needed to maintain account access.
-        return await this.tokenUtils!.createAuthResult(user, this.defaultScopes, req, res, true);
+        // secrets (e.g. MFA setup) needed to maintain account access. `authMethod: "registration"` still
+        // fires a SIGNED_IN entry despite `elevated: true` - see TokenUtils.createAuthResult()'s own doc
+        // comment for why this double-fire (REGISTRATION_COMPLETED + SIGNED_IN) is intentional, the same
+        // acceptable pattern elevation already uses (SESSION_CREATED + ELEVATED).
+        return await this.tokenUtils!.createAuthResult(user, this.defaultScopes, req, res, true, false, "registration");
     }
 }

@@ -140,7 +140,7 @@ export abstract class BaseAuthOTPRoute<U extends User, A extends Alias, S extend
         @Request req: HttpRequest,
         @Response res: HttpResponse,
     ): Promise<AuthResult | undefined> {
-        return await this.tokenUtils!.createAuthResult(user, this.defaultScopes, req, res);
+        return await this.tokenUtils!.createAuthResult(user, this.defaultScopes, req, res, false, false, "otp");
     }
 
     protected convertAliasType(type: AliasType): OTPContactType {

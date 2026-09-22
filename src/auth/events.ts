@@ -4,15 +4,37 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 /**
- * The security-relevant event types this library emits via `@rapidrest/core`'s `EventUtils.record()`.
+ * The security-relevant event types this library emits, shared across two separate sinks:
+ * `@rapidrest/core`'s `EventUtils.record()` (lossy, best-effort telemetry - silently discarded end to end
+ * unless the consuming app configures `telemetry_services:url` and registers its own `EventUtils.on()`
+ * listener) and this library's own `AuditLogUtils.record()` (see `./AuditLogUtils.ts`) - a separate,
+ * durable-by-default mechanism meant for real audit-log purposes. Most values below are recorded through
+ * both sinks in parallel at their existing call site; `SIGNED_IN`/`IMPERSONATED` are `AuditLogUtils`-only,
+ * since routine token refresh already makes `SESSION_CREATED` unsuitable as a "real sign-in" signal, and
+ * impersonation previously had no audit trail via either sink.
  */
 export enum AuthEventType {
     /**
      * A JWT access token was issued for a user. This covers every successful login (any strategy), token refresh,
      * self-registration, and elevation. Fired from `TokenUtils.createAuthResult()`, the single chokepoint
-     * every one of those flows already calls through.
+     * every one of those flows already calls through. Recorded via `EventUtils` only - see `SIGNED_IN` for
+     * the `AuditLogUtils` equivalent that excludes token refresh (and elevation/impersonation, which get
+     * their own dedicated entries).
      */
     SESSION_CREATED = "auth.session.created",
+    /**
+     * A genuine new authentication of any kind (password, app-password, an MFA second factor, passkey,
+     * FIDO2, direct TOTP/OTP, an OAuth/OIDC provider, or self-registration). Fired from
+     * `TokenUtils.createAuthResult()` whenever it's given an `authMethod` - deliberately NOT fired for a
+     * token refresh, and NOT fired for elevation (see `ELEVATED`) or impersonation (see `IMPERSONATED`),
+     * which each get their own more specific entry instead. Recorded via `AuditLogUtils` only.
+     */
+    SIGNED_IN = "auth.signed_in",
+    /**
+     * A trusted-role holder began impersonating another account (`BaseImpersonationRoute.impersonate()`).
+     * Recorded via `AuditLogUtils` only - previously this action had no audit trail at all.
+     */
+    IMPERSONATED = "auth.impersonated",
     /** A new account finished self-registration (OTP-verified email/phone). */
     REGISTRATION_COMPLETED = "auth.registration.completed",
     /** A caller successfully re-verified their identity to obtain an elevated (trusted-role-bearing) token. */

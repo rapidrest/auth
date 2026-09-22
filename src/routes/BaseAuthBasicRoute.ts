@@ -16,6 +16,7 @@ import {
 } from "@rapidrest/service-core";
 import { Alias, AuthResult, Secret, SecretType, User } from "../models/types.js";
 import { BasicStrategy, BasicStrategyOptions } from "../auth/BasicStrategy.js";
+import { AuditLogUtils } from "../auth/AuditLogUtils.js";
 import { AuthEventType } from "../auth/events.js";
 import {
     importArgon2,
@@ -28,7 +29,7 @@ import { PasswordConfig } from "../auth/types.js";
 import { TokenUtils } from "../auth/TokenUtils.js";
 import { UserUtils } from "./UserUtils.js";
 
-const { Config, Init, Inject } = ObjectDecorators;
+const { Config, Init, Inject, Logger } = ObjectDecorators;
 const { Summary, Description, Returns } = DocDecorators;
 const { Auth, Get, Request, Response } = RouteDecorators;
 const AuthUser = RouteDecorators.User;
@@ -67,6 +68,9 @@ export abstract class BaseAuthBasicRoute<U extends User, S extends Secret, A ext
     @Config("auth:app_password:enabled", true)
     protected appPasswordEnabled: boolean = true;
 
+    @Inject(AuditLogUtils)
+    protected auditLogUtils?: AuditLogUtils;
+
     @Inject(AuthMiddleware)
     protected authMiddleware?: AuthMiddleware;
 
@@ -75,6 +79,9 @@ export abstract class BaseAuthBasicRoute<U extends User, S extends Secret, A ext
 
     @Config("auth")
     protected jwtConfig?: any;
+
+    @Logger
+    protected logger: any;
 
     @Config("auth:password", new PasswordConfig())
     protected passwordConfig: PasswordConfig = new PasswordConfig();
@@ -177,6 +184,27 @@ export abstract class BaseAuthBasicRoute<U extends User, S extends Secret, A ext
                                 secretUid: secret.uid,
                                 path: req?.path,
                             }).catch(() => undefined);
+                            try {
+                                await this.auditLogUtils?.record({
+                                    type: AuthEventType.APP_PASSWORD_USED,
+                                    userUid: user.uid,
+                                    ip: req ? NetUtils.getIPAddress(req, this.trustedProxies) : undefined,
+                                    path: req?.path,
+                                    data: { secretUid: secret.uid },
+                                });
+                            } catch (err) {
+                                this.logger?.error(
+                                    `[AuditLog] Failed to record ${AuthEventType.APP_PASSWORD_USED} for '${user.uid}': ${err}`,
+                                );
+                            }
+                            // Stashed for authenticate() below, which has no other way to tell an
+                            // app-password login apart from a real one once verify() returns just `user` -
+                            // used to pick the right SIGNED_IN authMethod (mirrors the
+                            // `(req as any).generatedAppPassword`/`generatedRecoveryCodes` stashing pattern
+                            // already used elsewhere in this library).
+                            if (req) {
+                                (req as any).authMethodUsed = "app-password";
+                            }
                             return user;
                         }
                     }
@@ -260,6 +288,11 @@ export abstract class BaseAuthBasicRoute<U extends User, S extends Secret, A ext
         @Request req: HttpRequest,
         @Response res: HttpResponse,
     ): Promise<AuthResult | undefined> {
-        return await this.tokenUtils!.createAuthResult(user, this.defaultScopes, req, res);
+        // `verify()` above stashes "app-password" on a match; a real password login leaves it unset, so
+        // it defaults to "password" here - both fire SIGNED_IN (in addition to APP_PASSWORD_USED for the
+        // former), the same acceptable double-fire pattern elevation already uses (SESSION_CREATED +
+        // ELEVATED).
+        const authMethod: string = (req as any).authMethodUsed ?? "password";
+        return await this.tokenUtils!.createAuthResult(user, this.defaultScopes, req, res, false, false, authMethod);
     }
 }

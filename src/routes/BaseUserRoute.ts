@@ -169,8 +169,12 @@ export abstract class BaseUserRoute<T extends User> extends ModelRoute<T> {
             };
         } else {
             // New accounts always get an elevated token in order to ensure that they can safely create
-            // secrets (e.g. MFA setup) needed to maintain account access.
-            return await this.tokenUtils.createAuthResult(result, this.defaultScopes, req, res, true);
+            // secrets (e.g. MFA setup) needed to maintain account access. This branch is only reached
+            // anonymously (see the `if (user)` check above) - i.e. self-registration via POST /users - so
+            // `authMethod: "registration"` fires SIGNED_IN here too, the same as BaseRegistrationRoute's
+            // own OTP-verified flow; an admin creating an account on someone else's behalf never reaches
+            // this call at all (the `if (user)` branch above returns first, with no token issued).
+            return await this.tokenUtils.createAuthResult(result, this.defaultScopes, req, res, true, false, "registration");
         }
     }
 

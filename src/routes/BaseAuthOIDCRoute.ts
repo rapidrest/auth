@@ -344,6 +344,14 @@ export abstract class BaseAuthOIDCRoute<U extends User, A extends Alias, P exten
         @Request req: HttpRequest,
         @Response res: HttpResponse,
     ): Promise<AuthResult | undefined> {
-        return await this.tokenUtils!.createAuthResult(user, this.defaultScopes, req, res);
+        return await this.tokenUtils!.createAuthResult(
+            user,
+            this.defaultScopes,
+            req,
+            res,
+            false,
+            false,
+            `oidc:${this.providerConfig.name}`,
+        );
     }
 }
