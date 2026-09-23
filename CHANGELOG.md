@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Added CsrfUtils, issuing/rotating a host-only, non-HttpOnly `csrf` double-submit cookie alongside the `jwt`/`refresh` cookies at login/refresh/elevation, and clearing it at logout, as CSRF protection for cookie-authenticated requests (the enforcement itself lives in `@rapidrest/service-core`'s `RouteUtils.checkCsrf()`)
+- Added an explicit CSRF check to BaseOAuthAuthorizeRoute.decideConsent(), which authenticates via req.session directly and bypasses the framework's automatic jwt-cookie-keyed CSRF gate entirely
+
+### Changed
+- Changed BaseImpersonationRoute's `/impersonate/stop` from GET to POST — a state-changing GET is exploitable via a bare cross-site/same-site navigation, bypassing even CSRF defenses that only ever apply to non-safe methods
+- Document the changes in the README, CHANGELOG, release notes and NOTES
+
 ## [2.0.0-beta.12] - 2026-09-22
 
 ### Added

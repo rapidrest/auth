@@ -8,6 +8,7 @@ import parseDuration from "parse-duration";
 import * as uuid from "uuid";
 import { AuthResult } from "../models/types.js";
 import { AuditLogUtils } from "./AuditLogUtils.js";
+import { CsrfUtils } from "./CsrfUtils.js";
 import { AuthEventType } from "./events.js";
 
 const { Config, Inject, Logger } = ObjectDecorators;
@@ -76,6 +77,9 @@ export class TokenUtils {
     @Inject(AuditLogUtils)
     protected auditLogUtils?: AuditLogUtils;
 
+    @Inject(CsrfUtils)
+    protected csrfUtils?: CsrfUtils;
+
     /**
      * Builds the `Set-Cookie` header value for the given token using the configured cookie options. Pass
      * an empty string to build a header that immediately expires/clears the cookie instead.
@@ -123,6 +127,9 @@ export class TokenUtils {
             // after "logout".
             res.appendHeader("Set-Cookie", this.buildCookie("", this.cookieConfig.access));
             res.appendHeader("Set-Cookie", this.buildCookie("", this.cookieConfig.refresh));
+            // Clears the CSRF double-submit cookie too, matching the jwt/refresh cookies' own lifecycle —
+            // see `CsrfUtils` for why this exists alongside `RouteUtils.checkCsrf()`'s own lazy issuance.
+            this.csrfUtils?.clearToken(res);
         }
     }
 
@@ -232,6 +239,10 @@ export class TokenUtils {
             if (refresh) {
                 res.appendHeader("Set-Cookie", this.buildCookie(refresh, this.cookieConfig.refresh));
             }
+            // Rotates the CSRF double-submit cookie at every point the jwt/refresh cookies themselves are
+            // (re)issued — login, refresh, elevation, and impersonation — so it never trails a privilege
+            // change with a stale value. See `CsrfUtils` for the full lifecycle this is part of.
+            this.csrfUtils?.issueToken(res);
         }
 
         const ip: string | undefined = req ? NetUtils.getIPAddress(req, this.trustedProxies) : undefined;

@@ -202,6 +202,22 @@ describe("BaseImpersonationRoute Tests", () => {
     });
 
     describe("stopImpersonating", () => {
+        // Regression: this used to be a `@Get`, which meant a plain cross-site/same-site navigation
+        // (no form, no script) could trigger it — a state-changing GET is exploitable even by CSRF
+        // defenses that only ever apply to non-safe methods (see RouteUtils.checkCsrf() in
+        // @rapidrest/service-core). Asserted directly off the route metadata, not just the HTTP verb the
+        // frontend happens to send, so a regression back to `@Get` is caught even by a test that never
+        // spins up a real server.
+        it("Is registered as POST, not GET, at the framework metadata level.", () => {
+            const metadata: any = Reflect.getMetadata(
+                "rrst:route",
+                BaseImpersonationRoute.prototype,
+                "stopImpersonating",
+            );
+            expect(metadata.methods.has("post")).toBe(true);
+            expect(metadata.methods.has("get")).toBe(false);
+        });
+
         it("Returns restored:false and sets no cookies when no jwt_impersonator cookie is present.", async () => {
             const route = makeRoute();
             const res = makeResponse();

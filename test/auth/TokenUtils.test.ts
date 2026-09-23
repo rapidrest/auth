@@ -565,6 +565,57 @@ describe("TokenUtils Tests", () => {
                 expect(spy).not.toHaveBeenCalled();
             });
         });
+
+        describe("CsrfUtils interplay", () => {
+            it("rotates the CSRF cookie alongside the jwt/refresh cookies when csrfUtils is injected and cookie issuance is enabled.", async () => {
+                const tokenUtils = makeTokenUtils();
+                (tokenUtils as any).cookieConfig = {
+                    enabled: true,
+                    access: { name: "jwt" },
+                    refresh: { name: "refresh" },
+                };
+                const csrfUtils = { issueToken: vi.fn(), clearToken: vi.fn() };
+                (tokenUtils as any).csrfUtils = csrfUtils;
+                const res = makeRes();
+
+                await tokenUtils.createAuthResult(user, [], undefined, res);
+
+                expect(csrfUtils.issueToken).toHaveBeenCalledTimes(1);
+                expect(csrfUtils.issueToken).toHaveBeenCalledWith(res);
+                expect(csrfUtils.clearToken).not.toHaveBeenCalled();
+            });
+
+            it("never calls csrfUtils.issueToken when no response is provided.", async () => {
+                const tokenUtils = makeTokenUtils();
+                (tokenUtils as any).cookieConfig = { enabled: true, access: { name: "jwt" }, refresh: { name: "refresh" } };
+                const csrfUtils = { issueToken: vi.fn(), clearToken: vi.fn() };
+                (tokenUtils as any).csrfUtils = csrfUtils;
+
+                await tokenUtils.createAuthResult(user, []);
+
+                expect(csrfUtils.issueToken).not.toHaveBeenCalled();
+            });
+
+            it("never calls csrfUtils.issueToken when jwt/refresh cookie issuance itself is disabled.", async () => {
+                const tokenUtils = makeTokenUtils();
+                const csrfUtils = { issueToken: vi.fn(), clearToken: vi.fn() };
+                (tokenUtils as any).csrfUtils = csrfUtils;
+                const res = makeRes();
+
+                await tokenUtils.createAuthResult(user, [], undefined, res);
+
+                expect(csrfUtils.issueToken).not.toHaveBeenCalled();
+            });
+
+            it("works exactly as before when no CsrfUtils has been injected (backward compatible).", async () => {
+                const tokenUtils = makeTokenUtils();
+                (tokenUtils as any).cookieConfig = { enabled: true, access: { name: "jwt" }, refresh: { name: "refresh" } };
+                const res = makeRes();
+
+                await expect(tokenUtils.createAuthResult(user, [], undefined, res)).resolves.toBeDefined();
+                expect(res.appendHeader).toHaveBeenCalledTimes(2);
+            });
+        });
     });
 
     describe("clearToken", () => {
@@ -652,6 +703,37 @@ describe("TokenUtils Tests", () => {
             const [, refreshValue] = res.appendHeader.mock.calls[1];
             expect(accessValue).toBe("access_token=; Path=/api; SameSite=Lax; Max-Age=0; HttpOnly; Secure");
             expect(refreshValue).toBe("refresh_token=; Path=/api/refresh; SameSite=Lax; Max-Age=0; HttpOnly; Secure");
+        });
+
+        describe("CsrfUtils interplay", () => {
+            it("clears the CSRF cookie alongside the jwt/refresh cookies when csrfUtils is injected and cookie issuance is enabled.", () => {
+                const tokenUtils = makeTokenUtils();
+                (tokenUtils as any).cookieConfig = {
+                    enabled: true,
+                    access: { name: "jwt" },
+                    refresh: { name: "refresh" },
+                };
+                const csrfUtils = { issueToken: vi.fn(), clearToken: vi.fn() };
+                (tokenUtils as any).csrfUtils = csrfUtils;
+                const res = makeRes();
+
+                tokenUtils.clearToken(res);
+
+                expect(csrfUtils.clearToken).toHaveBeenCalledTimes(1);
+                expect(csrfUtils.clearToken).toHaveBeenCalledWith(res);
+                expect(csrfUtils.issueToken).not.toHaveBeenCalled();
+            });
+
+            it("never calls csrfUtils.clearToken when jwt/refresh cookie issuance itself is disabled.", () => {
+                const tokenUtils = makeTokenUtils();
+                const csrfUtils = { issueToken: vi.fn(), clearToken: vi.fn() };
+                (tokenUtils as any).csrfUtils = csrfUtils;
+                const res = makeRes();
+
+                tokenUtils.clearToken(res);
+
+                expect(csrfUtils.clearToken).not.toHaveBeenCalled();
+            });
         });
     });
 

@@ -14,6 +14,7 @@ import {
     ObjectFactory,
     RepoUtils,
     RouteDecorators,
+    verifyCsrfRequest,
 } from "@rapidrest/service-core";
 import parseDuration from "parse-duration";
 import { AuthorizationCode, Client, ConsentGrant } from "../models/types.js";
@@ -77,6 +78,12 @@ export abstract class BaseOAuthAuthorizeRoute<C extends Client, A extends Author
 
     @Config("auth:oauth_server:consentTicketTTL", "10m")
     protected consentTicketTTL: string = "10m";
+
+    @Config("csrf", { enabled: true })
+    protected csrfConfig: any = { enabled: true };
+
+    @Config("cors", {})
+    protected corsConfig: any = {};
 
     protected consentGrantRepo?: RepoUtils<G>;
 
@@ -394,6 +401,25 @@ export abstract class BaseOAuthAuthorizeRoute<C extends Client, A extends Author
     @Returns([Object])
     @Post("consent")
     public async decideConsent(@Request req: HttpRequest, @Response res: HttpResponse): Promise<any> {
+        // This route authenticates via `req.session.userUid` directly (see `resolveUserUid()`/the class
+        // doc comment above), not a fixed `@Auth([...])` decorator, so it is never covered by
+        // `RouteUtils.checkCsrf()`'s automatic gate — that gate only fires when `req.auth.source ===
+        // "cookie"`, and a request authenticated purely by session here may carry no jwt cookie at all. A
+        // forged consent here is arguably the highest-value CSRF target in this library: it can grant a
+        // malicious OAuth client an authorization code for the victim's account. Checked unconditionally
+        // (not gated on whether a session/jwt cookie is actually present) since this route is reachable by
+        // session cookie whenever one exists, and there is no cheaper, equally reliable signal to gate on.
+        verifyCsrfRequest(req, {
+            enabled: this.csrfConfig?.enabled !== false,
+            cookieName: this.csrfConfig?.cookieName,
+            headerName: this.csrfConfig?.headerName,
+            allowedOrigins: Array.isArray(this.csrfConfig?.allowedOrigins)
+                ? this.csrfConfig.allowedOrigins
+                : Array.isArray(this.corsConfig?.origins)
+                  ? this.corsConfig.origins
+                  : [],
+        });
+
         const { payload } = req.body && typeof req.body === "object" ? { payload: req.body } : { payload: undefined };
         const ticketRaw: string | undefined = payload?.requestId;
         const approved: boolean = payload?.approved === true;

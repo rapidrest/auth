@@ -690,6 +690,96 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
             ).rejects.toThrow(/requestId/);
         });
 
+        // This route authenticates via req.session.userUid directly, bypassing @Auth entirely (see the
+        // class's own doc comment), so it is never covered by RouteUtils.checkCsrf()'s automatic,
+        // req.auth.source-keyed gate. It must check for itself — this is the highest-value CSRF target in
+        // the library: a forged consent could grant a malicious OAuth client an authorization code for the
+        // victim's account.
+        describe("CSRF protection", () => {
+            it("Rejects a POST with no CSRF cookie/header pair at all, before even validating requestId.", async () => {
+                const { route } = makeRoute();
+                await expect(
+                    route.decideConsent(makeRequest({ method: "POST", body: {} }), res),
+                ).rejects.toMatchObject({ status: 403, code: "api-105" });
+            });
+
+            it("Rejects a POST whose CSRF cookie and header values don't match.", async () => {
+                const { route } = makeRoute();
+                const ticket = await makeTicket(route);
+                await expect(
+                    route.decideConsent(
+                        makeRequest({
+                            method: "POST",
+                            body: { requestId: ticket, approved: true },
+                            session: { userUid: "user-1" },
+                            cookies: { csrf: "tok-abc" },
+                            headers: { "x-csrf-token": "tok-different" },
+                        }),
+                        res,
+                    ),
+                ).rejects.toMatchObject({ status: 403, code: "api-105" });
+            });
+
+            it("Passes CSRF and proceeds to the normal consent flow when the double-submit pair matches.", async () => {
+                const { route } = makeRoute();
+                const ticket = await makeTicket(route);
+                const result = await route.decideConsent(
+                    makeRequest({
+                        method: "POST",
+                        body: { requestId: ticket, approved: true },
+                        session: { userUid: "user-1" },
+                        cookies: { csrf: "tok-abc" },
+                        headers: { "x-csrf-token": "tok-abc" },
+                    }),
+                    res,
+                );
+                expect(result.redirectTo).toBeDefined();
+            });
+
+            it("Passes a cross-origin request whose Origin is explicitly allow-listed, without a matching cookie/header pair.", async () => {
+                const { route } = makeRoute();
+                (route as any).csrfConfig = { enabled: true, allowedOrigins: ["https://mail.example.com"] };
+                const ticket = await makeTicket(route);
+                const result = await route.decideConsent(
+                    makeRequest({
+                        method: "POST",
+                        body: { requestId: ticket, approved: true },
+                        session: { userUid: "user-1" },
+                        cookies: {},
+                        headers: { origin: "https://mail.example.com", host: "auth.example.com" },
+                    }),
+                    res,
+                );
+                expect(result.redirectTo).toBeDefined();
+            });
+
+            it("Is skipped entirely when csrf:enabled is false.", async () => {
+                const { route } = makeRoute();
+                (route as any).csrfConfig = { enabled: false };
+                const ticket = await makeTicket(route);
+                const result = await route.decideConsent(
+                    makeRequest({
+                        method: "POST",
+                        body: { requestId: ticket, approved: true },
+                        session: { userUid: "user-1" },
+                        cookies: {},
+                        headers: {},
+                    }),
+                    res,
+                );
+                expect(result.redirectTo).toBeDefined();
+            });
+
+            it("Never enforces the check for a safe GET request.", async () => {
+                const { route } = makeRoute();
+                // GET decideConsent() isn't a real route (it's @Post-only), but the CSRF check itself is
+                // method-driven, not route-driven — assert its own safe-method exemption holds here too.
+                await expect(
+                    route.decideConsent(makeRequest({ method: "GET", body: {} }), res),
+                ).rejects.toThrow(/requestId/); // fails on the next check, not CSRF
+            });
+        });
+
         it("Throws when the request body is not a parseable object.", async () => {
             const { route } = makeRoute();
             await expect(

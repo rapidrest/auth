@@ -20,7 +20,7 @@ import { AuthEventType } from "../auth/events.js";
 import { TokenUtils } from "../auth/TokenUtils.js";
 const { Description, Returns, Summary } = DocDecorators;
 const { Config, Init, Inject, Logger } = ObjectDecorators;
-const { Auth, Get, Post, RateLimit, Request, RequiresTrustedRole, Response } = RouteDecorators;
+const { Auth, Post, RateLimit, Request, RequiresTrustedRole, Response } = RouteDecorators;
 const AuthUser = RouteDecorators.User;
 
 /** Matches `JWTStrategyOptions.cookieName`'s hardcoded default — see `JWTStrategy.ts`. */
@@ -184,7 +184,11 @@ export abstract class BaseImpersonationRoute<U extends User> {
     @Description("Restores the caller's own session from the stashed impersonator cookie, if one is present.")
     @Returns([Object])
     @Auth(["jwt"])
-    @Get("/impersonate/stop")
+    // Deliberately POST, not GET: this mutates state (swaps the active `jwt` cookie back to the
+    // impersonator's own), and a state-changing GET is exploitable via a bare cross-site/same-site
+    // navigation — no form or script required at all — bypassing even the CSRF double-submit check,
+    // which only ever applies to non-safe methods (see `@rapidrest/service-core`'s `checkCsrf()`).
+    @Post("/impersonate/stop")
     public async stopImpersonating(
         @Request req: HttpRequest,
         @Response res: HttpResponse,

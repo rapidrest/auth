@@ -37,6 +37,7 @@ For complete documentation please visit [RapidREST.dev](https://rapidrest.dev).
 * Configurable Argon2 password hashing cost parameters
 * Client-side pre-hashed (Argon2id) password support, alongside plaintext, so a capable client's real password never reaches the server
 * Secure, `HttpOnly` cookies by default when cookie-based token issuance is enabled
+* CSRF protection (`CsrfUtils`) — a host-only double-submit `csrf` cookie rotated alongside `jwt`/`refresh` at login/refresh/elevation and cleared at logout; enforcement is in `@rapidrest/service-core`'s `RouteUtils.checkCsrf()`, applied automatically to every cookie-authenticated, state-changing request
 * Default account provisioning on startup, with configuration-driven role/verification sync
 
 ### Data Models

@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+* Added CSRF (double-submit cookie) protection for every cookie-authenticated, state-changing request.
+  * `TokenUtils` now issues/rotates a `csrf` cookie alongside `jwt`/`refresh` at login, refresh and
+    elevation, and clears it at logout, via a new `CsrfUtils`. Unlike `jwt`/`refresh`, this cookie is
+    always host-only (never `Domain`-scoped), even when the session cookie itself is wildcard-domain for
+    SSO — a wildcard-domain double-submit cookie can be read via `document.cookie` by any same-site
+    sibling subdomain, defeating the whole scheme.
+  * Enforcement lives in `@rapidrest/service-core`'s `RouteUtils.checkCsrf()`, wired automatically into
+    every route, and applies only to a request whose only credential came from the `jwt` cookie
+    (`JWTAuthResult.source === "cookie"`) — a bearer-token/API-key/query-token caller is never affected.
+  * `BaseOAuthAuthorizeRoute.decideConsent()` authenticates via `req.session` directly, bypassing the
+    automatic jwt-cookie gate entirely, so it now runs the same check explicitly — a forged consent could
+    otherwise grant a malicious OAuth client an authorization code for the victim's account.
+  * `BaseImpersonationRoute`'s `/impersonate/stop` changed from `GET` to `POST`: a state-changing `GET`
+    is exploitable via a bare navigation, bypassing CSRF defenses entirely (they only ever apply to
+    non-safe methods).
+
 ## v2.0.0-beta.12
 
 * Added app passwords — a user-generated, high-entropy `app-password` secret for a single legacy

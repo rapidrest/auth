@@ -66,7 +66,45 @@ Keep entries terse — this is a reference, not a transcript.
 
 ## Session Log
 
-### 2026-09-22 (latest) — `AuditLogUtils`: a separate, durable audit-log mechanism (follow-up to the app-passwords/lastUsedAt work)
+### 2026-09-23 (latest) — CSRF protection: `CsrfUtils` + the two special-case routes
+
+Ecosystem-wide CSRF fix, spanning `service-core` (the actual double-submit enforcement,
+`RouteUtils.checkCsrf()`, plus `JWTAuthResult.source` so it can tell a cookie-sourced credential
+apart from a bearer/API-key one), this repo, `auth-server`, and `react-shared`. This repo's share:
+
+- `CsrfUtils` (`src/auth/CsrfUtils.ts`) issues/rotates a `csrf` cookie alongside `jwt`/`refresh` at
+  every point `TokenUtils.createAuthResult()`/`clearToken()` fire — login, refresh, elevation,
+  impersonation, logout. Deliberately **host-only** (no `Domain` attribute), unlike `jwt`/`refresh`
+  which are commonly `Domain`-scoped for SSO across sibling subdomains: a wildcard-domain
+  double-submit cookie can be read via `document.cookie` by *any* same-site sibling subdomain
+  (compromised, less-trusted, or just a different app on the same parent domain), which would
+  silently defeat the whole scheme. The actual double-submit comparison and Origin/Referer
+  allow-list fallback (for a legitimately cross-origin caller like `react-shared`'s
+  `authApiFetch()`, whose JS can never read this host-only cookie in the first place) both live in
+  `@rapidrest/service-core`'s new `src/http/csrf/csrf.ts` — read that module's doc comment for the
+  full design rationale before touching either side of this.
+- Two routes needed explicit handling beyond the automatic, `req.auth.source === "cookie"`-gated
+  check `RouteUtils.checkCsrf()` installs on every route:
+  - `BaseImpersonationRoute`'s `/impersonate/stop` was a `GET` — changed to `POST`. A
+    state-changing `GET` is exploitable via a bare cross-site/same-site navigation (no form or
+    script needed at all), which bypasses CSRF defenses entirely since they only ever apply to
+    non-safe methods. Verified every call site across `react-shared`, `auth-server`'s own
+    frontend, and this repo's tests was updated to `POST` — a real breaking change for any client
+    still issuing the old `GET`.
+  - `BaseOAuthAuthorizeRoute.decideConsent()` authenticates via `req.session.userUid` directly
+    (see the class's own doc comment on why — no fixed `@Auth([...])`), so it's never covered by
+    the automatic gate, which only fires once `req.auth.source` exists. Added an explicit,
+    unconditional `verifyCsrfRequest()` call at the top of the handler. This was arguably the
+    highest-value CSRF target in the library: a forged consent could grant a malicious OAuth
+    client an authorization code for the victim's account.
+- The prior 2026-08-22-era security review (see `auth-server`'s NOTES.md) concluded "no
+  CSRF-relevant gaps" — that wasn't wrong given the threat model it evaluated against (classic
+  cross-*site* forgery, which `SameSite=Lax` already blocks), it just didn't consider same-site
+  cross-*origin* forgery (a sibling subdomain, not a foreign site) or naive double-submit's
+  wildcard-domain weakness. Worth remembering next time a "no gaps found" review comes up: the
+  threat model matters as much as the review itself.
+
+### 2026-09-22 — `AuditLogUtils`: a separate, durable audit-log mechanism (follow-up to the app-passwords/lastUsedAt work)
 
 Requested as a same-session follow-up, prompted by the consuming app's operator confirming a concrete fact:
 no deployment in this monorepo configures `telemetry_services:url` or registers an `EventUtils.on()`

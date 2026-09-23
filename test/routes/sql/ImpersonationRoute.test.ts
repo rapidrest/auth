@@ -192,7 +192,7 @@ describe("Route:ImpersonationSQL Tests", () => {
         const token = await login(client, admin.uid);
         const elevatedToken = await elevate(client, token);
 
-        const result = await client.get(stopUrl).set("Authorization", "jwt " + elevatedToken);
+        const result = await client.post(stopUrl).set("Authorization", "jwt " + elevatedToken);
 
         expect(result.status).toBeGreaterThanOrEqual(200);
         expect(result.status).toBeLessThan(300);
@@ -227,7 +227,7 @@ describe("Route:ImpersonationSQL Tests", () => {
             // The impersonated session never inherits the caller's own trusted role.
             expect(impersonatedClaims.profile.roles).not.toContain("admin");
 
-            const stopResult = await client.get(stopUrl);
+            const stopResult = await client.post(stopUrl);
 
             expect(stopResult.status).toBeGreaterThanOrEqual(200);
             expect(stopResult.status).toBeLessThan(300);
@@ -236,7 +236,7 @@ describe("Route:ImpersonationSQL Tests", () => {
             expect(String(stopResult.headers["set-cookie"])).toContain("jwt_impersonator=;");
 
             // A second stop call, now that the stash has been cleared, is a no-op.
-            const secondStopResult = await client.get(stopUrl).set("Authorization", "jwt " + elevatedToken);
+            const secondStopResult = await client.post(stopUrl).set("Authorization", "jwt " + elevatedToken);
             expect(secondStopResult.body).toEqual({ restored: false });
         },
     );
