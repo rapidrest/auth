@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v2.0.0-beta.13
+
 * Added CSRF (double-submit cookie) protection for every cookie-authenticated, state-changing request.
   * `TokenUtils` now issues/rotates a `csrf` cookie alongside `jwt`/`refresh` at login, refresh and
     elevation, and clears it at logout, via a new `CsrfUtils`. Unlike `jwt`/`refresh`, this cookie is

@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0-beta.13] - 2026-09-23
+
+### Added
+- Added CsrfUtils, issuing/rotating a host-only, non-HttpOnly csrf double-submit cookie alongside jwt/refresh at login, refresh and elevation, and clearing it at logout via TokenUtils
+- Added an explicit CSRF check to BaseOAuthAuthorizeRoute.decideConsent(), which authenticates via req.session directly and is never covered by the framework's automatic jwt-cookie-keyed CSRF gate
+- Added regression tests for each of the above and document the findings in NOTES.md
+
+### Changed
+- Inject CsrfUtils into TokenUtils.createAuthResult()/clearToken() so the CSRF cookie's lifecycle tracks the session cookies it protects, without changing behavior for anyone who hasn't opted into auth:csrf.enabled
+- Change BaseImpersonationRoute's GET /impersonate/stop to POST, since a state-changing GET is exploitable via a bare cross-site/same-site navigation and bypasses CSRF defenses entirely
+- Export CsrfUtils from the package root, the same pattern as AuditLogUtils
+- Document the changes in the README, CHANGELOG, release notes and NOTES
+- Upgraded deps
+
 ### Added
 - Added CsrfUtils, issuing/rotating a host-only, non-HttpOnly `csrf` double-submit cookie alongside the `jwt`/`refresh` cookies at login/refresh/elevation, and clearing it at logout, as CSRF protection for cookie-authenticated requests (the enforcement itself lives in `@rapidrest/service-core`'s `RouteUtils.checkCsrf()`)
 - Added an explicit CSRF check to BaseOAuthAuthorizeRoute.decideConsent(), which authenticates via req.session directly and bypasses the framework's automatic jwt-cookie-keyed CSRF gate entirely
@@ -235,7 +249,8 @@ tagged.
 - `PasskeyStrategy` - WebAuthn based passkey authentication
 - `TOTPStrategy` - RFC 6238 Time-Based One Time Password authentication (e.g. Google Authenticator, etc.)
 
-[Unreleased]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.12...HEAD
+[Unreleased]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.13...HEAD
+[2.0.0-beta.13]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.12...v2.0.0-beta.13
 [2.0.0-beta.12]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.11...v2.0.0-beta.12
 [2.0.0-beta.11]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.10...v2.0.0-beta.11
 [2.0.0-beta.10]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.9...v2.0.0-beta.10
