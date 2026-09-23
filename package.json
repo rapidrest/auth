@@ -54,7 +54,7 @@
     "devDependencies": {
         "@rapidrest/cli": "^2.1.0",
         "@rapidrest/core": "^6.0.0",
-        "@rapidrest/service-core": "^2.1.1",
+        "@rapidrest/service-core": "^2.3.0",
         "@simplewebauthn/server": "^13.3.2",
         "@swc/core": "^1.15.41",
         "@types/cross-spawn": "^6.0.6",
