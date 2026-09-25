@@ -50,6 +50,10 @@ export class SystemSettingsSQL extends BaseEntity implements SystemSettingsEntit
     @Nullable
     requireMFA: boolean = false;
 
+    @Column({ type: "boolean", nullable: true })
+    @Nullable
+    public allowMultiplePasswords: boolean = false;
+
     constructor(other?: Partial<SystemSettingsSQL>) {
         super(other);
 
@@ -57,6 +61,8 @@ export class SystemSettingsSQL extends BaseEntity implements SystemSettingsEntit
             this.allowRegistration =
                 other.allowRegistration !== undefined ? other.allowRegistration : this.allowRegistration;
             this.requireMFA = other.requireMFA !== undefined ? other.requireMFA : this.requireMFA;
+            this.allowMultiplePasswords =
+                other.allowMultiplePasswords !== undefined ? other.allowMultiplePasswords : this.allowMultiplePasswords;
         }
     }
 }

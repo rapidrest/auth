@@ -12,6 +12,7 @@ vi.mock("@simplewebauthn/server", () => ({
     verifyRegistrationResponse: vi.fn(),
 }));
 
+import { Binary, deserialize, serialize } from "bson";
 import type { HttpRequest } from "@rapidrest/service-core";
 import * as otplib from "otplib";
 import {
@@ -46,6 +47,7 @@ import {
     obfuscateContact,
     parseWhatsAppMethodId,
     toWhatsAppMethodId,
+    toUint8Array,
     touchSecretLastUsedAt,
     verifyDummyPassword,
     verifyDummyTOTP,
@@ -588,6 +590,50 @@ describe("OTP helpers", () => {
             // has a matching session id and must be rejected rather than re-verified.
             await expect(verifyOTP(req, { id: "c", token })).rejects.toThrow(/Invalid authentication request/);
         });
+    });
+});
+
+describe("toUint8Array", () => {
+    const bytes = [165, 1, 2, 3, 4, 5, 6, 7, 8, 9, 250];
+
+    it("Returns a Uint8Array (and a Buffer) as is.", () => {
+        const arr = new Uint8Array(bytes);
+        expect(toUint8Array(arr)).toBe(arr);
+        const buf = Buffer.from(bytes);
+        expect(toUint8Array(buf)).toBe(buf);
+    });
+
+    it("Restores a BSON Binary read back from MongoDB.", () => {
+        // A Uint8Array stored by the MongoDB driver comes back as a `Binary` whose backing buffer isn't
+        // necessarily exactly the length of the data. Regression test: this used to decode to 3 bytes of garbage.
+        const stored = deserialize(serialize({ data: { publicKey: new Uint8Array(bytes) } })) as any;
+        expect(stored.data.publicKey).not.toBeInstanceOf(Uint8Array);
+        expect(Array.from(toUint8Array(stored.data.publicKey))).toEqual(bytes);
+    });
+
+    it("Restores a base64 string (a Binary serialized by a JSON cache).", () => {
+        const stored = JSON.parse(JSON.stringify({ k: new Binary(new Uint8Array(bytes)) }));
+        expect(typeof stored.k).toBe("string");
+        expect(Array.from(toUint8Array(stored.k))).toEqual(bytes);
+    });
+
+    it("Restores a JSON-serialized Buffer.", () => {
+        const stored = JSON.parse(JSON.stringify(Buffer.from(bytes)));
+        expect(Array.from(toUint8Array(stored))).toEqual(bytes);
+    });
+
+    it("Restores an index-keyed object (TypeORM simple-json).", () => {
+        const stored = JSON.parse(JSON.stringify({ k: new Uint8Array(bytes) })).k;
+        expect(Array.from(toUint8Array(stored))).toEqual(bytes);
+    });
+
+    it("Restores a plain array of numbers.", () => {
+        expect(Array.from(toUint8Array(bytes))).toEqual(bytes);
+    });
+
+    it("Throws for a value that can't hold a key.", () => {
+        expect(() => toUint8Array(undefined)).toThrow(/invalid public key/);
+        expect(() => toUint8Array(42)).toThrow(/invalid public key/);
     });
 });
 

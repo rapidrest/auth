@@ -50,6 +50,10 @@ export class SystemSettingsMongo extends BaseMongoEntity implements SystemSettin
     @Nullable
     requireMFA: boolean = false;
 
+    @Column()
+    @Nullable
+    public allowMultiplePasswords: boolean = false;
+
     constructor(other?: Partial<SystemSettingsMongo>) {
         super(other);
 
@@ -57,6 +61,8 @@ export class SystemSettingsMongo extends BaseMongoEntity implements SystemSettin
             this.allowRegistration =
                 other.allowRegistration !== undefined ? other.allowRegistration : this.allowRegistration;
             this.requireMFA = other.requireMFA !== undefined ? other.requireMFA : this.requireMFA;
+            this.allowMultiplePasswords =
+                other.allowMultiplePasswords !== undefined ? other.allowMultiplePasswords : this.allowMultiplePasswords;
         }
     }
 }

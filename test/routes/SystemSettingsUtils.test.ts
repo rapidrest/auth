@@ -12,6 +12,7 @@ class FakeSettingsClass {
     uid?: string;
     allowRegistration?: boolean;
     requireMFA?: boolean;
+    allowMultiplePasswords?: boolean;
     constructor(other?: any) {
         if (other) {
             Object.assign(this, other);
@@ -19,11 +20,17 @@ class FakeSettingsClass {
     }
 }
 
-function makeUtils(repo: any, allowRegistration: boolean = true, requireMFA: boolean = false): SystemSettingsUtils {
+function makeUtils(
+    repo: any,
+    allowRegistration: boolean = true,
+    requireMFA: boolean = false,
+    allowMultiplePasswords: boolean = false,
+): SystemSettingsUtils {
     const utils = new SystemSettingsUtils(FakeSettingsClass);
     (utils as any).repo = repo;
     (utils as any).allowRegistration = allowRegistration;
     (utils as any).requireMFA = requireMFA;
+    (utils as any).allowMultiplePasswords = allowMultiplePasswords;
     (utils as any).logger = { warn: vi.fn() };
     return utils;
 }
@@ -85,7 +92,7 @@ describe("SystemSettingsUtils Tests", () => {
                 findOne: vi.fn().mockResolvedValue(undefined),
                 create: vi.fn(async (obj: any) => obj),
             };
-            const utils = makeUtils(repo, false, true);
+            const utils = makeUtils(repo, false, true, true);
 
             const result = await utils.getEntity();
 
@@ -94,6 +101,7 @@ describe("SystemSettingsUtils Tests", () => {
                 uid: SYSTEM_SETTINGS_UID,
                 allowRegistration: false,
                 requireMFA: true,
+                allowMultiplePasswords: true,
             });
             expect(repo.create).toHaveBeenCalledWith(expect.any(FakeSettingsClass), { ignoreACL: true });
         });
@@ -145,11 +153,30 @@ describe("SystemSettingsUtils Tests", () => {
             await expect(utils.get()).resolves.toMatchObject({ requireMFA: stored });
         });
 
+        it.each([true, false])("Uses the stored allowMultiplePasswords (%s) over @Config.", async (stored) => {
+            const repo = {
+                findOne: vi.fn().mockResolvedValue({ allowRegistration: true, requireMFA: false, allowMultiplePasswords: stored }),
+            };
+            const utils = makeUtils(repo, true, false, !stored);
+
+            await expect(utils.get()).resolves.toMatchObject({ allowMultiplePasswords: stored });
+        });
+
+        it("Defaults allowMultiplePasswords to false: one password per account.", async () => {
+            const utils = makeUtils({ findOne: vi.fn().mockResolvedValue({ allowRegistration: true }) });
+
+            await expect(utils.get()).resolves.toMatchObject({ allowMultiplePasswords: false });
+        });
+
         it("Falls back to @Config and logs a warning when the settings can't be read.", async () => {
             const repo = { findOne: vi.fn().mockRejectedValue(new Error("db down")) };
-            const utils = makeUtils(repo, false, true);
+            const utils = makeUtils(repo, false, true, true);
 
-            await expect(utils.get()).resolves.toMatchObject({ allowRegistration: false, requireMFA: true });
+            await expect(utils.get()).resolves.toMatchObject({
+                allowRegistration: false,
+                requireMFA: true,
+                allowMultiplePasswords: true,
+            });
             expect((utils as any).logger.warn).toHaveBeenCalledWith(expect.stringMatching(/db down/));
         });
     });
@@ -190,15 +217,35 @@ describe("SystemSettingsUtils Tests", () => {
             await expect(utils.update({ requireMFA: true })).resolves.toMatchObject({ requireMFA: true });
         });
 
+        it("Persists a new allowMultiplePasswords value.", async () => {
+            const existing = { uid: SYSTEM_SETTINGS_UID, allowRegistration: true, requireMFA: false, allowMultiplePasswords: false };
+            const repo = {
+                findOne: vi.fn().mockResolvedValue(existing),
+                update: vi.fn(async (obj: any) => obj),
+            };
+            const utils = makeUtils(repo);
+
+            await expect(utils.update({ allowMultiplePasswords: true })).resolves.toMatchObject({ allowMultiplePasswords: true });
+            expect(repo.update).toHaveBeenCalledWith(
+                expect.objectContaining({ uid: SYSTEM_SETTINGS_UID, allowMultiplePasswords: true }),
+                existing,
+                { ignoreACL: true },
+            );
+        });
+
         it("Leaves fields untouched when omitted.", async () => {
-            const existing = { uid: SYSTEM_SETTINGS_UID, allowRegistration: false, requireMFA: true };
+            const existing = { uid: SYSTEM_SETTINGS_UID, allowRegistration: false, requireMFA: true, allowMultiplePasswords: true };
             const repo = {
                 findOne: vi.fn().mockResolvedValue(existing),
                 update: vi.fn(async (obj: any) => obj),
             };
             const utils = makeUtils(repo, true, false);
 
-            await expect(utils.update({})).resolves.toMatchObject({ allowRegistration: false, requireMFA: true });
+            await expect(utils.update({})).resolves.toMatchObject({
+                allowRegistration: false,
+                requireMFA: true,
+                allowMultiplePasswords: true,
+            });
         });
 
         it.each([null, "true", 1, undefined])(
@@ -225,6 +272,20 @@ describe("SystemSettingsUtils Tests", () => {
                 const utils = makeUtils(repo);
 
                 await expect(utils.update({ requireMFA: value })).rejects.toMatchObject({
+                    code: ApiErrors.INVALID_REQUEST,
+                    status: 400,
+                });
+                expect(repo.update).not.toHaveBeenCalled();
+            },
+        );
+
+        it.each([null, "true", 1])(
+            "Rejects a non-boolean allowMultiplePasswords (%p) with a 400 INVALID_REQUEST, persisting nothing.",
+            async (value) => {
+                const repo = { findOne: vi.fn(), update: vi.fn() };
+                const utils = makeUtils(repo);
+
+                await expect(utils.update({ allowMultiplePasswords: value })).rejects.toMatchObject({
                     code: ApiErrors.INVALID_REQUEST,
                     status: 400,
                 });

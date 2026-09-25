@@ -12,12 +12,13 @@ vi.mock("@simplewebauthn/server", () => ({
 }));
 
 import { EventUtils } from "@rapidrest/core";
-import { ModelRoute } from "@rapidrest/service-core";
+import { ACLAction, ModelRoute, RepoUtils } from "@rapidrest/service-core";
 import { generateRegistrationOptions, verifyRegistrationResponse } from "@simplewebauthn/server";
 import * as otplib from "otplib";
 import { BaseSecretRoute } from "../../src/routes/BaseSecretRoute.js";
 import { AuthEventType } from "../../src/auth/events.js";
 import { PasswordConfig } from "../../src/auth/types.js";
+import { SystemSettingsUtils } from "../../src/routes/SystemSettingsUtils.js";
 import { SecretType } from "../../src/models/types.js";
 
 const mockGenerateRegistrationOptions = generateRegistrationOptions as any;
@@ -34,6 +35,16 @@ function makeReq(session?: any) {
 }
 
 describe("BaseSecretRoute Tests", () => {
+    // `update()` now enforces elevation itself (see assertElevatedOrForcedPasswordChange()) rather than through a
+    // decorator that only runs behind the HTTP layer, so the many tests calling it directly with a plain user
+    // stub it out; the real check is covered by its own tests below.
+    let elevationSpy: any;
+    beforeEach(() => {
+        elevationSpy = vi
+            .spyOn(TestSecretRoute.prototype as any, "assertElevatedOrForcedPasswordChange")
+            .mockResolvedValue(undefined);
+    });
+
     afterEach(() => {
         vi.restoreAllMocks();
         mockGenerateRegistrationOptions.mockReset();
@@ -1061,6 +1072,480 @@ describe("BaseSecretRoute Tests", () => {
 
             expect(() => (route as any).validatePassword("Str0ngPass~")).not.toThrow();
             expect(() => (route as any).validatePassword(VALID_PASSWORD)).toThrow(/special character/);
+        });
+    });
+
+    describe("buildOwnerACL", () => {
+        const admin: any = { uid: "admin-1", roles: ["admin"] };
+        const req: any = { query: { allowUserChange: "true" } };
+        const password: any = { type: SecretType.PASSWORD, userUid: "user-1" };
+
+        it("Grants the account holder READ/EXISTS/UPDATE when a trusted user provisions their password on request.", () => {
+            const route = new TestSecretRoute();
+
+            expect((route as any).buildOwnerACL(password, req, admin)).toEqual({
+                records: [{ userOrRoleId: "user-1", actions: [ACLAction.EXISTS, ACLAction.READ, ACLAction.UPDATE] }],
+            });
+        });
+
+        it("Grants nothing unless the allowUserChange query parameter is 'true'.", () => {
+            const route = new TestSecretRoute();
+
+            expect((route as any).buildOwnerACL(password, { query: {} }, admin)).toBeUndefined();
+            expect((route as any).buildOwnerACL(password, { query: { allowUserChange: "false" } }, admin)).toBeUndefined();
+            expect((route as any).buildOwnerACL(password, {}, admin)).toBeUndefined();
+        });
+
+        it("Grants nothing for a non-password secret, a missing userUid, or a bulk create.", () => {
+            const route = new TestSecretRoute();
+
+            expect((route as any).buildOwnerACL({ ...password, type: SecretType.TOTP }, req, admin)).toBeUndefined();
+            expect((route as any).buildOwnerACL({ type: SecretType.PASSWORD }, req, admin)).toBeUndefined();
+            expect((route as any).buildOwnerACL([password], req, admin)).toBeUndefined();
+        });
+
+        it("Grants nothing when the caller is not a trusted user, is anonymous, or is the account holder.", () => {
+            const route = new TestSecretRoute();
+
+            expect((route as any).buildOwnerACL(password, req, { uid: "mallory", roles: [] })).toBeUndefined();
+            expect((route as any).buildOwnerACL(password, req, undefined)).toBeUndefined();
+            expect((route as any).buildOwnerACL(password, req, { uid: "user-1", roles: ["admin"] })).toBeUndefined();
+        });
+
+        it("Is handed to doCreate() by create().", async () => {
+            const doCreate = vi.spyOn(ModelRoute.prototype as any, "doCreate").mockResolvedValue({ type: SecretType.PASSWORD });
+            const route = new TestSecretRoute();
+
+            await route.create({ ...password }, req, admin);
+
+            expect(doCreate).toHaveBeenCalledWith(expect.anything(), {
+                req,
+                user: admin,
+                acl: { records: [{ userOrRoleId: "user-1", actions: [ACLAction.EXISTS, ACLAction.READ, ACLAction.UPDATE] }] },
+            });
+        });
+
+        it("Leaves the doCreate() options alone when there is nothing to grant.", async () => {
+            const doCreate = vi.spyOn(ModelRoute.prototype as any, "doCreate").mockResolvedValue({ type: SecretType.PASSWORD });
+            const route = new TestSecretRoute();
+
+            await route.create({ ...password }, { query: {} } as any, admin);
+
+            expect(doCreate).toHaveBeenCalledWith(expect.anything(), { req: { query: {} }, user: admin });
+        });
+    });
+
+    describe("syncOwnerAccess", () => {
+        const admin: any = { uid: "admin-1", roles: ["admin"] };
+        const req: any = { query: { allowUserChange: "true" } };
+        const existing: any = { uid: "sec-1", type: SecretType.PASSWORD, userUid: "user-1" };
+        const wanted = [ACLAction.EXISTS, ACLAction.READ, ACLAction.UPDATE];
+
+        function makeRoute(acl: any, enabled = true) {
+            const route = new TestSecretRoute();
+            const aclUtils = { enabled, findACL: vi.fn().mockResolvedValue(acl), saveACL: vi.fn().mockResolvedValue(undefined) };
+            (route as any).aclUtils = aclUtils;
+            (route as any).defaultACLUid = "Secret";
+            return { route, aclUtils };
+        }
+
+        it("Adds a record for the account holder to the secret's existing ACL.", async () => {
+            const { route, aclUtils } = makeRoute({ uid: "sec-1", version: 2, records: [{ userOrRoleId: "other", actions: ["READ"] }] });
+
+            await (route as any).syncOwnerAccess(existing, req, admin);
+
+            expect(aclUtils.findACL).toHaveBeenCalledWith("sec-1", [], { skipCache: true, skipParents: true });
+            expect(aclUtils.saveACL).toHaveBeenCalledWith({
+                uid: "sec-1",
+                version: 2,
+                records: [
+                    { userOrRoleId: "other", actions: ["READ"] },
+                    { userOrRoleId: "user-1", actions: wanted },
+                ],
+            });
+        });
+
+        it("Widens an existing record for the account holder without duplicating actions.", async () => {
+            const { route, aclUtils } = makeRoute({
+                uid: "sec-1",
+                version: 0,
+                records: [{ userOrRoleId: "user-1", actions: [ACLAction.READ, ACLAction.DELETE] }],
+            });
+
+            await (route as any).syncOwnerAccess(existing, req, admin);
+
+            expect(aclUtils.saveACL).toHaveBeenCalledWith({
+                uid: "sec-1",
+                version: 0,
+                records: [{ userOrRoleId: "user-1", actions: [ACLAction.READ, ACLAction.DELETE, ACLAction.EXISTS, ACLAction.UPDATE] }],
+            });
+        });
+
+        it("Creates the ACL, under the default one, when the secret has none.", async () => {
+            const { route, aclUtils } = makeRoute(undefined);
+
+            await (route as any).syncOwnerAccess(existing, req, admin);
+
+            expect(aclUtils.saveACL).toHaveBeenCalledWith(
+                { uid: "sec-1", parentUid: "Secret", records: [{ userOrRoleId: "user-1", actions: wanted }] },
+                { createOnly: true },
+            );
+        });
+
+        describe("with allowUserChange=false (the administrator keeps control)", () => {
+            const revoke: any = { query: { allowUserChange: "false" } };
+
+            it("Removes the account holder's record from the ACL, and only theirs.", async () => {
+                const { route, aclUtils } = makeRoute({
+                    uid: "sec-1",
+                    version: 3,
+                    records: [
+                        { userOrRoleId: "user-1", actions: ["READ", "UPDATE", "DELETE"] },
+                        { userOrRoleId: "other", actions: ["READ"] },
+                    ],
+                });
+
+                await (route as any).syncOwnerAccess(existing, revoke, admin);
+
+                expect(aclUtils.saveACL).toHaveBeenCalledWith({
+                    uid: "sec-1",
+                    version: 3,
+                    records: [{ userOrRoleId: "other", actions: ["READ"] }],
+                });
+            });
+
+            it("Leaves the ACL alone when the account holder has no record, or the secret has no ACL.", async () => {
+                const noRecord = makeRoute({ uid: "sec-1", version: 0, records: [{ userOrRoleId: "other", actions: ["READ"] }] });
+                await (noRecord.route as any).syncOwnerAccess(existing, revoke, admin);
+                expect(noRecord.aclUtils.saveACL).not.toHaveBeenCalled();
+
+                const noAcl = makeRoute(undefined);
+                await (noAcl.route as any).syncOwnerAccess(existing, revoke, admin);
+                expect(noAcl.aclUtils.saveACL).not.toHaveBeenCalled();
+            });
+
+            it("Isn't available to a caller who isn't a trusted user, or for another secret type.", async () => {
+                const { route, aclUtils } = makeRoute({ uid: "sec-1", version: 0, records: [{ userOrRoleId: "user-1", actions: ["UPDATE"] }] });
+
+                await (route as any).syncOwnerAccess(existing, revoke, { uid: "user-1", roles: [] });
+                await (route as any).syncOwnerAccess({ ...existing, type: SecretType.TOTP }, revoke, admin);
+
+                expect(aclUtils.findACL).not.toHaveBeenCalled();
+                expect(aclUtils.saveACL).not.toHaveBeenCalled();
+            });
+
+            it("Does nothing for a value that isn't 'true' or 'false'.", async () => {
+                const { route, aclUtils } = makeRoute({ uid: "sec-1", version: 0, records: [] });
+
+                await (route as any).syncOwnerAccess(existing, { query: { allowUserChange: "maybe" } }, admin);
+
+                expect(aclUtils.findACL).not.toHaveBeenCalled();
+            });
+        });
+
+        it("Does nothing when ACLs are off, unrequested, or the caller isn't entitled to it.", async () => {
+            const off = makeRoute({ uid: "sec-1", records: [] }, false);
+            await (off.route as any).syncOwnerAccess(existing, req, admin);
+            expect(off.aclUtils.findACL).not.toHaveBeenCalled();
+
+            const on = makeRoute({ uid: "sec-1", records: [] });
+            await (on.route as any).syncOwnerAccess(existing, { query: {} }, admin);
+            await (on.route as any).syncOwnerAccess(existing, req, { uid: "mallory", roles: [] });
+            await (on.route as any).syncOwnerAccess({ ...existing, type: SecretType.TOTP }, req, admin);
+            expect(on.aclUtils.findACL).not.toHaveBeenCalled();
+
+            const none = new TestSecretRoute();
+            await expect((none as any).syncOwnerAccess(existing, req, admin)).resolves.toBeUndefined();
+        });
+
+        it("Is run by update() after the secret is saved.", async () => {
+            const stored = { uid: "sec-1", type: SecretType.PASSWORD, userUid: "user-1" };
+            vi.spyOn(ModelRoute.prototype as any, "doUpdate").mockResolvedValue(stored);
+            vi.spyOn(EventUtils, "record").mockResolvedValue(undefined);
+            const route = new TestSecretRoute();
+            (route as any).repoUtils = { findOne: vi.fn().mockResolvedValue(stored), validate: vi.fn() };
+            vi.spyOn(route as any, "validateUpdate").mockResolvedValue(undefined);
+            const grant = vi.spyOn(route as any, "syncOwnerAccess").mockResolvedValue(undefined);
+
+            await route.update("sec-1", { uid: "sec-1", data: "x" } as any, req, admin);
+
+            expect(grant).toHaveBeenCalledWith(stored, req, admin);
+        });
+    });
+
+    describe("assertPasswordAllowed", () => {
+        const obj: any = { type: SecretType.PASSWORD, userUid: "user-1" };
+
+        function makeRoute(existing: any[], allowMultiplePasswords: boolean) {
+            const route = new TestSecretRoute();
+            const find = vi.fn().mockResolvedValue(existing);
+            const get = vi.fn().mockResolvedValue({ allowMultiplePasswords });
+            (route as any).repoUtils = { find };
+            (route as any).systemSettingsUtils = { get };
+            return { route, find, get };
+        }
+
+        it("Refuses a second password when the policy allows only one, whoever asks.", async () => {
+            const { route, find } = makeRoute([{ uid: "sec-1" }], false);
+
+            await expect((route as any).assertPasswordAllowed(obj)).rejects.toMatchObject({
+                status: 400,
+                message: expect.stringContaining("only one password per account"),
+            });
+            expect(find).toHaveBeenCalledWith({ type: SecretType.PASSWORD, userUid: "user-1" }, { ignoreACL: true });
+        });
+
+        it("Allows the first password when the policy allows only one.", async () => {
+            await expect((makeRoute([], false).route as any).assertPasswordAllowed(obj)).resolves.toBeUndefined();
+        });
+
+        it("Allows any number when the policy allows several, without even looking.", async () => {
+            const { route, find } = makeRoute([{ uid: "sec-1" }, { uid: "sec-2" }], true);
+
+            await expect((route as any).assertPasswordAllowed(obj)).resolves.toBeUndefined();
+            expect(find).not.toHaveBeenCalled();
+        });
+
+        it("Enforces nothing without a policy source, a repo, or an owner.", async () => {
+            const noSettings = makeRoute([{ uid: "sec-1" }], false);
+            (noSettings.route as any).systemSettingsUtils = undefined;
+            await expect((noSettings.route as any).assertPasswordAllowed(obj)).resolves.toBeUndefined();
+
+            const noRepo = makeRoute([{ uid: "sec-1" }], false);
+            (noRepo.route as any).repoUtils = undefined;
+            await expect((noRepo.route as any).assertPasswordAllowed(obj)).resolves.toBeUndefined();
+
+            const noOwner = makeRoute([{ uid: "sec-1" }], false);
+            await expect((noOwner.route as any).assertPasswordAllowed({ type: SecretType.PASSWORD })).resolves.toBeUndefined();
+            expect(noOwner.get).not.toHaveBeenCalled();
+        });
+
+        it("Is checked when a password secret is created.", async () => {
+            const { route } = makeRoute([{ uid: "sec-1" }], false);
+            vi.spyOn(ModelRoute.prototype as any, "validate").mockResolvedValue(undefined);
+
+            await expect(
+                (route as any).validateCreate({ type: SecretType.PASSWORD, userUid: "user-1", data: VALID_PASSWORD }, {} as any, {
+                    uid: "user-1",
+                    roles: [],
+                }),
+            ).rejects.toMatchObject({ status: 400 });
+        });
+    });
+
+    describe("initSystemSettings", () => {
+        it("Creates the settings utils from systemSettingsClass.", async () => {
+            const utils = {};
+            const newInstance = vi.fn().mockResolvedValue(utils);
+            class Settings {}
+            const route = new TestSecretRoute();
+            (route as any).systemSettingsClass = Settings;
+            (route as any)._objectFactory = { newInstance };
+
+            await (route as any).initSystemSettings();
+
+            expect((route as any).systemSettingsUtils).toBe(utils);
+            expect(newInstance).toHaveBeenCalledWith(SystemSettingsUtils, { name: "Settings", args: [Settings] });
+        });
+
+        it("Does nothing without a systemSettingsClass, or when the utils are already set.", async () => {
+            const newInstance = vi.fn();
+            const route = new TestSecretRoute();
+            (route as any)._objectFactory = { newInstance };
+
+            await (route as any).initSystemSettings();
+            (route as any).systemSettingsClass = class Settings {};
+            (route as any).systemSettingsUtils = {};
+            await (route as any).initSystemSettings();
+
+            expect(newInstance).not.toHaveBeenCalled();
+        });
+    });
+
+    describe("assertElevatedOrForcedPasswordChange", () => {
+        const password: any = { uid: "sec-1", type: SecretType.PASSWORD, userUid: "user-1" };
+        const owner: any = { uid: "user-1", roles: [] };
+
+        function makeRoute(flagged: boolean | undefined) {
+            elevationSpy.mockRestore();
+            const route = new TestSecretRoute();
+            const findOne = vi.fn().mockResolvedValue(flagged === undefined ? undefined : { uid: "user-1", passwordChangeRequired: flagged });
+            (route as any).userRepo = { findOne };
+            return { route, findOne };
+        }
+        const check = (route: any, existing: any, obj: any, user: any) =>
+            route.assertElevatedOrForcedPasswordChange(existing, obj, user);
+
+        it("Passes a token that was elevated within the last 60 seconds.", async () => {
+            const { route, findOne } = makeRoute(false);
+
+            await expect(check(route, password, { data: "x" }, { ...owner, elevated: Date.now() - 30_000 })).resolves.toBeUndefined();
+            expect(findOne).not.toHaveBeenCalled();
+        });
+
+        it("Refuses a token that was never elevated, or was elevated too long ago.", async () => {
+            const { route } = makeRoute(false);
+
+            await expect(check(route, password, { data: "x" }, owner)).rejects.toMatchObject({ status: 403 });
+            await expect(check(route, password, { data: "x" }, { ...owner, elevated: 0 })).rejects.toMatchObject({ status: 403 });
+            await expect(check(route, password, { data: "x" }, { ...owner, elevated: Date.now() - 61_000 })).rejects.toMatchObject({
+                status: 403,
+            });
+        });
+
+        it("Waives elevation for the account holder changing their own password while it's flagged passwordChangeRequired.", async () => {
+            const { route, findOne } = makeRoute(true);
+
+            await expect(check(route, password, { data: "x" }, owner)).resolves.toBeUndefined();
+            expect(findOne).toHaveBeenCalledWith("user-1", { ignoreACL: true, skipCache: true });
+        });
+
+        it("Doesn't waive it when the account isn't flagged, or has no record, or there's no user repo.", async () => {
+            await expect(check(makeRoute(false).route, password, { data: "x" }, owner)).rejects.toMatchObject({ status: 403 });
+            await expect(check(makeRoute(undefined).route, password, { data: "x" }, owner)).rejects.toMatchObject({ status: 403 });
+
+            elevationSpy.mockRestore();
+            await expect(check(new TestSecretRoute(), password, { data: "x" }, owner)).rejects.toMatchObject({ status: 403 });
+        });
+
+        it("Doesn't waive it for anything but a change of the password itself, by its own holder.", async () => {
+            const { route } = makeRoute(true);
+
+            // a rename, not a new password
+            await expect(check(route, password, { hint: "x" }, owner)).rejects.toMatchObject({ status: 403 });
+            // someone else's password, even from another flagged account
+            await expect(check(route, password, { data: "x" }, { uid: "user-2", roles: [] })).rejects.toMatchObject({ status: 403 });
+            // an administrator without an elevated token
+            await expect(check(route, password, { data: "x" }, { uid: "admin-1", roles: ["admin"] })).rejects.toMatchObject({ status: 403 });
+            // a different secret type of the same account
+            await expect(check(route, { ...password, type: SecretType.TOTP }, { data: "x" }, owner)).rejects.toMatchObject({ status: 403 });
+        });
+
+        it("Is enforced by update() before anything is changed.", async () => {
+            elevationSpy.mockRestore();
+            const route = new TestSecretRoute();
+            (route as any).repoUtils = { findOne: vi.fn().mockResolvedValue(password), validate: vi.fn() };
+            const doUpdate = vi.spyOn(ModelRoute.prototype as any, "doUpdate").mockResolvedValue(password);
+
+            await expect(route.update("sec-1", { uid: "sec-1", data: "x" } as any, {} as any, owner)).rejects.toMatchObject({
+                status: 403,
+            });
+            expect(doUpdate).not.toHaveBeenCalled();
+        });
+    });
+
+    describe("clearPasswordChangeRequired", () => {
+        it("Clears the flag on the account when it is set.", async () => {
+            const findOne = vi.fn().mockResolvedValue({ uid: "user-1", version: 3, passwordChangeRequired: true });
+            const update = vi.fn().mockResolvedValue(undefined);
+            const route = new TestSecretRoute();
+            (route as any).userRepo = { findOne, update };
+
+            await (route as any).clearPasswordChangeRequired("user-1");
+
+            expect(findOne).toHaveBeenCalledWith("user-1", { ignoreACL: true, skipCache: true });
+            expect(update).toHaveBeenCalledWith(
+                { uid: "user-1", version: 3, passwordChangeRequired: false },
+                expect.objectContaining({ uid: "user-1" }),
+                { ignoreACL: true, recordEvent: false },
+            );
+        });
+
+        it("Does nothing when the flag isn't set, the account is missing, or there is no user repo.", async () => {
+            const update = vi.fn();
+            const route = new TestSecretRoute();
+
+            await (route as any).clearPasswordChangeRequired("user-1");
+
+            (route as any).userRepo = { findOne: vi.fn().mockResolvedValue({ uid: "user-1", version: 1 }), update };
+            await (route as any).clearPasswordChangeRequired("user-1");
+
+            (route as any).userRepo = { findOne: vi.fn().mockResolvedValue(undefined), update };
+            await (route as any).clearPasswordChangeRequired("user-1");
+
+            expect(update).not.toHaveBeenCalled();
+        });
+
+        it("Logs, rather than throws, when clearing the flag fails.", async () => {
+            const route = new TestSecretRoute();
+            const error = vi.fn();
+            (route as any).logger = { error };
+            (route as any).userRepo = { findOne: vi.fn().mockRejectedValue(new Error("db down")) };
+
+            await expect((route as any).clearPasswordChangeRequired("user-1")).resolves.toBeUndefined();
+
+            expect(error).toHaveBeenCalledWith(expect.stringContaining("db down"));
+        });
+
+        it("Tolerates a failure with no logger configured.", async () => {
+            const route = new TestSecretRoute();
+            (route as any).userRepo = { findOne: vi.fn().mockRejectedValue(new Error("db down")) };
+
+            await expect((route as any).clearPasswordChangeRequired("user-1")).resolves.toBeUndefined();
+        });
+
+        it("Is run when the account holder changes their own password, but not when someone else does.", async () => {
+            const existing = { uid: "id-1", type: SecretType.PASSWORD, userUid: "user-1" };
+            vi.spyOn(ModelRoute.prototype as any, "doUpdate").mockResolvedValue(existing);
+            vi.spyOn(EventUtils, "record").mockResolvedValue(undefined);
+            const route = new TestSecretRoute();
+            (route as any).repoUtils = {
+                findOne: vi.fn().mockResolvedValue(existing),
+                validate: vi.fn().mockResolvedValue(undefined),
+            };
+            vi.spyOn(route as any, "validateUpdate").mockResolvedValue(undefined);
+            const clear = vi.spyOn(route as any, "clearPasswordChangeRequired").mockResolvedValue(undefined);
+
+            await route.update("id-1", { uid: "id-1", data: "new" } as any, {} as any, { uid: "admin-1", roles: ["admin"] } as any);
+            expect(clear).not.toHaveBeenCalled();
+
+            await route.update("id-1", { uid: "id-1", data: "new" } as any, {} as any, { uid: "user-1" } as any);
+            expect(clear).toHaveBeenCalledWith("user-1");
+        });
+
+        it("Is not run for an update that doesn't change the password (e.g. a rename).", async () => {
+            const existing = { uid: "id-1", type: SecretType.PASSWORD, userUid: "user-1" };
+            vi.spyOn(ModelRoute.prototype as any, "doUpdate").mockResolvedValue(existing);
+            const route = new TestSecretRoute();
+            (route as any).repoUtils = {
+                findOne: vi.fn().mockResolvedValue(existing),
+                validate: vi.fn().mockResolvedValue(undefined),
+            };
+            vi.spyOn(route as any, "validateUpdate").mockResolvedValue(undefined);
+            const clear = vi.spyOn(route as any, "clearPasswordChangeRequired").mockResolvedValue(undefined);
+
+            await route.update("id-1", { uid: "id-1", hint: "renamed" } as any, {} as any, { uid: "user-1" } as any);
+
+            expect(clear).not.toHaveBeenCalled();
+        });
+    });
+
+    describe("initUserRepo", () => {
+        it("Creates the user repo from userClass.", async () => {
+            const repo = {};
+            const newInstance = vi.fn().mockResolvedValue(repo);
+            class User {}
+            const route = new TestSecretRoute();
+            (route as any).userClass = User;
+            (route as any)._objectFactory = { newInstance };
+
+            await (route as any).initUserRepo();
+
+            expect((route as any).userRepo).toBe(repo);
+            expect(newInstance).toHaveBeenCalledWith(RepoUtils, { name: "User", args: [User] });
+        });
+
+        it("Does nothing without a userClass, or when a user repo is already set.", async () => {
+            const newInstance = vi.fn();
+            const route = new TestSecretRoute();
+            (route as any)._objectFactory = { newInstance };
+
+            await (route as any).initUserRepo();
+            (route as any).userClass = class User {};
+            (route as any).userRepo = {};
+            await (route as any).initUserRepo();
+
+            expect(newInstance).not.toHaveBeenCalled();
         });
     });
 

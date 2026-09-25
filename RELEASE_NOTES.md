@@ -2,6 +2,53 @@
 
 ## Unreleased
 
+### Fixed
+
+* **Passkey sign-in failed on MongoDB with `decodedPublicKey.get is not a function`.** A registered
+  credential's public key is a `Uint8Array`, which MongoDB stores as a BSON `Binary` (and a JSON cache stores
+  as a base64 string). `toUint8Array()` only understood the index-keyed object TypeORM's `simple-json` column
+  returns, so it rebuilt a `Binary` into three garbage bytes and `@simplewebauthn/server` then failed to decode
+  it. It now restores the real key from a `Uint8Array`/`Buffer`, a `Binary`, a base64 string, a JSON-serialized
+  `Buffer`, an array, or an index-keyed object. Passkeys registered before this fix work again — nothing about
+  the stored data changes.
+* **A password an administrator set for another account could not be changed by that account.** The admin is a
+  trusted role, which is exempt from the implicit "creator gets full access" ACL grant, so the new secret's ACL
+  had no record for the account holder and their own `PUT /secrets/:id` was refused with a permission error.
+
+### Added
+
+* **A policy for how many passwords an account can have: `SystemSettings.allowMultiplePasswords`, off by default — one
+  password per account.** Configured with `auth:allowMultiplePasswords` (which seeds the stored setting the first time
+  it's read), then changeable at runtime by a trusted user via `PUT /settings`, and stored in the database, exactly like
+  `allowRegistration`; like `requireMFA` it's only reported to a trusted caller. It's enforced when a `password` secret
+  is created, for everyone: with it off, an account that already has a password is refused another (400) — an
+  administrator changes the existing one instead. Lowering it later doesn't remove passwords an account already has.
+  Sign-in accepts *any* of an account's passwords, so with it on, an administrator can keep a password of their own on an
+  account (one its holder can't change) alongside the holder's, which preserves their access to it. New nullable
+  `allowMultiplePasswords` column on the system settings table for SQL datastores.
+  * **Behavior change:** before this, an account could have any number of passwords. Set `auth.allowMultiplePasswords`
+    to `true` (or turn it on in the admin console) to keep that.
+* `PUT /secrets/:id?allowUserChange=false`: an administrator taking a password over. Removes the account holder's rights
+  on it altogether — including the ones they had on a password they chose themselves — so only an administrator can
+  change or remove it from then on. Together with the policy above this is how an administrator keeps control of an
+  account's password: with one password, only they can change it; with several, they can hold one of their own.
+* `POST /secrets?allowUserChange=true` (and `PUT /secrets/:id?allowUserChange=true`, to reset a password its holder could not change before): when a trusted user creates or resets a `password` for *another* account, also
+  grants that account `READ`, `EXISTS` and `UPDATE` on the new secret (not `DELETE`). Ignored for anyone who
+  isn't a trusted user, for a caller creating their own secret, for any other secret type, and for bulk creates.
+* `User.passwordChangeRequired` — for an account holder who must choose a new password before doing anything
+  else, e.g. one provisioned with a temporary password. Only a trusted user can set it (on `POST /users`, or
+  `PUT /users/:id`); it's cleared automatically when the account holder changes their own password (not when an
+  administrator changes it for them). Sign-in still succeeds and the flag is returned with the user, so a client
+  is responsible for prompting; the server does not otherwise restrict a flagged account.
+  * While the flag is set, the account holder changing their own `password` (`PUT /secrets/:id` with a new
+    `data`) no longer needs an elevated token: they've just signed in with the temporary password, so asking
+    them to prove it again to replace it is an empty ceremony. Elevation is not the alternative — it lapses
+    after 60 seconds, and an elevated token carries trusted roles. Nothing else is waived: a rename, any other
+    secret, another account's password, or the same change once the flag is cleared still needs elevation.
+    `PUT /secrets/:id` now makes this check itself instead of through `@RequiresElevation(60)`, which can't be
+    waived per request; the requirement is otherwise unchanged (403 `api-104` unless elevated in the last 60s).
+  * New nullable `passwordChangeRequired` column on the `User` table for SQL datastores.
+
 ## v2.0.0-beta.13
 
 * Added CSRF (double-submit cookie) protection for every cookie-authenticated, state-changing request.

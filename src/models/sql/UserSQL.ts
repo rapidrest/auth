@@ -42,6 +42,14 @@ export class UserSQL extends BaseEntity implements User {
     @Nullable
     requireMFA?: boolean;
 
+    @Column({ nullable: true })
+    @Description(
+        "Set to `true` when the account holder must choose a new password before doing anything else " +
+            "(e.g. after an administrator set a temporary one). Cleared once they change their password.",
+    )
+    @Nullable
+    passwordChangeRequired?: boolean;
+
     @Column({ type: "simple-json" })
     @Description("The list of permission roles the user has.")
     public roles: string[] = [];
@@ -67,6 +75,8 @@ export class UserSQL extends BaseEntity implements User {
 
         if (other) {
             this.requireMFA = "requireMFA" in other ? other.requireMFA : this.requireMFA;
+            this.passwordChangeRequired =
+                "passwordChangeRequired" in other ? other.passwordChangeRequired : this.passwordChangeRequired;
             this.roles = other.roles !== undefined ? other.roles : this.roles;
             this.scopes = other.scopes !== undefined ? other.scopes : this.scopes;
             this.sessionsRevokedAt = other.sessionsRevokedAt !== undefined ? other.sessionsRevokedAt : this.sessionsRevokedAt;

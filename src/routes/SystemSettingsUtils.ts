@@ -31,6 +31,9 @@ export class SystemSettingsUtils {
     @Config("auth:requireMFA", false)
     protected requireMFA: boolean = false;
 
+    @Config("auth:allowMultiplePasswords", false)
+    protected allowMultiplePasswords: boolean = false;
+
     @Logger
     protected logger: any;
 
@@ -80,6 +83,7 @@ export class SystemSettingsUtils {
                     uid: SYSTEM_SETTINGS_UID,
                     allowRegistration: this.allowRegistration,
                     requireMFA: this.requireMFA,
+                    allowMultiplePasswords: this.allowMultiplePasswords,
                 }),
                 { ignoreACL: true },
             );
@@ -111,6 +115,7 @@ export class SystemSettingsUtils {
         return new SystemSettings({
             allowRegistration: settings?.allowRegistration ?? this.allowRegistration,
             requireMFA: settings?.requireMFA ?? this.requireMFA,
+            allowMultiplePasswords: settings?.allowMultiplePasswords ?? this.allowMultiplePasswords,
         });
     }
 
@@ -142,6 +147,12 @@ export class SystemSettingsUtils {
             }
             picked.requireMFA = changes.requireMFA;
         }
+        if ("allowMultiplePasswords" in changes) {
+            if (typeof changes.allowMultiplePasswords !== "boolean") {
+                throw new ApiError(ApiErrors.INVALID_REQUEST, 400, "allowMultiplePasswords must be a boolean.");
+            }
+            picked.allowMultiplePasswords = changes.allowMultiplePasswords;
+        }
 
         const existing: SystemSettingsEntity = await this.getEntity();
         const merged: Partial<SystemSettings> = { ...existing, ...picked };
@@ -152,6 +163,7 @@ export class SystemSettingsUtils {
         return new SystemSettings({
             allowRegistration: updated.allowRegistration ?? this.allowRegistration,
             requireMFA: updated?.requireMFA ?? this.requireMFA,
+            allowMultiplePasswords: updated?.allowMultiplePasswords ?? this.allowMultiplePasswords,
         });
     }
 }

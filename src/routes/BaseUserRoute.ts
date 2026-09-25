@@ -106,6 +106,12 @@ export abstract class BaseUserRoute<T extends User> extends ModelRoute<T> {
             obj.verified = false;
         }
 
+        // Only trusted users can require a new account to change its password at first sign-in. It's how an
+        // admin-issued temporary password is retired; an account registering itself has no reason for it.
+        if ("passwordChangeRequired" in obj && !UserUtils.hasRoles(user, this.trustedRoles)) {
+            obj.passwordChangeRequired = false;
+        }
+
         // If the system currently mandates MFA for all accounts, force it on for this new one too, even when
         // the caller is a trusted admin creating it on someone else's behalf — unlike validateUpdate() (which
         // lets a trusted caller deliberately exempt an *existing* account), a mandate can't be satisfied by a
@@ -260,6 +266,13 @@ export abstract class BaseUserRoute<T extends User> extends ModelRoute<T> {
         // left alone.
         if ("verified" in obj && !isTrusted && !!obj.verified && !existing?.verified) {
             obj.verified = false;
+        }
+
+        // Only trusted users can set or clear the must-change-password flag. Otherwise an account could
+        // dismiss the requirement itself with a plain `PUT /users/me`. The flag is cleared by the account
+        // holder actually changing their password (see `BaseSecretRoute.update()`).
+        if ("passwordChangeRequired" in obj && !isTrusted) {
+            obj.passwordChangeRequired = existing?.passwordChangeRequired ?? false;
         }
 
         if ("requireMFA" in obj) {

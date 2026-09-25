@@ -332,11 +332,12 @@ describe("Route:AuthElevationMongo Tests", () => {
         expect(verify.body.user.uid).toBe(user.uid);
         expect(verify.body.user.elevated).toEqual(expect.any(Number));
 
-        // The minted token actually satisfies a @RequiresElevation-gated endpoint (BaseSecretRoute.create()).
+        // The minted token actually satisfies a @RequiresElevation-gated endpoint (BaseSecretRoute.create()). An app password,
+        // not a password: the account already has one, and the server allows only one by default.
         const createResult = await request(server.getApplication())
             .post(secretsUrl)
             .set("Authorization", "jwt " + verify.body.token)
-            .send({ data: "MyValidPassw0rd!", type: SecretType.PASSWORD, userUid: user.uid });
+            .send({ type: SecretType.APP_PASSWORD, hint: "elevation probe", userUid: user.uid });
         expect(createResult.status).toBeGreaterThanOrEqual(200);
         expect(createResult.status).toBeLessThan(300);
     });
@@ -442,7 +443,7 @@ describe("Route:AuthElevationMongo Tests", () => {
             const createResult = await request(server.getApplication())
                 .post(secretsUrl)
                 .set("Authorization", "jwt " + token)
-                .send({ data: "MyValidPassw0rd!", type: SecretType.PASSWORD, userUid: user.uid });
+                .send({ type: SecretType.APP_PASSWORD, hint: "elevation probe", userUid: user.uid });
 
             expect(createResult.status).toBe(403);
         },

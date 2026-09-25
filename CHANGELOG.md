@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Added the `allowMultiplePasswords` system setting (`auth:allowMultiplePasswords`, default `false`, editable via `PUT /settings` like `allowRegistration`): unless it's on, an account can have only one `password` secret, enforced when one is created
+- Added `allowUserChange=false` to `PUT /secrets/:id`, which removes the account holder's rights on the password so only an administrator can change or remove it
+- Added `User.passwordChangeRequired`, set only by a trusted user, and cleared when the account holder changes their own password via `PUT /secrets/:id`
+- Added an `allowUserChange=true` query parameter to `POST /secrets`, which lets a trusted user creating a `password` for another account grant that account READ/EXISTS/UPDATE on it
+- Extended `allowUserChange=true` to `PUT /secrets/:id`, so a trusted user resetting a password its holder could not change can make it changeable
+- Exported `toUint8Array()` from the shared auth helpers
+
+### Changed
+- Waived the elevation requirement on `PUT /secrets/:id` for an account holder changing their own password while `passwordChangeRequired` is set; the check is now made in the handler rather than by `@RequiresElevation(60)`, and applies unchanged in every other case
+
+### Fixed
+- Fixed passkey sign-in always failing on MongoDB with `decodedPublicKey.get is not a function`: the stored public key comes back as a BSON `Binary` (or a base64 string via a JSON cache), which `toUint8Array()` turned into garbage bytes instead of the key
+- Fixed a password an administrator set for another account being impossible for that account to change, since the admin, a trusted role, is exempt from the implicit creator ACL grant and the account holder had no rights on the record
+
 ## [2.0.0-beta.13] - 2026-09-23
 
 ### Added

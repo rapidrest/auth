@@ -3,9 +3,12 @@
 // SPDX-License-Identifier: MPL-2.0
 ///////////////////////////////////////////////////////////////////////////////
 import { RouteDecorators } from "@rapidrest/service-core";
-import { SecretSQL } from "../../models/sql/index.js";
+import { SecretSQL, SystemSettingsSQL, UserSQL } from "../../models/sql/index.js";
 import { BaseSecretRoute } from "../BaseSecretRoute.js";
 const { Model } = RouteDecorators;
 
 @Model(SecretSQL)
-export class BaseSecretRouteSQL extends BaseSecretRoute<SecretSQL> {}
+export class BaseSecretRouteSQL extends BaseSecretRoute<SecretSQL> {
+    protected userClass: any = UserSQL;
+    protected systemSettingsClass: any = SystemSettingsSQL;
+}

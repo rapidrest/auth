@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: MPL-2.0
 ///////////////////////////////////////////////////////////////////////////////
 import {
+    ACLAction,
     ApiErrorMessages,
     ApiErrors,
     DocDecorators,
@@ -33,6 +34,7 @@ import {
     WeakClientHashError,
 } from "../auth/shared.js";
 import { AuditLogUtils } from "../auth/AuditLogUtils.js";
+import { SystemSettingsUtils } from "./SystemSettingsUtils.js";
 import { AuthEventType } from "../auth/events.js";
 import {
     PasskeyConfig,
@@ -48,7 +50,13 @@ const { Description, Returns, Summary } = DocDecorators;
 const { Auth, Delete, Get, Head, Param, Post, Put, Query, Request, RequiresElevation, Response, User, Validate } =
     RouteDecorators;
 
-const REGEX_LOWERCASE = new RegExp("^.*[a-z]+.*$");
+/** How recently (in seconds) a token must have been elevated to update a secret — what `@RequiresElevation(60)` meant. */
+const ELEVATION_WINDOW_SECONDS = 60;
+
+/** What `allowUserChange=true` gives an account holder on a password an administrator set for them. */
+const OWNER_PASSWORD_ACTIONS = [ACLAction.EXISTS, ACLAction.READ, ACLAction.UPDATE];
+
+const REGEX_LOWERCASE =new RegExp("^.*[a-z]+.*$");
 const REGEX_NUMERAL = new RegExp("^.*[0-9]+.*$");
 const REGEX_UPPERCASE = new RegExp("^.*[A-Z]+.*$");
 
@@ -124,9 +132,224 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
     @Inject(AuditLogUtils)
     protected auditLogUtils?: AuditLogUtils;
 
+    /**
+     * The `User` model class (e.g. `UserMongo`), used to clear `passwordChangeRequired` once the account holder
+     * changes their password. Optional: a subclass that leaves it unset simply never clears the flag.
+     */
+    protected userClass?: any;
+
+    protected userRepo?: RepoUtils<any>;
+
+    /**
+     * The `SystemSettings` model class (e.g. `SystemSettingsMongo`), used to read the `allowMultiplePasswords` policy.
+     * Optional: a subclass that leaves it unset has no policy to consult, and so doesn't enforce one.
+     */
+    protected systemSettingsClass?: any;
+
+    protected systemSettingsUtils?: SystemSettingsUtils;
+
     @Init
     private init() {
         this.regexSpecialChars = new RegExp("^.*[" + this.passwordConfig.special_chars + "]+.*$");
+    }
+
+    @Init
+    private async initSystemSettings(): Promise<void> {
+        if (!this.systemSettingsUtils && this.systemSettingsClass && this._objectFactory) {
+            this.systemSettingsUtils = await this._objectFactory.newInstance(SystemSettingsUtils, {
+                name: this.systemSettingsClass.name,
+                args: [this.systemSettingsClass],
+            });
+        }
+    }
+
+    @Init
+    private async initUserRepo(): Promise<void> {
+        if (!this.userRepo && this.userClass && this._objectFactory) {
+            this.userRepo = await this._objectFactory.newInstance(RepoUtils, {
+                name: this.userClass.name,
+                args: [this.userClass],
+            });
+        }
+    }
+
+    /**
+     * Builds the ACL to create a new secret with when a trusted user (e.g. an administrator) provisions a
+     * `password` for *another* account and asks, via the `allowUserChange=true` query parameter, for the account
+     * holder to be able to change it themselves.
+     *
+     * Without this the new secret's ACL is empty: the creator is a trusted role, which is exempt from the usual
+     * implicit creator grant, and the account holder — who is not the creator — has no rights on it at all, so their
+     * own `PUT /secrets/:id` to change the password is refused. Only `READ`, `EXISTS` and `UPDATE` are granted;
+     * removing a password remains an administrator's call.
+     *
+     * @returns The ACL to pass to `doCreate()`, or `undefined` when the caller didn't ask for it or isn't entitled to.
+     */
+    protected buildOwnerACL(obj: T | T[], req: HttpRequest, user?: JWTUser): { records: any[] } | undefined {
+        if (Array.isArray(obj) || this.ownerAccessRequest(obj.type, obj.userUid, req, user) !== "grant") {
+            return undefined;
+        }
+        return { records: [{ userOrRoleId: obj.userUid, actions: [...OWNER_PASSWORD_ACTIONS] }] };
+    }
+
+    /**
+     * What a trusted user is asking for, via the `allowUserChange` query parameter, about whether the account holder
+     * can change a `password` secret they're provisioning or resetting for that account: `"grant"` for
+     * `allowUserChange=true`, `"revoke"` for `allowUserChange=false`, and `undefined` when it isn't given (leave it as
+     * it is) or the caller isn't entitled to ask. Never for another secret type, for a caller who isn't a trusted user,
+     * or for one acting on their own secret (who has the ordinary creator grant already).
+     */
+    protected ownerAccessRequest(
+        type: SecretType,
+        userUid: string | undefined,
+        req: HttpRequest,
+        user?: JWTUser,
+    ): "grant" | "revoke" | undefined {
+        if (
+            type !== SecretType.PASSWORD ||
+            !userUid ||
+            !user ||
+            user.uid === userUid ||
+            !UserUtils.hasRoles(user, this.trustedRoles)
+        ) {
+            return undefined;
+        }
+        const requested = req.query?.allowUserChange;
+        return requested === "true" ? "grant" : requested === "false" ? "revoke" : undefined;
+    }
+
+    /**
+     * The `update()` counterpart of `buildOwnerACL()`: a secret that already exists has an ACL already, and what the
+     * account holder can do with it depends on how it got there — a password an administrator created earlier gives
+     * them nothing, one they set themselves gives them everything. So an administrator resetting it says which they
+     * want, with `allowUserChange`:
+     * - `true` adds `OWNER_PASSWORD_ACTIONS` for the holder (creating the ACL first if the record somehow has none),
+     * so a password they couldn't change becomes one they can;
+     * - `false` removes the holder's record from it altogether, so a password they could change — including one they
+     * chose themselves — becomes one only an administrator can. That's how an administrator keeps control of it.
+     */
+    protected async syncOwnerAccess(existing: T, req: HttpRequest, user?: JWTUser): Promise<void> {
+        const request = this.ownerAccessRequest(existing.type, existing.userUid, req, user);
+        if (!this.aclUtils?.enabled || !request) {
+            return;
+        }
+        const acl = await this.aclUtils.findACL(existing.uid, [], { skipCache: true, skipParents: true });
+        if (request === "revoke") {
+            const records = (acl?.records ?? []).filter((r: any) => r.userOrRoleId !== existing.userUid);
+            if (acl && records.length !== acl.records.length) {
+                await this.aclUtils.saveACL({ ...acl, records });
+            }
+            return;
+        }
+        if (!acl) {
+            await this.aclUtils.saveACL(
+                {
+                    uid: existing.uid,
+                    parentUid: this.defaultACLUid,
+                    records: [{ userOrRoleId: existing.userUid, actions: [...OWNER_PASSWORD_ACTIONS] }],
+                },
+                { createOnly: true },
+            );
+            return;
+        }
+        const records = acl.records.map((r: any) => ({ ...r, actions: [...r.actions] }));
+        const record = records.find((r: any) => r.userOrRoleId === existing.userUid);
+        if (record) {
+            record.actions = [...new Set([...record.actions, ...OWNER_PASSWORD_ACTIONS])];
+        } else {
+            records.push({ userOrRoleId: existing.userUid, actions: [...OWNER_PASSWORD_ACTIONS] });
+        }
+        await this.aclUtils.saveACL({ ...acl, records });
+    }
+
+    /**
+     * Enforces the `SystemSettings.allowMultiplePasswords` policy on a new `password`: unless it's on, an account that
+     * already has one can't be given another — by anyone, an administrator included, who changes the existing one
+     * instead. Sign-in accepts *any* of an account's password secrets, so this is also what makes "the one password"
+     * mean something: whoever controls it (see `syncOwnerAccess()`) controls signing in by password, and the holder
+     * can't sidestep an administrator by adding a password of their own.
+     *
+     * Not enforced by a route with no `systemSettingsClass`, which has no policy to consult.
+     */
+    protected async assertPasswordAllowed(obj: Partial<T>): Promise<void> {
+        if (!this.systemSettingsUtils || !this.repoUtils || !obj.userUid) {
+            return;
+        }
+        if ((await this.systemSettingsUtils.get()).allowMultiplePasswords) {
+            return;
+        }
+        const existing: T[] = await this.repoUtils.find(
+            { type: SecretType.PASSWORD, userUid: obj.userUid },
+            { ignoreACL: true },
+        );
+        if (existing.length > 0) {
+            throw new ApiError(
+                ApiErrors.INVALID_REQUEST,
+                400,
+                "This account already has a password, and this server allows only one password per account.",
+            );
+        }
+    }
+
+    /**
+     * The elevation check `@RequiresElevation(60)` would make on `update()` — the caller's token must have been
+     * elevated within the last 60 seconds — except that it's waived for an account holder changing their own
+     * `password` while their account is flagged `passwordChangeRequired`.
+     *
+     * That flag means they were just sent here to choose a new password, having signed in with a temporary one. Asking
+     * them to prove the password they typed a moment ago again, to replace it, is an empty ceremony; and an elevated
+     * sign-in token wouldn't fix it — elevation lapses after 60 seconds, which is easily less than the time it takes to
+     * choose a password, and an elevated token also carries trusted roles (an administrator recovering their own
+     * account would be handed an elevated admin token). Waiving the requirement for this one action has neither problem.
+     * Nothing else about the caller is loosened: it applies only to their own password, only to a change of its `data`,
+     * and only while the flag is set.
+     */
+    protected async assertElevatedOrForcedPasswordChange(existing: T, obj: UpdateObject<T>, user: JWTUser): Promise<void> {
+        if (user?.elevated && user.elevated > 0 && Date.now() - user.elevated < ELEVATION_WINDOW_SECONDS * 1000) {
+            return;
+        }
+        if (
+            existing.type === SecretType.PASSWORD &&
+            "data" in obj &&
+            user?.uid === existing.userUid &&
+            (await this.isPasswordChangeRequired(existing.userUid))
+        ) {
+            return;
+        }
+        throw new ApiError(
+            ApiErrors.AUTH_REQUIRES_ELEVATION,
+            403,
+            ApiErrorMessages.AUTH_REQUIRES_ELEVATION,
+        );
+    }
+
+    /** Whether the given account is flagged `passwordChangeRequired`. `false` when there's no user repo to ask. */
+    protected async isPasswordChangeRequired(userUid: string): Promise<boolean> {
+        const account = await this.userRepo?.findOne(userUid, { ignoreACL: true, skipCache: true });
+        return account?.passwordChangeRequired === true;
+    }
+
+    /**
+     * Clears the `passwordChangeRequired` flag on the given account, after its holder set a new password. A
+     * failure is logged rather than thrown: the password change itself has already been persisted, and the worst
+     * case is the account being asked to change it once more.
+     */
+    protected async clearPasswordChangeRequired(userUid: string): Promise<void> {
+        if (!this.userRepo) {
+            return;
+        }
+        try {
+            const account = await this.userRepo.findOne(userUid, { ignoreACL: true, skipCache: true });
+            if (account?.passwordChangeRequired) {
+                await this.userRepo.update(
+                    { uid: account.uid, version: account.version, passwordChangeRequired: false },
+                    account,
+                    { ignoreACL: true, recordEvent: false },
+                );
+            }
+        } catch (err) {
+            this.logger?.error(`Failed to clear passwordChangeRequired for '${userUid}': ${err}`);
+        }
     }
 
     /**
@@ -189,6 +412,7 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
                 await this.validateWebAuthnCreate(obj, req, this.passkeyConfig);
                 break;
             case SecretType.PASSWORD:
+                await this.assertPasswordAllowed(obj);
                 obj.data = await this.processPasswordSecret(obj.data, obj.userUid!);
                 break;
             case SecretType.RECOVERY_CODES:
@@ -567,7 +791,8 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
     @Validate("validateCreate")
     @RequiresElevation(60)
     public async create(obj: T | T[], @Request req: HttpRequest, @User user: JWTUser): Promise<T | Array<T>> {
-        const result: T | Array<T> = await super.doCreate(obj, { req, user });
+        const acl = this.buildOwnerACL(obj, req, user);
+        const result: T | Array<T> = await super.doCreate(obj, { req, user, ...(acl ? { acl } : {}) } as any);
 
         // Selectively clean data from certain types of secrets. Some secret types require the data needs to be
         // returned back to the client. `sanitizeSecretForResponse()` may hand back a different object than it
@@ -916,7 +1141,6 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
     @Description("Updates a single Secret.")
     @Returns([Object])
     @Put("/:id")
-    @RequiresElevation(60)
     public async update(
         @Param("id") id: string,
         obj: UpdateObject<T>,
@@ -932,6 +1156,10 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
             throw new ApiError(ApiErrors.NOT_FOUND, 404, ApiErrorMessages.NOT_FOUND);
         }
 
+        // Enforced here rather than by `@RequiresElevation(60)`, which can't be waived per request: see
+        // `assertElevatedOrForcedPasswordChange()` for the one case that is.
+        await this.assertElevatedOrForcedPasswordChange(existing, obj, user);
+
         // Captured before validateUpdate() runs - it reassigns obj.data (e.g. to the freshly-hashed
         // value) but never removes the key, so this still correctly reflects whether the caller actually
         // submitted a new `data` value, as opposed to e.g. a hint-only rename.
@@ -941,7 +1169,15 @@ export abstract class BaseSecretRoute<T extends Secret> extends ModelRoute<T> {
 
         const result: T = await super.doUpdate(id, obj, { user });
 
+        await this.syncOwnerAccess(existing, req, user);
+
         if (isPasswordDataChange) {
+            // Only the account holder choosing a new password retires a temporary one; an administrator resetting
+            // it on their behalf must not.
+            if (user?.uid === existing.userUid) {
+                await this.clearPasswordChangeRequired(existing.userUid);
+            }
+
             EventUtils.record({
                 type: AuthEventType.PASSWORD_CHANGED,
                 userUid: existing.userUid,

@@ -600,16 +600,49 @@ export const generatePasskeyChallenge = async function (
  *
  * `StoredPasskeyCredential.publicKey` is a `Uint8Array` when it's first produced by the
  * registration ceremony, but by the time it's read back here it's been round-tripped through
- * whatever the `Secret` datastore uses to persist `data` (e.g. TypeORM's `simple-json` column,
- * which serializes via `JSON.stringify`/`JSON.parse`). That round-trip doesn't preserve typed
- * arrays — a `Uint8Array` comes back as a plain object keyed by numeric index
- * (`{"0":1,"1":2,...}`). Passed as-is to `@simplewebauthn/server`, that plain object has no
- * `byteLength`, so its CBOR/COSE key decoder treats it as zero-length input and fails with an
- * opaque "No data" error. Reconstruct a real `Uint8Array` regardless of which shape it comes in
- * as, so verification always sees the actual key bytes.
+ * whatever the `Secret` datastore (and cache) uses to persist `data`, which doesn't preserve typed
+ * arrays. Reconstruct a real `Uint8Array` from whichever shape it comes back as, so verification
+ * always sees the actual key bytes:
+ * - a `Uint8Array` (including a Node `Buffer`) — returned as is;
+ * - a BSON `Binary` (MongoDB stores a `Uint8Array` as one) — its `buffer` holds the bytes, but
+ * `position` marks how much of it is in use;
+ * - a base64 string (`Binary`'s `toJSON()`, as written by a JSON-serialized cache);
+ * - `{ type: "Buffer", data: number[] }` (a `Buffer`'s `toJSON()`);
+ * - a plain object keyed by numeric index (`{"0":1,"1":2,...}`), which is what TypeORM's
+ * `simple-json` column gives back for a `Uint8Array`.
+ *
+ * Passing any of the non-`Uint8Array` shapes on to `@simplewebauthn/server` unconverted (or, as this
+ * once did for a `Binary`, converted wrongly) makes its CBOR/COSE key decoder read the wrong bytes and
+ * fail with an opaque "No data" or "decodedPublicKey.get is not a function" error.
  */
-function toUint8Array(value: Uint8Array | ArrayLike<number>): Uint8Array {
-    return value instanceof Uint8Array ? value : Uint8Array.from(Object.values(value));
+export function toUint8Array(value: unknown): Uint8Array {
+    if (value instanceof Uint8Array) {
+        return value;
+    }
+    if (typeof value === "string") {
+        return new Uint8Array(Buffer.from(value, "base64"));
+    }
+    if (Array.isArray(value)) {
+        return Uint8Array.from(value);
+    }
+    if (value && typeof value === "object") {
+        const obj: any = value;
+        // BSON `Binary`: `buffer` is the (possibly over-allocated) backing store, `position` the used length.
+        if (obj.buffer instanceof Uint8Array && typeof obj.position === "number") {
+            return new Uint8Array(obj.buffer.subarray(0, obj.position));
+        }
+        // JSON-serialized `Buffer`.
+        if (obj.type === "Buffer" && Array.isArray(obj.data)) {
+            return Uint8Array.from(obj.data);
+        }
+        // Index-keyed object. Sorted numerically, as object key order isn't guaranteed to match index order.
+        return Uint8Array.from(
+            Object.keys(obj)
+                .sort((a, b) => Number(a) - Number(b))
+                .map((k) => obj[k]),
+        );
+    }
+    throw new ApiError(ApiErrors.INTERNAL_ERROR, 500, "Stored passkey credential has an invalid public key.");
 }
 
 export const verifyPasskeyChallenge = async function (

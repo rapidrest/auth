@@ -974,6 +974,302 @@ describe("Route:SecretMongo Tests", () => {
         expect(result.status).toBe(403);
     });
 
+    describe("Admin-provisioned password", () => {
+        const password = "TempPassw0rd!";
+        const newPassword = "NewValidPassw0rd!";
+
+        async function adminCreatesPassword(query = ""): Promise<any> {
+            const result = await request(server.getApplication())
+                .post(baseUrl + query)
+                .set("Authorization", "jwt " + adminToken)
+                .send({ type: SecretType.PASSWORD, userUid: user.uid, data: password });
+            expect(result.status).toBe(200);
+            return result.body;
+        }
+
+        it("Can't be changed by its account holder by default (the admin owns the record, the user has no rights on it).", async () => {
+            const created = await adminCreatesPassword();
+
+            const result = await request(server.getApplication())
+                .put(baseUrl + "/" + created.uid)
+                .set("Authorization", "jwt " + userToken)
+                .send({ uid: created.uid, version: created.version, data: newPassword });
+
+            expect(result.status).toBeGreaterThanOrEqual(400);
+        });
+
+        it("Can be changed by its account holder when the admin created it with allowUserChange=true.", async () => {
+            const created = await adminCreatesPassword("?allowUserChange=true");
+
+            const result = await request(server.getApplication())
+                .put(baseUrl + "/" + created.uid)
+                .set("Authorization", "jwt " + userToken)
+                .send({ uid: created.uid, version: created.version, data: newPassword });
+
+            expect(result.status).toBe(200);
+            const stored: SecretMongo | null = await repo.findOne({ uid: created.uid } as any);
+            const canonical = await normalizePasswordSubmission(newPassword, user.uid, new PasswordConfig());
+            expect(await argon2.verify(stored!.data, canonical)).toBe(true);
+        });
+
+        it("Doesn't let the account holder delete it, or anyone else change it, even with allowUserChange=true.", async () => {
+            const created = await adminCreatesPassword("?allowUserChange=true");
+            const stranger: any = { uid: uuid.v4(), roles: [], elevated: Date.now() };
+            const strangerToken = JWTUtils.createTokenSync(config.get("auth"), stranger);
+
+            const deleted = await request(server.getApplication())
+                .delete(baseUrl + "/" + created.uid)
+                .set("Authorization", "jwt " + userToken);
+            const strangerUpdate = await request(server.getApplication())
+                .put(baseUrl + "/" + created.uid)
+                .set("Authorization", "jwt " + strangerToken)
+                .send({ uid: created.uid, version: created.version, data: newPassword });
+
+            expect(deleted.status).toBeGreaterThanOrEqual(400);
+            expect(strangerUpdate.status).toBeGreaterThanOrEqual(400);
+        });
+
+        it("Lets an admin resetting an existing password (that its holder couldn't change) make it changeable with allowUserChange=true.", async () => {
+            const created = await adminCreatesPassword();
+            const adminReset = await request(server.getApplication())
+                .put(baseUrl + "/" + created.uid + "?allowUserChange=true")
+                .set("Authorization", "jwt " + adminToken)
+                .send({ uid: created.uid, version: created.version, data: "ResetPassw0rd!" });
+            expect(adminReset.status).toBe(200);
+
+            const result = await request(server.getApplication())
+                .put(baseUrl + "/" + created.uid)
+                .set("Authorization", "jwt " + userToken)
+                .send({ uid: created.uid, version: adminReset.body.version, data: newPassword });
+
+            expect(result.status).toBe(200);
+        });
+
+        it("Leaves an existing password unchangeable by its holder when the admin resets it without allowUserChange.", async () => {
+            const created = await adminCreatesPassword();
+            const adminReset = await request(server.getApplication())
+                .put(baseUrl + "/" + created.uid)
+                .set("Authorization", "jwt " + adminToken)
+                .send({ uid: created.uid, version: created.version, data: "ResetPassw0rd!" });
+            expect(adminReset.status).toBe(200);
+
+            const result = await request(server.getApplication())
+                .put(baseUrl + "/" + created.uid)
+                .set("Authorization", "jwt " + userToken)
+                .send({ uid: created.uid, version: adminReset.body.version, data: newPassword });
+
+            expect(result.status).toBeGreaterThanOrEqual(400);
+        });
+
+        it("Lets an admin take a password over for good with allowUserChange=false, undoing a grant the holder had.", async () => {
+            const created = await adminCreatesPassword("?allowUserChange=true");
+            const change = await request(server.getApplication())
+                .put(baseUrl + "/" + created.uid)
+                .set("Authorization", "jwt " + userToken)
+                .send({ uid: created.uid, version: created.version, data: newPassword });
+            expect(change.status).toBe(200);
+
+            const takeOver = await request(server.getApplication())
+                .put(baseUrl + "/" + created.uid + "?allowUserChange=false")
+                .set("Authorization", "jwt " + adminToken)
+                .send({ uid: created.uid, version: change.body.version, data: "AdminSetPassw0rd!" });
+            expect(takeOver.status).toBe(200);
+
+            const again = await request(server.getApplication())
+                .put(baseUrl + "/" + created.uid)
+                .set("Authorization", "jwt " + userToken)
+                .send({ uid: created.uid, version: takeOver.body.version, data: "HolderTriesAgain1!" });
+            expect(again.status).toBeGreaterThanOrEqual(400);
+            const deleted = await request(server.getApplication())
+                .delete(baseUrl + "/" + created.uid)
+                .set("Authorization", "jwt " + userToken);
+            expect(deleted.status).toBeGreaterThanOrEqual(400);
+            // and it's still there, unchanged by the holder
+            const stored: SecretMongo | null = await repo.findOne({ uid: created.uid } as any);
+            const canonical = await normalizePasswordSubmission("AdminSetPassw0rd!", user.uid, new PasswordConfig());
+            expect(await argon2.verify(stored!.data, canonical)).toBe(true);
+        });
+
+        describe("allowMultiplePasswords policy", () => {
+            const settingsUrl = "/mongo/settings";
+            const setPolicy = (allowMultiplePasswords: boolean) =>
+                request(server.getApplication())
+                    .put(settingsUrl)
+                    .set("Authorization", "jwt " + adminToken)
+                    .send({ allowMultiplePasswords });
+
+            afterEach(async () => {
+                await setPolicy(false);
+            });
+
+            it("Defaults to one password per account: a second is refused, from the holder and from an administrator.", async () => {
+                const first = await adminCreatesPassword("?allowUserChange=true");
+                expect(first.uid).toBeDefined();
+
+                const byHolder = await request(server.getApplication())
+                    .post(baseUrl)
+                    .set("Authorization", "jwt " + userToken)
+                    .send({ type: SecretType.PASSWORD, userUid: user.uid, data: "SecondPassw0rd!" });
+                const byAdmin = await request(server.getApplication())
+                    .post(baseUrl)
+                    .set("Authorization", "jwt " + adminToken)
+                    .send({ type: SecretType.PASSWORD, userUid: user.uid, data: "SecondPassw0rd!" });
+
+                expect(byHolder.status).toBe(400);
+                expect(byAdmin.status).toBe(400);
+                expect(byAdmin.body.message).toContain("only one password per account");
+                expect(await repo.count({ userUid: user.uid, type: SecretType.PASSWORD })).toBe(1);
+            });
+
+            it("Reports the policy to an administrator, and can be turned on.", async () => {
+                const before = await request(server.getApplication()).get(settingsUrl).set("Authorization", "jwt " + adminToken);
+                expect(before.body.allowMultiplePasswords).toBe(false);
+
+                expect((await setPolicy(true)).body.allowMultiplePasswords).toBe(true);
+                const after = await request(server.getApplication()).get(settingsUrl).set("Authorization", "jwt " + adminToken);
+                expect(after.body.allowMultiplePasswords).toBe(true);
+            });
+
+            it("Rejects a non-boolean value, and lets only a trusted user change it.", async () => {
+                const bad = await request(server.getApplication())
+                    .put(settingsUrl)
+                    .set("Authorization", "jwt " + adminToken)
+                    .send({ allowMultiplePasswords: "yes" });
+                expect(bad.status).toBe(400);
+
+                const byUser = await request(server.getApplication())
+                    .put(settingsUrl)
+                    .set("Authorization", "jwt " + userToken)
+                    .send({ allowMultiplePasswords: true });
+                expect(byUser.status).toBeGreaterThanOrEqual(400);
+            });
+
+            it("Allows several when turned on: the holder's own, and one only the administrator can change.", async () => {
+                await setPolicy(true);
+                // The administrator's own password, which its holder can't change (no allowUserChange).
+                const adminHeld = await adminCreatesPassword();
+                // The holder's own, alongside it.
+                const holderOwn = await request(server.getApplication())
+                    .post(baseUrl)
+                    .set("Authorization", "jwt " + userToken)
+                    .send({ type: SecretType.PASSWORD, userUid: user.uid, data: "HoldersOwnPassw0rd!" });
+                expect(holderOwn.status).toBe(200);
+                expect(await repo.count({ userUid: user.uid, type: SecretType.PASSWORD })).toBe(2);
+
+                // The holder can change their own but not the administrator's.
+                const ownChange = await request(server.getApplication())
+                    .put(baseUrl + "/" + holderOwn.body.uid)
+                    .set("Authorization", "jwt " + userToken)
+                    .send({ uid: holderOwn.body.uid, version: holderOwn.body.version, data: newPassword });
+                expect(ownChange.status).toBe(200);
+                const adminHeldChange = await request(server.getApplication())
+                    .put(baseUrl + "/" + adminHeld.uid)
+                    .set("Authorization", "jwt " + userToken)
+                    .send({ uid: adminHeld.uid, version: adminHeld.version, data: newPassword });
+                expect(adminHeldChange.status).toBeGreaterThanOrEqual(400);
+            });
+        });
+
+        it("Ignores allowUserChange from a caller who isn't a trusted user.", async () => {
+            const forOther = await request(server.getApplication())
+                .post(baseUrl + "?allowUserChange=true")
+                .set("Authorization", "jwt " + userToken)
+                .send({ type: SecretType.PASSWORD, userUid: uuid.v4(), data: password });
+
+            expect(forOther.status).toBe(403);
+        });
+
+        describe("passwordChangeRequired", () => {
+            let userRepo: MongoRepository<any>;
+
+            beforeAll(() => {
+                const conn: any = objectFactory.getInstance(ConnectionManager)?.connections.get("mongo");
+                userRepo = conn.getMongoRepository("UserMongo");
+            });
+
+            async function seedFlaggedUser(): Promise<void> {
+                await userRepo.deleteMany({ uid: user.uid } as any).catch(() => undefined);
+                await userRepo.save({
+                    uid: user.uid,
+                    version: 0,
+                    roles: [],
+                    verified: false,
+                    passwordChangeRequired: true,
+                } as any);
+            }
+
+            // A token that has never been elevated: what a fresh sign-in gives.
+            const plainToken = JWTUtils.createTokenSync(config.get("auth"), { uid: user.uid, roles: [] });
+
+            it("Doesn't need an elevated token for the account holder to change it while flagged.", async () => {
+                await seedFlaggedUser();
+                const created = await adminCreatesPassword("?allowUserChange=true");
+
+                const result = await request(server.getApplication())
+                    .put(baseUrl + "/" + created.uid)
+                    .set("Authorization", "jwt " + plainToken)
+                    .send({ uid: created.uid, version: created.version, data: newPassword });
+
+                expect(result.status).toBe(200);
+                expect(((await userRepo.findOne({ uid: user.uid } as any))).passwordChangeRequired).toBe(false);
+            });
+
+            it("Still needs an elevated token once the flag is cleared, or for anything but the password itself.", async () => {
+                await seedFlaggedUser();
+                const created = await adminCreatesPassword("?allowUserChange=true");
+
+                // flagged, but only renaming: elevation required
+                const rename = await request(server.getApplication())
+                    .put(baseUrl + "/" + created.uid)
+                    .set("Authorization", "jwt " + plainToken)
+                    .send({ uid: created.uid, version: created.version, hint: "renamed" });
+                expect(rename.status).toBe(403);
+                expect(rename.body.code).toBe("api-104");
+
+                // after the change the flag is gone, and so is the waiver
+                const change = await request(server.getApplication())
+                    .put(baseUrl + "/" + created.uid)
+                    .set("Authorization", "jwt " + plainToken)
+                    .send({ uid: created.uid, version: created.version, data: newPassword });
+                expect(change.status).toBe(200);
+                const again = await request(server.getApplication())
+                    .put(baseUrl + "/" + created.uid)
+                    .set("Authorization", "jwt " + plainToken)
+                    .send({ uid: created.uid, version: change.body.version, data: "AnotherPassw0rd!" });
+                expect(again.status).toBe(403);
+                expect(again.body.code).toBe("api-104");
+            });
+
+            it("Is cleared when the account holder changes their own password.", async () => {
+                await seedFlaggedUser();
+                const created = await adminCreatesPassword("?allowUserChange=true");
+
+                const result = await request(server.getApplication())
+                    .put(baseUrl + "/" + created.uid)
+                    .set("Authorization", "jwt " + userToken)
+                    .send({ uid: created.uid, version: created.version, data: newPassword });
+
+                expect(result.status).toBe(200);
+                const account: any = await userRepo.findOne({ uid: user.uid } as any);
+                expect(account.passwordChangeRequired).toBe(false);
+            });
+
+            it("Is left alone when an administrator changes the password on the account holder's behalf.", async () => {
+                await seedFlaggedUser();
+                const created = await adminCreatesPassword("?allowUserChange=true");
+
+                const result = await request(server.getApplication())
+                    .put(baseUrl + "/" + created.uid)
+                    .set("Authorization", "jwt " + adminToken)
+                    .send({ uid: created.uid, version: created.version, data: newPassword });
+
+                expect(result.status).toBe(200);
+                const account: any = await userRepo.findOne({ uid: user.uid } as any);
+                expect(account.passwordChangeRequired).toBe(true);
+            });
+        });
+    });
+
     it("Regression: a trusted (admin) caller can update another user's secret without the omitted userUid being treated as a re-assignment attempt, and ownership is not silently transferred to the admin.", async () => {
         const obj: SecretMongo = await createSecretMongo({ userUid: user.uid, hint: "old hint" });
         const url = baseUrl + "/" + obj.uid;

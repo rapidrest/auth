@@ -432,6 +432,17 @@ export interface User extends BaseEntity, JWTUser {
     requireMFA?: boolean;
 
     /**
+     * Set to `true` when the account holder must choose a new password before doing anything else — e.g. an
+     * administrator provisioned the account with a temporary password. Sign-in still succeeds, and the flag is
+     * reported to the client with the rest of the user so it can prompt for the change. Cleared automatically
+     * once the account holder changes their own password (see `BaseSecretRoute.update()`). Only a trusted user
+     * can set it.
+     *
+     * Default value is `false`.
+     */
+    passwordChangeRequired?: boolean;
+
+    /**
      * The epoch-millisecond timestamp (see `Date.now()`) at which every refresh token issued for this account
      * before that moment was revoked (see `BaseAccountRoute.revokeSessions()`/`BaseAuthRefreshRoute`). A
      * refresh token whose `iat` claim predates this is rejected. Does not affect already-issued *access*
@@ -466,11 +477,28 @@ export class SystemSettings {
     @RequiresScope("system")
     public requireMFA: boolean = false;
 
+    /**
+     * Set to `true` to let an account have more than one `password` secret, otherwise (the default) an account can
+     * have only one. With one, a password is the only way in by password, so whoever can change it — its holder, or
+     * an administrator who took it over by resetting it with `allowUserChange=false` — decides who can sign in that
+     * way. With several, sign-in accepts any of them, which is how an administrator keeps a password of their own
+     * on an account (one its holder can't change) alongside the holder's, to preserve their access to it.
+     *
+     * Enforced when a password is created (see `BaseSecretRoute.assertPasswordAllowed()`); lowering it later
+     * doesn't remove passwords an account already has.
+     *
+     * Seeded from and falls back to `@Config("auth:allowMultiplePasswords")`.
+     */
+    @RequiresScope("system")
+    public allowMultiplePasswords: boolean = false;
+
     constructor(other?: Partial<SystemSettings>) {
         if (other) {
             this.allowRegistration =
                 other.allowRegistration !== undefined ? other.allowRegistration : this.allowRegistration;
             this.requireMFA = other.requireMFA !== undefined ? other.requireMFA : this.requireMFA;
+            this.allowMultiplePasswords =
+                other.allowMultiplePasswords !== undefined ? other.allowMultiplePasswords : this.allowMultiplePasswords;
         }
     }
 }

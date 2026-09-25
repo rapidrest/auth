@@ -302,6 +302,28 @@ describe("BaseUserRoute Tests", () => {
             expect(obj.verified).toBe(true);
         });
 
+        it("Resets passwordChangeRequired to false when a non-trusted caller includes it.", async () => {
+            vi.spyOn(ModelRoute.prototype as any, "validate").mockResolvedValue(undefined);
+            const route = new TestUserRoute();
+            (route as any).authConfig = {};
+            const obj: any = { passwordChangeRequired: true };
+
+            await (route as any).validateCreate(obj, { uid: "attacker-uid", roles: [] });
+
+            expect(obj.passwordChangeRequired).toBe(false);
+        });
+
+        it("Allows a trusted (admin) caller to set passwordChangeRequired on a newly-created user.", async () => {
+            vi.spyOn(ModelRoute.prototype as any, "validate").mockResolvedValue(undefined);
+            const route = new TestUserRoute();
+            (route as any).authConfig = {};
+            const obj: any = { passwordChangeRequired: true };
+
+            await (route as any).validateCreate(obj, { uid: "admin-uid", roles: ["admin"] });
+
+            expect(obj.passwordChangeRequired).toBe(true);
+        });
+
         it("Forces requireMFA to the runtime system-settings value when set, overriding any client-supplied value.", async () => {
             vi.spyOn(ModelRoute.prototype as any, "validate").mockResolvedValue(undefined);
             const route = new TestUserRoute();
@@ -442,6 +464,42 @@ describe("BaseUserRoute Tests", () => {
 
             expect(findOne).toHaveBeenCalledWith("user-1", { ignoreACL: true });
             expect(obj.verified).toBe(false);
+        });
+
+        it("Keeps the persisted passwordChangeRequired when a non-trusted caller tries to change it (an account can't dismiss the requirement itself).", async () => {
+            vi.spyOn(ModelRoute.prototype as any, "validate").mockResolvedValue(undefined);
+            const route = new TestUserRoute();
+            (route as any).repoUtils = { findOne: vi.fn().mockResolvedValue({ uid: "user-1", passwordChangeRequired: true }) };
+            (route as any).authConfig = {};
+            const obj: any = { uid: "user-1", passwordChangeRequired: false };
+
+            await (route as any).validateUpdate("user-1", obj, { uid: "user-1", roles: [] });
+
+            expect(obj.passwordChangeRequired).toBe(true);
+        });
+
+        it("Defaults a non-trusted caller's passwordChangeRequired to false when there's no persisted record.", async () => {
+            vi.spyOn(ModelRoute.prototype as any, "validate").mockResolvedValue(undefined);
+            const route = new TestUserRoute();
+            (route as any).repoUtils = { findOne: vi.fn().mockResolvedValue(undefined) };
+            (route as any).authConfig = {};
+            const obj: any = { uid: "user-1", passwordChangeRequired: true };
+
+            await (route as any).validateUpdate("user-1", obj, { uid: "user-1", roles: [] });
+
+            expect(obj.passwordChangeRequired).toBe(false);
+        });
+
+        it("Lets a trusted caller set or clear passwordChangeRequired.", async () => {
+            vi.spyOn(ModelRoute.prototype as any, "validate").mockResolvedValue(undefined);
+            const route = new TestUserRoute();
+            (route as any).repoUtils = { findOne: vi.fn().mockResolvedValue({ uid: "user-1", passwordChangeRequired: false }) };
+            (route as any).authConfig = {};
+            const obj: any = { uid: "user-1", passwordChangeRequired: true };
+
+            await (route as any).validateUpdate("user-1", obj, { uid: "admin-1", roles: ["admin"] });
+
+            expect(obj.passwordChangeRequired).toBe(true);
         });
 
         it("Allows a non-trusted caller to lower their own verified status (no false-positive block).", async () => {
