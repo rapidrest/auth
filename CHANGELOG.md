@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0-beta.14] - 2026-09-25
+
+### Changed
+- Document that a downstream package's release bump level follows its upstream dependency's, minor for minor, patch for patch and major for major, in NOTES
+
+### Fixed
+- Fixed passkey sign-in on MongoDB, where toUint8Array() turned the stored BSON Binary public key into three garbage bytes and @simplewebauthn/server then failed with "decodedPublicKey.get is not a function", by restoring the real key from a Binary, a base64 string, a JSON-serialized Buffer, an array or an index-keyed object Add User.passwordChangeRequired, settable only by a trusted user and cleared when the account holder changes their own password Add allowUserChange to POST and PUT /secrets so a trusted user can give the account holder rights on a password it set for them (true), which an admin-created password never granted, or take them away for good (false), which nothing could do before Waive the elevation requirement on PUT /secrets/:id for an account holder changing their own password while passwordChangeRequired is set, checked in the handler because @RequiresElevation(60) can't be waived per request Add the allowMultiplePasswords system setting (auth:allowMultiplePasswords, off by default, changeable at runtime via PUT /settings and stored like allowRegistration), enforced when a password secret is created, so an account has one password unless an administrator allows several; this changes behavior for anyone relying on several Add tests for each, including integration tests against a real server, and document the changes in the changelog and release notes
+
 ### Added
 - Added the `allowMultiplePasswords` system setting (`auth:allowMultiplePasswords`, default `false`, editable via `PUT /settings` like `allowRegistration`): unless it's on, an account can have only one `password` secret, enforced when one is created
 - Added `allowUserChange=false` to `PUT /secrets/:id`, which removes the account holder's rights on the password so only an administrator can change or remove it
@@ -264,7 +272,8 @@ tagged.
 - `PasskeyStrategy` - WebAuthn based passkey authentication
 - `TOTPStrategy` - RFC 6238 Time-Based One Time Password authentication (e.g. Google Authenticator, etc.)
 
-[Unreleased]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.13...HEAD
+[Unreleased]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.14...HEAD
+[2.0.0-beta.14]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.13...v2.0.0-beta.14
 [2.0.0-beta.13]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.12...v2.0.0-beta.13
 [2.0.0-beta.12]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.11...v2.0.0-beta.12
 [2.0.0-beta.11]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.10...v2.0.0-beta.11

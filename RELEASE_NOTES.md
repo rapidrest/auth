@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v2.0.0-beta.14
+
 ### Fixed
 
 * **Passkey sign-in failed on MongoDB with `decodedPublicKey.get is not a function`.** A registered
