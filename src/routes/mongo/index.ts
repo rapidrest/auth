@@ -12,6 +12,7 @@ export * from "./BaseOAuthClientRouteMongo.js";
 export * from "./BaseOAuthIntrospectRouteMongo.js";
 export * from "./BaseOAuthJwksRouteMongo.js";
 export * from "./BaseOAuthRevokeRouteMongo.js";
+export * from "./BaseOAuthSessionTokenRouteMongo.js";
 export * from "./BaseOAuthTokenRouteMongo.js";
 export * from "./BaseOAuthUserInfoRouteMongo.js";
 export * from "./BaseAuthPasskeyRouteMongo.js";

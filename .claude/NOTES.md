@@ -66,6 +66,41 @@ Keep entries terse — this is a reference, not a transcript.
 
 ## Session Log
 
+### 2026-09-27 (latest) — `BaseOAuthSessionTokenRoute`: trade an OAuth access token for a session JWT
+
+Added for `auth-server`'s new native `tauri-client` app — full rationale/design/testing writeup lives in
+`auth-server`'s own `.claude/NOTES.md` (2026-09-27 entry), since the driving need lives there; summary here for
+this repo's own future sessions. **Left uncommitted, pending review.**
+
+- New: `src/routes/BaseOAuthSessionTokenRoute.ts` (+ `mongo`/`sql` subclasses, exported from the usual
+  `routes/index.ts`/`routes/mongo/index.ts`/`routes/sql/index.ts` barrels). `@Auth(["oauth_bearer"])`-gated
+  (registers `OAuthBearerStrategy` under the fixed `"oauth_bearer"` name in its own `@Init`, exactly like
+  `BaseOAuthUserInfoRoute` — the two registrations are redundant-but-harmless whichever route's `@Init` runs
+  first, since `AuthMiddleware.register()` just (re)sets a map entry by name). Looks up the real `User` behind
+  the verified token's `sub` (`ignoreACL: true`, same as `BaseAuthRefreshRoute`), then calls
+  `TokenUtils.createAuthResult(user, this.defaultScopes, req)` — **no `res`** (never writes a cookie — this is
+  for a native app with no relevant cookie jar) and **no `authMethod`** (no new credential is actually verified
+  here, so — like `BaseAuthRefreshRoute`'s routine refresh — it must never fire `SIGNED_IN`). Returns only
+  `{ token }`, deliberately dropping `AuthResult.refresh` — the caller's long-term credential is its own OAuth
+  refresh token via the unmodified `/oauth/token` `refresh_token` grant.
+- Why this had to live in `auth`, not purely in `auth-server`: `TokenUtils`, `OAuthBearerStrategy`,
+  `OAuthTokenUtils` and `AccessTokenDenylist` are all internal to this package — none are exported from
+  `src/auth/index.ts`/`src/index.ts` (see `OAuthBearerStrategy`'s own doc comment, which calls this out
+  explicitly) — so a route needing any of them has to be defined here, mirroring `BaseOAuthUserInfoRoute`/
+  `BaseAuthRefreshRoute`/`BaseAuthBasicRoute`.
+- Tests: `test/routes/BaseOAuthSessionTokenRoute.test.ts` (isolated unit, real `TokenUtils`/`JWTUtils` round
+  trips — no mocked signing), `test/routes/{mongo,sql}/BaseOAuthSessionTokenRoute{Mongo,SQL}.test.ts` (trivial
+  model-binding), `test/routes/{mongo,sql}/OAuthSessionTokenRoute.test.ts` (full HTTP round trip via a real
+  authorize→token→exchange flow, mirroring `OAuthUserInfoAndDiscoveryRoute.test.ts`'s harness — valid/expired
+  (mocks `Date.now()`, not `vi.useFakeTimers()`, so the real Mongo/SQL connections' own timers aren't
+  disturbed)/revoked/malformed/missing-header/deleted-account cases). Full suite green (`yarn build`/`yarn
+  lint`/`yarn test`), including this file's own coverage.
+- Gotcha hit while writing the tests (left here so it isn't rediscovered): `TokenUtils.resolveTokenUser()` strips
+  every configured `trusted_roles` entry (default `["admin"]`) from any non-elevated token's `roles` regardless
+  of caller — same as every other plain sign-in route. Assert against an untrusted role (e.g. `"editor"`) when
+  proving a minted token carries the *real* account's roles, not `"admin"`, or the assertion fails for an
+  unrelated, pre-existing reason.
+
 ### 2026-09-23 (latest) — CSRF protection: `CsrfUtils` + the two special-case routes
 
 Ecosystem-wide CSRF fix, spanning `service-core` (the actual double-submit enforcement,

@@ -17,6 +17,7 @@ export * from "./BaseOAuthDiscoveryRoute.js";
 export * from "./BaseOAuthIntrospectRoute.js";
 export * from "./BaseOAuthJwksRoute.js";
 export * from "./BaseOAuthRevokeRoute.js";
+export * from "./BaseOAuthSessionTokenRoute.js";
 export * from "./BaseOAuthTokenRoute.js";
 export * from "./BaseOAuthUserInfoRoute.js";
 export * from "./BaseProfileRoute.js";

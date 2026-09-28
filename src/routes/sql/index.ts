@@ -12,6 +12,7 @@ export * from "./BaseOAuthClientRouteSQL.js";
 export * from "./BaseOAuthIntrospectRouteSQL.js";
 export * from "./BaseOAuthJwksRouteSQL.js";
 export * from "./BaseOAuthRevokeRouteSQL.js";
+export * from "./BaseOAuthSessionTokenRouteSQL.js";
 export * from "./BaseOAuthTokenRouteSQL.js";
 export * from "./BaseOAuthUserInfoRouteSQL.js";
 export * from "./BaseAuthPasskeyRouteSQL.js";
