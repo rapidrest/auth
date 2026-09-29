@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v2.0.0-beta.15
+
 ### Added
 
 * **`POST /oauth/session-token`** exchanges a presented OAuth 2.0 access token (`Authorization: Bearer`, verified the same way `/userinfo` does) for one of this library's own ordinary session JWTs - the same shape every other sign-in route (password/MFA/passkey/refresh/OIDC) already hands back. Built for a native app (e.g. `tauri-client`) that signs in through the standard OAuth 2.0 + PKCE flow (`/oauth/authorize`, `/oauth/token`) but also needs to call a deployment's ordinary, `JWTStrategy`-protected `/api/...` routes, which only ever accept a plain session `jwt`. Widening those routes to accept an OAuth bearer token directly was deliberately rejected - they live in `@rapidrest/service-core` (shared far beyond this library) and an OAuth access token carries no `roles` claim, so accepting it directly on a role-gated route would silently authorize as "no roles" instead of failing loudly. This route looks up the real `User` behind the token's `sub` and mints a normal session JWT carrying their actual `roles`. Sets no cookie (a native app has no cookie jar this should write into) and fires no `SIGNED_IN` audit entry (no new credential was actually checked here - see `TokenUtils.createAuthResult()`'s own doc comment).

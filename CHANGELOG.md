@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0-beta.15] - 2026-09-29
+
+### Added
+- Added POST /oauth/session-token, exchanging a validated OAuth access token for an ordinary session JWT via the same createAuthResult() every sign-in route already calls
+
+### Changed
+- Document why ordinary API routes were not widened to accept OAuth bearer tokens directly, in NOTES
+- Document the new POST /oauth/session-token route in RELEASE_NOTES
+
 ## [2.0.0-beta.14] - 2026-09-25
 
 ### Changed
@@ -272,7 +281,8 @@ tagged.
 - `PasskeyStrategy` - WebAuthn based passkey authentication
 - `TOTPStrategy` - RFC 6238 Time-Based One Time Password authentication (e.g. Google Authenticator, etc.)
 
-[Unreleased]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.14...HEAD
+[Unreleased]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.15...HEAD
+[2.0.0-beta.15]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.14...v2.0.0-beta.15
 [2.0.0-beta.14]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.13...v2.0.0-beta.14
 [2.0.0-beta.13]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.12...v2.0.0-beta.13
 [2.0.0-beta.12]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.11...v2.0.0-beta.12
