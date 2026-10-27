@@ -876,3 +876,15 @@ Why: meet-plugin 0.4.2 and booking-plugin 0.5.2 were cut as patches after web-cl
 ### 2026-10-26 - Publish gate: only the tag's own Build, and only once every Build of its commit is green
 
 A release pushes `main` and its tag at the same commit, and each push runs Build. The old Publish ran after *any* green Build of a tagged commit, so a failed tag Build (activesync v1.2.0) or a failed `main` Build (web-client v0.37.0) didn't stop the release, and the second Publish run always failed as a duplicate. `.github/workflows/publish.yml`'s `check` job (ported from activesync 9c0f71d, where it was verified on the 1.2.1 release) now runs only for a tag push's Build (`head_branch` starting with `v`), checks the tag points at the commit on `main`, then polls the Build workflow's runs for that `head_sha` until all have finished, refusing if any did not succeed; a green rerun triggers Publish again. `check` has `actions: read`, `contents: read`; `publish` keeps its own steps and just `needs: check`.
+
+## Agent model assignments (JP, 2026-10-28)
+
+Standing rule for every AI agent working on this project (applies to all RapidMX and RapidREST repositories):
+
+| Kind of work | Model |
+|---|---|
+| Design (specs, plans, architecture proposals) | Opus 5.5 (`claude-opus-5-5`) |
+| Architectural review | Opus 5.5 (`claude-opus-5-5`) |
+| Code review (finding and verifying defects in diffs or code) | Sonnet 5.5 (`claude-sonnet-5-5`) |
+| Fixes (implementing review findings and other code changes) | Sonnet 5.5 (`claude-sonnet-5-5`) |
+| Simple operations (file operations, renames, project initialization and similar mechanical tasks) | Haiku 5.5 (`claude-haiku-5-5`) |
