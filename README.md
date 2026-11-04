@@ -7,8 +7,9 @@
 A library for implementing a complete authentication server with [RapidREST](https://rapidrest.dev). It
 provides the data models, persistence adapters, and HTTP routes needed to register and authenticate users via
 password, TOTP, OTP (email/SMS/WhatsApp), WebAuthn passkeys, FIDO2 hardware security keys, multi-factor authentication, and
-OpenID Connect / OAuth 2.0. Using this library you can stand up a fully featured authorization server by writing
-configuration and a handful of one-line route classes.
+sign-in through upstream OpenID Connect / OAuth 2.0 providers. It can also act as an OpenID Connect-conformant OAuth 2.0
+authorization server for your own applications. Using this library you can stand up a fully featured authorization
+server by writing configuration and a handful of one-line route classes.
 
 For complete documentation please visit [RapidREST.dev](https://rapidrest.dev).
 
@@ -19,7 +20,8 @@ For complete documentation please visit [RapidREST.dev](https://rapidrest.dev).
 * `BasicStrategy` - Simple id and password authentication
 * `FIDO2Strategy` - FIDO2/WebAuthn hardware based authentication (e.g. YubiKey)
 * `MFAStrategy` - Simple id and password + 2FA authentication [fido2|otp|recovery-code|totp]
-* `OIDCStrategy` - OAuth 2.0 & OpenID Connect authentication
+* `OAuthBearerStrategy` - Verifies an OAuth 2.0 access token issued by this library's own authorization server (`Authorization: Bearer`)
+* `OIDCStrategy` - OAuth 2.0 & OpenID Connect authentication against an upstream identity provider
 * `OTPStrategy` - One-Time Password (OTP) authentication (e.g. email, sms, whatsapp)
 * `PasskeyStrategy` - WebAuthn based passkey authentication
 * `TOTPStrategy` - RFC 6238 Time-Based One Time Password authentication (e.g. Google Authenticator, etc.)
@@ -35,7 +37,9 @@ For complete documentation please visit [RapidREST.dev](https://rapidrest.dev).
 * Session revocation ("log out everywhere") that invalidates every outstanding refresh token for an account
 * Optional TOTP secret encryption at rest (AES-256-GCM)
 * Configurable Argon2 password hashing cost parameters
-* Client-side pre-hashed (Argon2id) password support, alongside plaintext, so a capable client's real password never reaches the server
+* Client-side pre-hashed (Argon2id) password support, alongside plaintext, so a capable client's real password never reaches the server (accepts any Argon2 library's PHC parameter order)
+* Password policy: one password per account unless the `allowMultiplePasswords` system setting is on; administrators can require a password change (`User.passwordChangeRequired`) and grant or remove an account holder's rights on a password they set (`allowUserChange`)
+* Impersonation, letting a trusted user temporarily act as another account without its credentials, recorded in the audit log
 * Secure, `HttpOnly` cookies by default when cookie-based token issuance is enabled
 * CSRF protection (`CsrfUtils`) — a host-only double-submit `csrf` cookie rotated alongside `jwt`/`refresh` at login/refresh/elevation and cleared at logout; enforcement is in `@rapidrest/service-core`'s `RouteUtils.checkCsrf()`, applied automatically to every cookie-authenticated, state-changing request
 * Default account provisioning on startup, with configuration-driven role/verification sync
@@ -49,6 +53,12 @@ with either `Mongo` or `SQL` at the end of the name (e.g. `Alias` becomes `Alias
 * `Alias` - Describes an alternate identifying name (aka: alias) for a user account (e.g. email, phone, third-party OAuth ID)
 * `Secret` - Stores secrets used to authenticate user accounts (e.g. `app-password`, `fido2`, `passkey`, `password`, `totp`, `recovery-codes` secrets). Tracks `lastUsedAt`, the last time the secret successfully authenticated (unset if never)
 * `Profile` - Stores additional, personally identifying, information about a user (e.g. birthdate, legal name, verified contacts, preferences)
+* `SystemSettings` - Runtime-editable deployment settings (e.g. `allowRegistration`, `allowMultiplePasswords`, `requireMFA`)
+* `Client` - A registered OAuth 2.0 / OpenID Connect application this server issues tokens to
+* `AuthorizationCode` - A short-lived authorization code issued by the `/authorize` endpoint
+* `ConsentGrant` - A user's recorded consent to the scopes a client requested
+* `OAuthRefreshToken` - A refresh token issued to an OAuth client
+* `SigningKey` - A rotating key used to sign OAuth access and ID tokens, published via the JWKS endpoint
 
 ### Route Handlers
 
@@ -80,7 +90,21 @@ with either `Mongo` or `SQL` at the end of the name (e.g. `BaseAliasRoute` becom
 * `BaseAuthElevationRoute` - Issues a step-up (elevated) token after re-verifying identity, required for `@RequiresElevation`-gated actions
 * `BaseAuthLogoutRoute` - Clears the authentication cookie, if cookie-based token issuance is enabled
 * `BaseAuthRefreshRoute` - Issues a new access token from a valid refresh token
+* `BaseImpersonationRoute` - Lets a trusted user start and stop impersonating another account
 * `BaseRegistrationRoute` - Self-service account registration via OTP-verified email or phone
+* `BaseSettingsRoute` - Reads and updates `SystemSettings`
+
+#### OAuth 2.0 / OpenID Connect Authorization Server
+
+* `BaseOAuthAuthorizeRoute` - The `/authorize` endpoint (authorization code flow with PKCE) and the consent decision that may follow it
+* `BaseOAuthTokenRoute` - The `/token` endpoint (`authorization_code`, `refresh_token` and `client_credentials` grants)
+* `BaseOAuthClientRoute` - Owner/admin CRUD for registered `Client` applications
+* `BaseOAuthDiscoveryRoute` - Authorization server metadata (RFC 8414 / OIDC Discovery)
+* `BaseOAuthJwksRoute` - The public JSON Web Key Set (RFC 7517)
+* `BaseOAuthUserInfoRoute` - The OIDC `/userinfo` endpoint
+* `BaseOAuthIntrospectRoute` - Token introspection (RFC 7662)
+* `BaseOAuthRevokeRoute` - Token revocation (RFC 7009)
+* `BaseOAuthSessionTokenRoute` - Exchanges an OAuth access token for an ordinary session JWT, for native apps that sign in through OAuth but call ordinary API routes
 
 #### App passwords
 
@@ -173,7 +197,7 @@ dependencies are optional and only need to be installed if you use the correspon
 | --- | --- |
 | `@rapidrest/core` | Always |
 | `@rapidrest/service-core` | Always |
-| `argon2` | Password (`Basic`, `MFA`) secrets — password hashing |
+| `argon2` | Password, app password and recovery code secrets — hashing |
 | `otplib` | `TOTP`, `OTP`, and `MFA` secrets/strategies |
 | `@simplewebauthn/server` | `Passkey` and `FIDO2` strategies |
 | `jwks-rsa` | Verifying `OIDC` providers that publish a JWKS endpoint |
