@@ -132,8 +132,11 @@ export abstract class DefaultAccounts<
             // was specified we do not overwrite it. We assume it was intentional.
             account.roles = account.roles !== undefined ? account.roles : this.trustedRoles;
 
-            // First check if there is an existing account for the given name
-            const aliases: A[] = (await this.aliasRepo!.find({ alias: account.name }, { ignoreACL: true })) ?? [];
+            // First check if there is an existing account for the given name. Aliases are always stored
+            // trimmed and lower-cased, so the lookup must normalize the same way or a name like "Admin"
+            // would never be found again and a new user would be created on every restart.
+            const name: string = account.name.trim().toLowerCase();
+            const aliases: A[] = (await this.aliasRepo!.find({ alias: name }, { ignoreACL: true })) ?? [];
             let user: U | undefined =
                 aliases.length > 0 ? await this.userRepo!.findOne(aliases[0].userUid, { ignoreACL: true }) : undefined;
             if (!user) {
@@ -160,6 +163,26 @@ export abstract class DefaultAccounts<
                         ],
                     },
                 });
+
+                // The name alias is the only way this account is found again on the next start, so it must
+                // exist before anything else can fail. If it can't be created, remove the user we just made
+                // rather than leave an orphan that would be duplicated on every restart. Everything after this
+                // point is idempotent and picked up again by `syncAccount()` on the next start.
+                if (name) {
+                    try {
+                        await this.aliasRepo!.create(
+                            { alias: name, type: AliasType.NAME, userUid: user.uid, verified: true } as any,
+                            { user }
+                        );
+                    } catch (err) {
+                        try {
+                            await this.userRepo!.delete(user.uid, { ignoreACL: true, user });
+                        } catch (cleanupErr) {
+                            this.logger?.error(`Failed to remove user ${user.uid} after an alias error`, cleanupErr);
+                        }
+                        throw err;
+                    }
+                }
             } else {
                 // Re-sync roles/verified for an already-provisioned account on every restart, matching the
                 // profile/alias/secret sync below - without this, a config change to
@@ -168,7 +191,7 @@ export abstract class DefaultAccounts<
                 user = await this.userRepo!.update(
                     { uid: user.uid, version: user.version, roles: account.roles, verified: true } as any,
                     user,
-                    { user },
+                    { user }
                 );
             }
 
@@ -183,8 +206,14 @@ export abstract class DefaultAccounts<
     }
 
     private async syncAccount(user: User, account: DefaultAccountConfig) {
+        // `Profile.contacts` is gated by `@RequiresScope("profile:contacts")`, which `RepoUtils` applies to
+        // everything it returns, even with `ignoreACL`. A user with no scopes would get `contacts` stripped
+        // from the profile it just created (or read), and writing it back would erase the stored contacts, so
+        // the profile is handled with the scopes this trusted startup job is entitled to.
+        const profileUser: User = { ...user, scopes: ["profile:contacts", "profile:preferences"] };
+
         // Create a profile for the user if one does not already exist
-        let profile: P | undefined = await this.profileRepo!.findOne(user.uid, { ignoreACL: true, user });
+        let profile: P | undefined = await this.profileRepo!.findOne(user.uid, { ignoreACL: true, user: profileUser });
         if (!profile) {
             profile = await this.profileRepo!.create(
                 new this.profileClass({
@@ -193,15 +222,16 @@ export abstract class DefaultAccounts<
                     givenName: "Administrator",
                 }),
                 {
-                    user,
-                },
+                    user: profileUser,
+                }
             );
         }
         // Now merge all configured contacts with the profile
         if (profile) {
+            profile.contacts = profile.contacts ?? [];
             if (account.email) {
                 const emails: Contact[] = profile.contacts.filter(
-                    (c) => c.type === ContactType.EMAIL && c.contact === account.email!.toLowerCase(),
+                    (c) => c.type === ContactType.EMAIL && c.contact === account.email!.toLowerCase()
                 );
                 if (emails.length === 0) {
                     profile?.contacts.push({
@@ -213,7 +243,7 @@ export abstract class DefaultAccounts<
             }
             if (account.phone) {
                 const phones: Contact[] = profile.contacts.filter(
-                    (c) => c.type === ContactType.PHONE && c.contact === account.phone,
+                    (c) => c.type === ContactType.PHONE && c.contact === account.phone
                 );
                 if (phones.length === 0) {
                     profile?.contacts.push({
@@ -230,7 +260,7 @@ export abstract class DefaultAccounts<
                     contacts: profile.contacts,
                 } as any,
                 profile,
-                { user },
+                { user: profileUser }
             );
         }
 
@@ -245,7 +275,7 @@ export abstract class DefaultAccounts<
                     { alias: email, type: AliasType.EMAIL, userUid: user.uid, verified: true } as any,
                     {
                         user,
-                    },
+                    }
                 );
             }
         }
@@ -257,7 +287,7 @@ export abstract class DefaultAccounts<
                     { alias: name, type: AliasType.NAME, userUid: user.uid, verified: true } as any,
                     {
                         user,
-                    },
+                    }
                 );
             }
         }
@@ -269,7 +299,7 @@ export abstract class DefaultAccounts<
                     { alias: phone, type: AliasType.PHONE, userUid: user.uid, verified: true } as any,
                     {
                         user,
-                    },
+                    }
                 );
             }
         }
@@ -279,7 +309,7 @@ export abstract class DefaultAccounts<
         let pwCreated: boolean = false;
         const passwords: S[] = await this.secretRepo!.find(
             { type: SecretType.PASSWORD, userUid: user.uid },
-            { ignoreACL: true },
+            { ignoreACL: true }
         );
         if (passwords.length === 0) {
             if (!account.password) {
@@ -316,7 +346,7 @@ export abstract class DefaultAccounts<
                     `Name=${account.name},Password=${account.password},Roles=${account.roles}\n`,
                     {
                         encoding: "utf-8",
-                    },
+                    }
                 );
                 this.logger.info(`Name: ${account.name}`);
                 this.logger.info(`Password: See '${filePath}'`);

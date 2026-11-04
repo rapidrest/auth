@@ -68,7 +68,7 @@ function setupDefaultAccounts(
         profileRepo?: any;
         secretRepo?: any;
         userRepo?: any;
-    } = {},
+    } = {}
 ) {
     const job = new TestDefaultAccounts();
     (job as any).defaultAccounts = accounts;
@@ -116,7 +116,9 @@ describe("DefaultAccounts Tests", () => {
 
         it("Creates alias/profile/secret/user repos via the object factory when unset.", async () => {
             const job = new TestDefaultAccounts();
-            const newInstance = vi.fn().mockImplementation((_ctor: any, opts: any) => Promise.resolve({ name: opts.name }));
+            const newInstance = vi
+                .fn()
+                .mockImplementation((_ctor: any, opts: any) => Promise.resolve({ name: opts.name }));
             (job as any)._objectFactory = { newInstance };
 
             await (job as any).init();
@@ -202,7 +204,7 @@ describe("DefaultAccounts Tests", () => {
                 expect(accounts[0].roles).toEqual(["admin", "superuser"]);
                 expect((job as any).userRepo.create).toHaveBeenCalledWith(
                     expect.objectContaining({ roles: ["admin", "superuser"] }),
-                    expect.anything(),
+                    expect.anything()
                 );
             });
 
@@ -215,7 +217,7 @@ describe("DefaultAccounts Tests", () => {
                 expect(accounts[0].roles).toEqual([]);
                 expect((job as any).userRepo.create).toHaveBeenCalledWith(
                     expect.objectContaining({ roles: [] }),
-                    expect.anything(),
+                    expect.anything()
                 );
             });
 
@@ -261,6 +263,107 @@ describe("DefaultAccounts Tests", () => {
                         },
                     ],
                 });
+            });
+
+            it("Looks up the existing alias using the same trimmed, lower-cased form it is stored in.", async () => {
+                const accounts: DefaultAccountConfig[] = [{ name: " Admin ", password: VALID_PASSWORD }];
+                const job = setupDefaultAccounts(accounts);
+
+                await job.start();
+
+                expect((job as any).aliasRepo.find).toHaveBeenCalledWith({ alias: "admin" }, { ignoreACL: true });
+            });
+
+            it("Removes the new user and rethrows when its name alias can't be created.", async () => {
+                const userDelete = vi.fn().mockResolvedValue(undefined);
+                const job = setupDefaultAccounts([{ name: "admin", password: VALID_PASSWORD }], {
+                    aliasRepo: {
+                        find: vi.fn().mockResolvedValue([]),
+                        create: vi.fn().mockRejectedValue(new Error("alias down")),
+                    },
+                    userRepo: {
+                        findOne: vi.fn(),
+                        create: vi.fn().mockResolvedValue({ uid: "user-1", roles: ["admin"] }),
+                        delete: userDelete,
+                    },
+                });
+
+                await expect(job.start()).rejects.toThrow("alias down");
+
+                expect(userDelete).toHaveBeenCalledWith("user-1", expect.objectContaining({ ignoreACL: true }));
+            });
+
+            it("Still rethrows the original error when removing the new user also fails.", async () => {
+                const error = vi.fn();
+                const job = setupDefaultAccounts([{ name: "admin", password: VALID_PASSWORD }], {
+                    logger: { info: vi.fn(), error },
+                    aliasRepo: {
+                        find: vi.fn().mockResolvedValue([]),
+                        create: vi.fn().mockRejectedValue(new Error("alias down")),
+                    },
+                    userRepo: {
+                        findOne: vi.fn(),
+                        create: vi.fn().mockResolvedValue({ uid: "user-1", roles: ["admin"] }),
+                        delete: vi.fn().mockRejectedValue(new Error("delete down")),
+                    },
+                });
+
+                await expect(job.start()).rejects.toThrow("alias down");
+
+                expect(error).toHaveBeenCalled();
+            });
+
+            it("Works without a logger when removing the new user fails.", async () => {
+                const job = setupDefaultAccounts([{ name: "admin", password: VALID_PASSWORD }], {
+                    aliasRepo: {
+                        find: vi.fn().mockResolvedValue([]),
+                        create: vi.fn().mockRejectedValue(new Error("alias down")),
+                    },
+                    userRepo: {
+                        findOne: vi.fn(),
+                        create: vi.fn().mockResolvedValue({ uid: "user-1", roles: ["admin"] }),
+                        delete: vi.fn().mockRejectedValue(new Error("delete down")),
+                    },
+                });
+                (job as any).logger = undefined;
+
+                await expect(job.start()).rejects.toThrow("alias down");
+            });
+
+            it("Reads and writes the profile with the scopes needed to see and keep its contacts.", async () => {
+                const profileFindOne = vi.fn().mockResolvedValue(makeProfile());
+                const profileUpdate = vi.fn().mockResolvedValue(undefined);
+                const job = setupDefaultAccounts([{ name: "admin", email: "a@b.c", password: VALID_PASSWORD }], {
+                    profileRepo: { findOne: profileFindOne, create: vi.fn(), update: profileUpdate },
+                });
+
+                await job.start();
+
+                const scopes = expect.arrayContaining(["profile:contacts"]);
+                expect(profileFindOne).toHaveBeenCalledWith("user-1", {
+                    ignoreACL: true,
+                    user: expect.objectContaining({ uid: "user-1", scopes }),
+                });
+                expect(profileUpdate).toHaveBeenCalledWith(expect.anything(), expect.anything(), {
+                    user: expect.objectContaining({ scopes }),
+                });
+            });
+
+            it("Treats a profile that has no contacts as having none.", async () => {
+                const profileUpdate = vi.fn().mockResolvedValue(undefined);
+                const job = setupDefaultAccounts([{ name: "admin", email: "A@B.c", password: VALID_PASSWORD }], {
+                    profileRepo: {
+                        findOne: vi.fn().mockResolvedValue({ uid: "user-1", version: 1 }),
+                        create: vi.fn(),
+                        update: profileUpdate,
+                    },
+                });
+
+                await job.start();
+
+                expect(profileUpdate.mock.calls[0][0].contacts).toEqual([
+                    { contact: "a@b.c", type: ContactType.EMAIL, verified: true },
+                ]);
             });
 
             it("Looks up an existing alias for the account name before deciding whether to create a user.", async () => {
@@ -311,7 +414,9 @@ describe("DefaultAccounts Tests", () => {
                 });
                 const existingUser = { uid: "existing-1", version: 3, roles: ["admin"], verified: false };
                 const userFindOne = vi.fn().mockResolvedValue(existingUser);
-                const userUpdate = vi.fn().mockResolvedValue({ ...existingUser, roles: ["admin", "superuser"], verified: true });
+                const userUpdate = vi
+                    .fn()
+                    .mockResolvedValue({ ...existingUser, roles: ["admin", "superuser"], verified: true });
                 const job = setupDefaultAccounts(accounts, {
                     aliasRepo: { find: aliasFind, create: vi.fn().mockResolvedValue(undefined) },
                     userRepo: { findOne: userFindOne, create: vi.fn(), update: userUpdate },
@@ -322,7 +427,7 @@ describe("DefaultAccounts Tests", () => {
                 expect(userUpdate).toHaveBeenCalledWith(
                     { uid: "existing-1", version: 3, roles: ["admin", "superuser"], verified: true },
                     existingUser,
-                    { user: existingUser },
+                    { user: existingUser }
                 );
             });
 
@@ -349,9 +454,11 @@ describe("DefaultAccounts Tests", () => {
             it("Treats a nullish alias lookup result as no existing alias and creates a new user.", async () => {
                 const accounts: DefaultAccountConfig[] = [{ name: "admin", password: VALID_PASSWORD }];
                 const userCreate = vi.fn().mockResolvedValue({ uid: "user-1", roles: ["admin"] });
-                const aliasFind = vi.fn().mockImplementation((query: any) =>
-                    "alias" in query ? Promise.resolve(undefined) : Promise.resolve([]),
-                );
+                const aliasFind = vi
+                    .fn()
+                    .mockImplementation((query: any) =>
+                        "alias" in query ? Promise.resolve(undefined) : Promise.resolve([])
+                    );
                 const job = setupDefaultAccounts(accounts, {
                     aliasRepo: { find: aliasFind, create: vi.fn().mockResolvedValue(undefined) },
                     userRepo: { findOne: vi.fn(), create: userCreate },
@@ -398,7 +505,7 @@ describe("DefaultAccounts Tests", () => {
                 expect(profileCreate).toHaveBeenCalledTimes(1);
                 const [newProfile] = profileCreate.mock.calls[0];
                 expect(newProfile).toEqual(
-                    expect.objectContaining({ uid: "user-1", contacts: [], givenName: "Administrator" }),
+                    expect.objectContaining({ uid: "user-1", contacts: [], givenName: "Administrator" })
                 );
             });
 
@@ -513,7 +620,7 @@ describe("DefaultAccounts Tests", () => {
 
                 expect(aliasCreate).toHaveBeenCalledWith(
                     { alias: "admin", type: AliasType.NAME, userUid: "user-1", verified: true },
-                    { user: expect.anything() },
+                    { user: expect.anything() }
                 );
             });
 
@@ -528,11 +635,11 @@ describe("DefaultAccounts Tests", () => {
 
                 expect(aliasCreate).not.toHaveBeenCalledWith(
                     expect.objectContaining({ type: AliasType.NAME }),
-                    expect.anything(),
+                    expect.anything()
                 );
             });
 
-            it("Skips creating a name alias when one already exists.", async () => {
+            it("Creates the name alias only once when it already exists for the new user by the time sync runs.", async () => {
                 const aliasCreate = vi.fn().mockResolvedValue(undefined);
                 const accounts: DefaultAccountConfig[] = [{ name: "admin", password: VALID_PASSWORD }];
                 const job = setupDefaultAccounts(accounts, {
@@ -542,7 +649,7 @@ describe("DefaultAccounts Tests", () => {
                             .mockImplementation((query: any) =>
                                 "alias" in query
                                     ? Promise.resolve([])
-                                    : Promise.resolve([{ type: AliasType.NAME, alias: "admin" }]),
+                                    : Promise.resolve([{ type: AliasType.NAME, alias: "admin" }])
                             ),
                         create: aliasCreate,
                     },
@@ -550,10 +657,8 @@ describe("DefaultAccounts Tests", () => {
 
                 await job.start();
 
-                expect(aliasCreate).not.toHaveBeenCalledWith(
-                    expect.objectContaining({ type: AliasType.NAME }),
-                    expect.anything(),
-                );
+                // Only the anchor alias written right after the user was created; sync adds no second one.
+                expect(aliasCreate.mock.calls.filter((c: any[]) => c[0].type === AliasType.NAME)).toHaveLength(1);
             });
 
             it("Creates a missing email alias, trimmed and lowercased, when an email is configured.", async () => {
@@ -569,7 +674,7 @@ describe("DefaultAccounts Tests", () => {
 
                 expect(aliasCreate).toHaveBeenCalledWith(
                     { alias: "admin@example.com", type: AliasType.EMAIL, userUid: "user-1", verified: true },
-                    { user: expect.anything() },
+                    { user: expect.anything() }
                 );
             });
 
@@ -585,7 +690,7 @@ describe("DefaultAccounts Tests", () => {
                             .mockImplementation((query: any) =>
                                 "alias" in query
                                     ? Promise.resolve([])
-                                    : Promise.resolve([{ type: AliasType.EMAIL, alias: "admin@example.com" }]),
+                                    : Promise.resolve([{ type: AliasType.EMAIL, alias: "admin@example.com" }])
                             ),
                         create: aliasCreate,
                     },
@@ -595,7 +700,7 @@ describe("DefaultAccounts Tests", () => {
 
                 expect(aliasCreate).not.toHaveBeenCalledWith(
                     expect.objectContaining({ type: AliasType.EMAIL }),
-                    expect.anything(),
+                    expect.anything()
                 );
             });
 
@@ -612,7 +717,7 @@ describe("DefaultAccounts Tests", () => {
 
                 expect(aliasCreate).toHaveBeenCalledWith(
                     { alias: "555-1234", type: AliasType.PHONE, userUid: "user-1", verified: true },
-                    { user: expect.anything() },
+                    { user: expect.anything() }
                 );
             });
 
@@ -628,7 +733,7 @@ describe("DefaultAccounts Tests", () => {
                             .mockImplementation((query: any) =>
                                 "alias" in query
                                     ? Promise.resolve([])
-                                    : Promise.resolve([{ type: AliasType.PHONE, alias: "555-1234" }]),
+                                    : Promise.resolve([{ type: AliasType.PHONE, alias: "555-1234" }])
                             ),
                         create: aliasCreate,
                     },
@@ -638,7 +743,7 @@ describe("DefaultAccounts Tests", () => {
 
                 expect(aliasCreate).not.toHaveBeenCalledWith(
                     expect.objectContaining({ type: AliasType.PHONE }),
-                    expect.anything(),
+                    expect.anything()
                 );
             });
         });
@@ -680,7 +785,7 @@ describe("DefaultAccounts Tests", () => {
                 const canonical = await shared.normalizePasswordSubmission(
                     VALID_PASSWORD,
                     "user-1",
-                    new PasswordConfig(),
+                    new PasswordConfig()
                 );
                 await expect(argon2.verify(secret.data, canonical)).resolves.toBe(true);
             });
@@ -760,7 +865,7 @@ describe("DefaultAccounts Tests", () => {
 
                 const loggedLines = logger.info.mock.calls.map((call: any[]) => call[0]);
                 expect(loggedLines).toEqual(
-                    expect.arrayContaining([`Name: admin`, `Password: '${VALID_PASSWORD}'`, `Roles: admin`]),
+                    expect.arrayContaining([`Name: admin`, `Password: '${VALID_PASSWORD}'`, `Roles: admin`])
                 );
             });
         });
