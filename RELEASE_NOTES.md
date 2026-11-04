@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v2.0.0
+
 ### Changed
 
 * **`@rapidrest/core` peer dependency is now `6.x`** (was `5.x`). Features such as WhatsApp delivery via
