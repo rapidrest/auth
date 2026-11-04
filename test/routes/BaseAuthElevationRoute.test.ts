@@ -1608,12 +1608,19 @@ describe("BaseAuthElevationRoute Tests", () => {
             const route = new TestAuthElevationRoute();
             const argon2 = await import("argon2");
             const shared = await import("../../src/auth/shared.js");
+            const { PasswordConfig } = await import("../../src/auth/types.js");
             const clientHash = await argon2.hash("correct-password", {
                 salt: shared.deriveClientSalt("user-uid-1"),
                 ...shared.CLIENT_ARGON2_PARAMS,
             });
+            // Stored as a plaintext registration would have stored it, so this also proves cross-mode login.
+            const canonical = await shared.normalizePasswordSubmission(
+                "correct-password",
+                "user-uid-1",
+                new PasswordConfig(),
+            );
             (route as any).secretRepo = {
-                find: vi.fn().mockResolvedValue([{ data: await argon2.hash(clientHash) }]),
+                find: vi.fn().mockResolvedValue([{ data: await argon2.hash(canonical) }]),
             };
             (route as any).userUtils = { lookup: vi.fn().mockResolvedValue({ uid: "user-uid-1" }) };
 

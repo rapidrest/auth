@@ -779,7 +779,7 @@ describe("BaseSecretRoute Tests", () => {
 
             await (route as any).validateCreate(obj, {} as any, { uid: "user-1" });
 
-            expect(obj.data).toContain("m=1024,p=1,t=2");
+            expect(obj.data).toMatch(/\$m=1024,(p=1,t=2|t=2,p=1)\$/);
         });
 
         // Proves the dual-mode requirement end to end: a capable client submitting its own locally-computed
@@ -798,7 +798,13 @@ describe("BaseSecretRoute Tests", () => {
 
             expect(obj.data).not.toBe(clientHash);
             expect(typeof obj.data).toBe("string");
-            await expect((await import("argon2")).verify(obj.data, clientHash)).resolves.toBe(true);
+            // A later plaintext login normalizes to the same canonical value the client hash did.
+            const canonical = await shared.normalizePasswordSubmission(
+                "way-too-short",
+                "user-1",
+                new PasswordConfig(),
+            );
+            await expect((await import("argon2")).verify(obj.data, canonical)).resolves.toBe(true);
         });
 
         it("Rejects a client-hashed PASSWORD secret whose embedded cost parameters fall below the configured floor.", async () => {
@@ -1747,7 +1753,7 @@ describe("BaseSecretRoute Tests", () => {
 
             await (route as any).validateRecoveryCodesCreate(obj, req);
 
-            expect(obj.data.codes[0].hash).toContain("m=1024,p=1,t=2");
+            expect(obj.data.codes[0].hash).toMatch(/\$m=1024,(p=1,t=2|t=2,p=1)\$/);
         });
     });
 
@@ -1863,7 +1869,7 @@ describe("BaseSecretRoute Tests", () => {
 
             await (route as any).validateAppPasswordCreate(obj, req);
 
-            expect(obj.data).toContain("m=1024,p=1,t=2");
+            expect(obj.data).toMatch(/\$m=1024,(p=1,t=2|t=2,p=1)\$/);
         });
     });
 
@@ -2153,7 +2159,9 @@ describe("BaseSecretRoute Tests", () => {
             await (route as any).validateUpdate(obj, existing, { uid: "u1" });
 
             expect(obj.data).not.toBe(clientHash);
-            await expect((await import("argon2")).verify(obj.data, clientHash)).resolves.toBe(true);
+            // A later plaintext login normalizes to the same canonical value the client hash did.
+            const canonical = await shared.normalizePasswordSubmission("way-too-short", "u1", new PasswordConfig());
+            await expect((await import("argon2")).verify(obj.data, canonical)).resolves.toBe(true);
         });
 
         it("Throws for a PASSWORD secret update with non-string data.", async () => {

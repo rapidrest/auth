@@ -1089,21 +1089,77 @@ export const deriveClientSalt = function (userUid: string): Buffer {
 };
 
 /**
- * Matches the PHC-encoded string `argon2.hash()` produces for an argon2id hash, e.g.
- * `$argon2id$v=19$m=19456,p=1,t=2$<salt>$<hash>`. Used to distinguish an already client-hashed password
+ * Matches the PHC-encoded string an Argon2 implementation produces for an argon2id hash, e.g.
+ * `$argon2id$v=19$m=19456,t=2,p=1$<salt>$<hash>`. Used to distinguish an already client-hashed password
  * submission from a raw plaintext one — deliberately based on the value's own structure rather than a
  * client-supplied flag, since a flag could be lied about (tagging a weak plaintext string as "already
  * hashed" to dodge `validatePassword()`'s strength checks) whereas a value can't be faked into this shape
  * without also failing `normalizePasswordSubmission()`'s cost-parameter floor check below.
+ *
+ * The parameter segment is captured whole and validated by `parseClientHash()`, since implementations
+ * disagree on its order: the reference implementation (and `argon2` >= 0.45.2) emits `m,t,p`, while
+ * earlier `argon2` releases emitted `m,p,t`.
  */
-const CLIENT_HASH_FORMAT_REGEX = /^\$argon2id\$v=\d+\$m=(\d+),p=(\d+),t=(\d+)\$[A-Za-z0-9+/]+\$[A-Za-z0-9+/]+$/;
+const CLIENT_HASH_FORMAT_REGEX = /^\$argon2id\$v=(\d+)\$([a-z]=\d+(?:,[a-z]=\d+)*)\$([A-Za-z0-9+/]+)\$([A-Za-z0-9+/]+)$/;
+
+interface ParsedClientHash {
+    version: string;
+    memoryCost: number;
+    timeCost: number;
+    parallelism: number;
+    salt: string;
+    hash: string;
+}
+
+/**
+ * Parses an argon2id PHC string whose parameter segment holds exactly `m`, `t` and `p` once each, in any
+ * order. Returns `undefined` for anything else.
+ */
+const parseClientHash = function (value: string): ParsedClientHash | undefined {
+    const match = CLIENT_HASH_FORMAT_REGEX.exec(value);
+    if (!match) {
+        return undefined;
+    }
+    const params: Record<string, number> = {};
+    for (const pair of match[2].split(",")) {
+        const [key, num] = pair.split("=");
+        if (!["m", "t", "p"].includes(key) || key in params) {
+            return undefined;
+        }
+        params[key] = Number(num);
+    }
+    if (Object.keys(params).length !== 3) {
+        return undefined;
+    }
+    return {
+        version: match[1],
+        memoryCost: params.m,
+        timeCost: params.t,
+        parallelism: params.p,
+        salt: match[3],
+        hash: match[4],
+    };
+};
+
+/**
+ * Re-serializes a parsed client hash into the one canonical string form fed to the server's own hash/verify.
+ * The submitted string itself is what gets hashed server-side, so two orderings of the same parameters would
+ * otherwise be two different passwords. The canonical order is `m,p,t` because every stored password secret
+ * was derived from that form (what `argon2` < 0.45.2 emitted); changing it would break every existing login.
+ */
+const canonicalizeClientHash = function (parsed: ParsedClientHash): string {
+    return (
+        `$argon2id$v=${parsed.version}$m=${parsed.memoryCost},p=${parsed.parallelism},t=${parsed.timeCost}` +
+        `$${parsed.salt}$${parsed.hash}`
+    );
+};
 
 /**
  * Returns whether `value` is structurally shaped like an argon2id PHC hash string, i.e. was very likely
  * produced by a client hashing its password locally rather than typed as a plaintext password.
  */
 export const isClientHashedFormat = function (value: string): boolean {
-    return CLIENT_HASH_FORMAT_REGEX.test(value);
+    return parseClientHash(value) !== undefined;
 };
 
 /**
@@ -1117,9 +1173,9 @@ export class WeakClientHashError extends Error {}
  * Normalizes a submitted password value to the canonical form that should be fed into the server's own
  * Argon2id hash (on create/change-password) or verify (on login) call, regardless of whether the
  * submitting client hashed it locally first:
- * - Already client-hashed (matches `isClientHashedFormat()`): returned unchanged, once its embedded
- * cost parameters are confirmed to meet `config`'s configured minimum (throws `WeakClientHashError`
- * otherwise).
+ * - Already client-hashed (matches `isClientHashedFormat()`): returned in canonical parameter order (see
+ * `canonicalizeClientHash()`), once its embedded cost parameters are confirmed to meet `config`'s configured
+ * minimum (throws `WeakClientHashError` otherwise).
  * - Raw plaintext: hashed here, using the same fixed salt derivation and parameters a capable client
  * would have used (`deriveClientSalt(userUid)` + `CLIENT_ARGON2_PARAMS`), so a legacy/incapable
  * client's submission normalizes to what a capable client's submission of the same password would have
@@ -1136,25 +1192,23 @@ export const normalizePasswordSubmission = async function (
     userUid: string,
     config: PasswordConfig,
 ): Promise<string> {
-    const match = CLIENT_HASH_FORMAT_REGEX.exec(value);
-    if (match) {
-        const memoryCost = Number(match[1]);
-        const parallelism = Number(match[2]);
-        const timeCost = Number(match[3]);
+    const parsed = parseClientHash(value);
+    if (parsed) {
         if (
-            memoryCost < config.client_hash_min_memory_cost ||
-            timeCost < config.client_hash_min_time_cost ||
-            parallelism < config.client_hash_min_parallelism
+            parsed.memoryCost < config.client_hash_min_memory_cost ||
+            parsed.timeCost < config.client_hash_min_time_cost ||
+            parsed.parallelism < config.client_hash_min_parallelism
         ) {
             throw new WeakClientHashError(
                 "Client-hashed password does not meet the minimum required Argon2id cost parameters.",
             );
         }
-        return value;
+        return canonicalizeClientHash(parsed);
     }
 
     const argon = await importArgon2();
-    return await argon.hash(value, { salt: deriveClientSalt(userUid), ...CLIENT_ARGON2_PARAMS });
+    const hashed: string = await argon.hash(value, { salt: deriveClientSalt(userUid), ...CLIENT_ARGON2_PARAMS });
+    return canonicalizeClientHash(parseClientHash(hashed)!);
 };
 
 /**

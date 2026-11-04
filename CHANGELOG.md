@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Fixed password login failing for every existing account under argon2 >= 0.45.2, which emits PHC parameters as m,t,p instead of m,p,t, by normalizing client hashes and plaintext submissions to one canonical m,p,t string
+- Fixed client-hashed passwords from argon2 libraries using the standard m,t,p order being treated as plaintext
+- Fixed DefaultAccounts creating a duplicate user on every restart
+- Fixed DefaultAccounts leaving an orphaned user when a seeded account has an email
+
+### Changed
+- Require @rapidrest/core 6.x as a peer dependency
+- Upgrade all dependencies
+
 ## [2.0.0-beta.15] - 2026-09-29
 
 ### Added

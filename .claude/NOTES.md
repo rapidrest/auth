@@ -85,7 +85,21 @@ Review (Sonnet) for security and performance topics.
 
 ## Session Log
 
-### 2026-09-27 (latest) — `BaseOAuthSessionTokenRoute`: trade an OAuth access token for a session JWT
+### 2026-11-04 (latest) — argon2 0.45.2 PHC parameter order broke client-hash normalization
+
+The dependency bump (argon2 0.45.1 → 0.45.2) changed PHC output from `m=,p=,t=` to the reference `m=,t=,p=`. That broke
+more than tests: `normalizePasswordSubmission()`'s output string is itself what the server argon2-hashes and stores,
+so the plaintext fallback producing a new order meant **every existing password would stop verifying**, and
+`CLIENT_HASH_FORMAT_REGEX` (hard-coded `m,p,t`) treated standard-order client hashes as plaintext.
+
+- Fix (`src/auth/shared.ts`): `parseClientHash()` accepts exactly `m`/`t`/`p` in any order; both branches
+  re-serialize via `canonicalizeClientHash()` to the **legacy `m,p,t` order**, the form all stored secrets were derived
+  from. Never change the canonical order without a migration.
+- `shared.test.ts` pins a known-answer vector (`CANONICAL_STR0NGPASS_USER_UID_1`) to guard it.
+- The server-side stored hash's own param order is irrelevant (`argon2.verify` parses either), so those test
+  assertions were made order-agnostic.
+
+### 2026-09-27 — `BaseOAuthSessionTokenRoute`: trade an OAuth access token for a session JWT
 
 Added for `auth-server`'s new native `tauri-client` app — full rationale/design/testing writeup lives in
 `auth-server`'s own `.claude/NOTES.md` (2026-09-27 entry), since the driving need lives there; summary here for

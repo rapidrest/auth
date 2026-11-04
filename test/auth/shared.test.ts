@@ -989,6 +989,20 @@ describe("isClientHashedFormat", () => {
     it("Returns false for an empty string.", () => {
         expect(isClientHashedFormat("")).toBe(false);
     });
+
+    it("Returns true regardless of the m/t/p parameter order.", () => {
+        expect(isClientHashedFormat("$argon2id$v=19$m=19456,p=1,t=2$c29tZXNhbHQ$aGFzaA")).toBe(true);
+        expect(isClientHashedFormat("$argon2id$v=19$m=19456,t=2,p=1$c29tZXNhbHQ$aGFzaA")).toBe(true);
+    });
+
+    it("Returns false unless the parameters are exactly m, t and p, once each.", () => {
+        // Unknown key.
+        expect(isClientHashedFormat("$argon2id$v=19$m=19456,t=2,x=1$c29tZXNhbHQ$aGFzaA")).toBe(false);
+        // Duplicate key.
+        expect(isClientHashedFormat("$argon2id$v=19$m=19456,t=2,t=1$c29tZXNhbHQ$aGFzaA")).toBe(false);
+        // Missing key.
+        expect(isClientHashedFormat("$argon2id$v=19$m=19456,t=2$c29tZXNhbHQ$aGFzaA")).toBe(false);
+    });
 });
 
 describe("deriveClientSalt", () => {
@@ -1025,20 +1039,22 @@ describe("normalizePasswordSubmission", () => {
         expect(a).not.toBe(b);
     });
 
-    it("Hashes plaintext using deriveClientSalt(userUid) and CLIENT_ARGON2_PARAMS.", async () => {
+    // Known-answer vector: every stored password secret is an argon2 hash OF this canonical string, so its exact
+    // bytes (including the m,p,t parameter order emitted by argon2 < 0.45.2) must never drift, whatever order
+    // the installed argon2 emits. A change here means every existing account's password stops verifying.
+    const CANONICAL_STR0NGPASS_USER_UID_1 =
+        "$argon2id$v=19$m=19456,p=1,t=2$d1RvgFSLVY/gcFrFMQYf7TrjYOXoUU849cB1knLBEXU" +
+        "$Ea0iGwuXEz/r9zJdpqb5bRd2EiT3JOjfBPsmjt3eMNA";
+
+    it("Hashes plaintext using deriveClientSalt(userUid) and CLIENT_ARGON2_PARAMS, in canonical m,p,t order.", async () => {
         const config = new PasswordConfig();
-        const argon2 = await import("argon2");
 
         const canonical = await normalizePasswordSubmission("Str0ngP@ss", "user-uid-1", config);
-        const expected = await argon2.hash("Str0ngP@ss", {
-            salt: deriveClientSalt("user-uid-1"),
-            ...CLIENT_ARGON2_PARAMS,
-        });
 
-        expect(canonical).toBe(expected);
+        expect(canonical).toBe(CANONICAL_STR0NGPASS_USER_UID_1);
     });
 
-    it("Returns an already client-hashed value unchanged when it meets the configured cost floor.", async () => {
+    it("Returns an already client-hashed value in canonical form when it meets the configured cost floor.", async () => {
         const config = new PasswordConfig();
         const argon2 = await import("argon2");
         const clientHash = await argon2.hash("Str0ngP@ss", {
@@ -1048,7 +1064,28 @@ describe("normalizePasswordSubmission", () => {
 
         const canonical = await normalizePasswordSubmission(clientHash, "user-uid-1", config);
 
-        expect(canonical).toBe(clientHash);
+        expect(canonical).toBe(CANONICAL_STR0NGPASS_USER_UID_1);
+    });
+
+    // A capable client may use any argon2 implementation; the reference order is m,t,p but older node-argon2
+    // emitted m,p,t. Both must normalize to the same canonical value, or the same password would only verify
+    // from clients whose library happens to match the one used at registration.
+    it("Normalizes a client hash to the same value regardless of its parameter order.", async () => {
+        const config = new PasswordConfig();
+        const [salt, hash] = CANONICAL_STR0NGPASS_USER_UID_1.split("$").slice(-2);
+        const mtp = `$argon2id$v=19$m=19456,t=2,p=1$${salt}$${hash}`;
+        const tpm = `$argon2id$v=19$t=2,p=1,m=19456$${salt}$${hash}`;
+
+        expect(await normalizePasswordSubmission(mtp, "user-uid-1", config)).toBe(CANONICAL_STR0NGPASS_USER_UID_1);
+        expect(await normalizePasswordSubmission(tpm, "user-uid-1", config)).toBe(CANONICAL_STR0NGPASS_USER_UID_1);
+    });
+
+    it("Throws WeakClientHashError for a below-floor client hash in m,t,p order too.", async () => {
+        const weakHash = "$argon2id$v=19$m=8,t=1,p=1$c29tZXNhbHQ$aGFzaA";
+
+        await expect(normalizePasswordSubmission(weakHash, "user-uid-1", new PasswordConfig())).rejects.toThrow(
+            WeakClientHashError,
+        );
     });
 
     it("Throws WeakClientHashError for a below-floor client-hashed value.", async () => {
@@ -1074,7 +1111,8 @@ describe("normalizePasswordSubmission", () => {
 
         const canonical = await normalizePasswordSubmission(strongerHash, "user-uid-1", config);
 
-        expect(canonical).toBe(strongerHash);
+        expect(canonical).toMatch(/^\$argon2id\$v=19\$m=65536,p=2,t=4\$/);
+        expect(canonical.split("$").slice(-2)).toEqual(strongerHash.split("$").slice(-2));
     });
 
     it("Honors a deployment-configured (non-default) cost floor.", async () => {

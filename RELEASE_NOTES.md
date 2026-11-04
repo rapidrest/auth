@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### Changed
+
+* **`@rapidrest/core` peer dependency is now `6.x`** (was `5.x`). Features such as WhatsApp delivery via
+  `MessagingUtils` already required 6.x; the declared peer range now says so.
+
+### Fixed
+
+* **Password sign-in failed for every existing account under `argon2` >= 0.45.2.** That release writes Argon2 hash
+  parameters as `m,t,p` instead of `m,p,t`, and the server hashes the normalized password string itself, so a
+  different order meant a different password. Plaintext and client-hashed submissions are now always normalized to one
+  canonical `m,p,t` string, the form all stored passwords were created from. No stored data changes.
+* **Client-hashed passwords using the standard `m,t,p` parameter order were treated as plaintext** and hashed again,
+  so they never matched. Client hashes are now recognized whatever their parameter order.
+* **Default account seeding created a duplicate user on every restart.** The name alias is now created right after
+  the user (removing the user if that fails), and the lookup is trimmed and lower-cased to match how aliases are stored.
+* **Default account seeding left an orphaned user when a seeded account had an email.** The profile is now read and
+  written with the `profile:contacts` and `profile:preferences` scopes, so its contacts are no longer stripped and erased.
+
 ## v2.0.0-beta.15
 
 ### Added
