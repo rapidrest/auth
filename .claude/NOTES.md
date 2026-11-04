@@ -454,7 +454,8 @@ Requested by JP for the auth-server (uses `@rapidrest/core` 6.x `MessagingUtils.
   codes stay e-mail/SMS — they have no request-side channel choice, target *unverified* contacts, and would need their own
   template fields; not trivial/safe to bolt on.
 - `peerDependencies["@rapidrest/core"]` still says `5.x` (the devDependency is 6.x); `sendWhatsApp` needs 6.x. Not
-  changed here (package.json is the release process's to touch) — flagged to JP.
+  changed here (package.json is the release process's to touch) — flagged to JP. **Resolved 2026-11-03** at JP's
+  request: peer is now `6.x` (and the `@rapidrest/service-core` devDependency `^2.4.0`), not yet released.
 
 ### 2026-09-10 — Client-side pre-hashed (Argon2id) password support, dual-mode
 
