@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-11-05
+
+### Added
+- Added alphanumeric sent one-time codes with a configurable length, alphabet, TTL and attempt limit under the new auth:otp config block
+- Added salted-hash challenge storage bound to a purpose and user so a code issued by one flow cannot complete another
+- Added dedicated Redis 7 compatible counters (OTPCounters) for issue, verify, user and per-code guess limits and the one-time claim of a success
+- Added per-address and contact-wide or user-wide verification limits (verify, verifyTotal, user, userTotal) alongside the issue limits
+- Added a startup check that refuses to start when the cache connection is older than Redis 7.0 or unreachable, and makes the counters fail closed on bad replies
+- Added a separate bounded in-process store for the counters instead of the shared memory store
+- Added mfaPendingUid so the password step of MFA no longer marks the session as signed in
+- Added signedInUid and signedInAt, written only by a completed sign-in and cleared on logout, and require them for OAuth authorize and consent
+- Added an abstract userClass and userRepo to BaseOAuthAuthorizeRoute so authorize can load the user
+- Added a first-party client check, audience check and client lookup to the OAuth session-token exchange
+- Added checkPendingRateLimit so MFA phases 2 and 3 are limited on a server-side mfa:<uid> key after the request is matched to the pending user
+- Added discriminating regression tests for consent, MFA lockout, impersonation, stolen tokens, sign out everywhere, logout, error injection and key hygiene
+
+### Changed
+- Updated the exported helper signatures for generateOTP, verifyOTP and enforceOTPIssueLimit (breaking, version left to the maintainer)
+- Updated the README, release notes and agent notes with the new behaviour, breaking changes, security fixes and the checkPendingRateLimit requirement for hosts
+
+### Fixed
+- Fixed the one-time code step of MFA accepting a code that was issued for a different account or flow
+- Fixed a password-only MFA session being usable at the OAuth authorize and consent endpoints
+- Fixed impersonation and stolen access tokens obtaining OAuth authorization codes through session.userUid
+- Fixed sign out everywhere not stopping OAuth authorize for sessions that signed in before the revocation
+- Fixed any OAuth access token being exchangeable for a full session JWT
+- Fixed the session-token exchange changing the caller's own session by minting only the access token
+- Fixed client-supplied rate limit identifiers landing on internal counters by namespacing them under ratelimit:id: and hashing long values under idh:sha256:
+- Fixed MFA phases 2 and 3 being lockable by unauthenticated requests naming a user id
+- Fixed the verification budgets being drainable from a single address
+- Fixed counter keys being ambiguous for IPv6 addresses by hashing each part
+- Fixed auth:otp:maxAttempts and single use not holding across parallel requests with a Redis-backed session store
+- Fixed sent codes expiring after 0 to 30 seconds and a wrong guess discarding the challenge
+- Fixed MFA and elevation leaving their session identity behind when verification throws or is rate limited
+- Fixed a stale MFA method or challenge surviving into a new password attempt
+- Fixed a failed second factor signing out a genuinely signed-in session
+- Fixed the cache startup probe to use the same strict number check as the counters and to tell an unsupported version from an unreachable connection
+
 ## [2.0.0] - 2026-11-04
 
 ### Added
@@ -318,7 +356,8 @@ tagged.
 - `PasskeyStrategy` - WebAuthn based passkey authentication
 - `TOTPStrategy` - RFC 6238 Time-Based One Time Password authentication (e.g. Google Authenticator, etc.)
 
-[Unreleased]: https://github.com/rapidrest/auth/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/rapidrest/auth/compare/v3.0.0...HEAD
+[3.0.0]: https://github.com/rapidrest/auth/compare/v2.0.0...v3.0.0
 [2.0.0]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.15...v2.0.0
 [2.0.0-beta.15]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.14...v2.0.0-beta.15
 [2.0.0-beta.14]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.13...v2.0.0-beta.14

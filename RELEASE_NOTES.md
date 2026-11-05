@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v3.0.0
+
 ### Breaking changes
 
 * `generateOTP()`, `verifyOTP()` and `enforceOTPIssueLimit()` have new signatures (`purpose` is required; `counters` replaces a rate limiter). These are exported helpers, so under semver this is a breaking change; choosing the version is left to the maintainer.
