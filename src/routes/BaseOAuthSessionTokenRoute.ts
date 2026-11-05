@@ -14,11 +14,12 @@ import {
     RepoUtils,
     RouteDecorators,
 } from "@rapidrest/service-core";
-import { SigningKey, User } from "../models/types.js";
+import { Client, SigningKey, User } from "../models/types.js";
 import { AccessTokenDenylist } from "../auth/AccessTokenDenylist.js";
 import { OAuthBearerStrategy } from "../auth/OAuthBearerStrategy.js";
 import { OAuthTokenUtils } from "../auth/OAuthTokenUtils.js";
 import { SigningKeyUtils } from "../auth/SigningKeyUtils.js";
+import { getBearerToken } from "../auth/shared.js";
 import { TokenUtils } from "../auth/TokenUtils.js";
 
 const { Config, Init, Inject } = ObjectDecorators;
@@ -62,9 +63,16 @@ const STRATEGY_NAME = "oauth_bearer";
  * credential remains its own OAuth refresh token, renewed via the unmodified `/oauth/token`
  * `refresh_token` grant, not this session-refresh token.
  *
+ * Because the result is a full session JWT carrying the account's real roles, only a token issued to a **first-party**
+ * client (`Client.firstParty`) of this deployment may be exchanged: the token must verify against this server's own
+ * issuer and signing keys, name a registered, enabled, first-party client as both `client_id` and `aud`, and have
+ * been issued to the same subject that was authenticated. Anything else is refused with a 403, so a token granted to
+ * a third-party application (which holds only the scopes the user consented to) can never be traded for the user's
+ * own session.
+ *
  * @author Jean-Philippe Steinmetz
  */
-export abstract class BaseOAuthSessionTokenRoute<U extends User> {
+export abstract class BaseOAuthSessionTokenRoute<C extends Client, U extends User> {
     // Automatically injected by ObjectFactory on instantiation
     private _objectFactory?: ObjectFactory;
 
@@ -75,6 +83,10 @@ export abstract class BaseOAuthSessionTokenRoute<U extends User> {
     protected defaultScopes: string[] = [];
 
     protected oauthTokenUtils?: OAuthTokenUtils;
+
+    protected abstract clientClass: any;
+
+    protected clientRepo?: RepoUtils<C>;
 
     protected abstract signingKeyClass: any;
 
@@ -95,6 +107,13 @@ export abstract class BaseOAuthSessionTokenRoute<U extends User> {
         }
         if (!this._objectFactory) {
             throw new Error("objectFactory is not set.");
+        }
+
+        if (!this.clientRepo && this.clientClass) {
+            this.clientRepo = await this._objectFactory.newInstance(RepoUtils, {
+                name: this.clientClass.name,
+                args: [this.clientClass],
+            });
         }
 
         if (!this.userRepo && this.userClass) {
@@ -146,13 +165,48 @@ export abstract class BaseOAuthSessionTokenRoute<U extends User> {
     @Auth([STRATEGY_NAME])
     @Post()
     public async sessionToken(@AuthUser oauthUser: JWTUser, @Request req: HttpRequest): Promise<{ token: string }> {
+        await this.requireFirstPartyToken(oauthUser, req);
+
         const user: U | undefined = await this.userRepo!.findOne(oauthUser.uid, { ignoreACL: true });
         if (!user) {
             throw new ApiError(ApiErrors.AUTH_FAILED, 401, ApiErrorMessages.AUTH_FAILED);
         }
 
-        const result = await this.tokenUtils!.createAuthResult(user, this.defaultScopes, req);
+        // This exchange is not a sign-in: it only mints an access token, and leaves the caller's session (its
+        // `userUid`, `signedInUid`, refresh token and activity fields) exactly as it was.
+        const token: string = await this.tokenUtils!.createAccessToken(user, this.defaultScopes);
 
-        return { token: result.token };
+        return { token };
+    }
+
+    /**
+     * Throws a 403 unless the presented access token was issued by this deployment to a registered, enabled,
+     * first-party client for the authenticated subject.
+     */
+    protected async requireFirstPartyToken(oauthUser: JWTUser, req: HttpRequest): Promise<void> {
+        const forbidden = () =>
+            new ApiError(
+                ApiErrors.AUTH_PERMISSION_FAILURE,
+                403,
+                "Only an access token issued to a first-party client can be exchanged for a session.",
+            );
+
+        // The strategy has already verified the token (signature, expiry, issuer, revocation). Its claims are read
+        // again here because the strategy only hands this route the subject.
+        const token: string | undefined = getBearerToken(req);
+        const claims: any = token ? await this.oauthTokenUtils!.verifyAccessToken(token) : undefined;
+        if (!claims || typeof claims.client_id !== "string" || claims.sub !== oauthUser.uid) {
+            throw forbidden();
+        }
+        // The audience of an access token is the client it was issued to.
+        const audience: string[] = Array.isArray(claims.aud) ? claims.aud : [claims.aud];
+        if (audience.length !== 1 || audience[0] !== claims.client_id) {
+            throw forbidden();
+        }
+
+        const client: C | undefined = await this.clientRepo!.findOne(claims.client_id, { ignoreACL: true });
+        if (!client || client.disabled || client.firstParty !== true) {
+            throw forbidden();
+        }
     }
 }

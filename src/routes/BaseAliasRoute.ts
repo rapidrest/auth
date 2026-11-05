@@ -16,7 +16,9 @@ import {
 } from "@rapidrest/service-core";
 import { ApiError, JWTUser, MessagingUtils, ObjectDecorators, UserUtils, ValidationUtils } from "@rapidrest/core";
 import { Alias, AliasType, ContactType, Profile } from "../models/types.js";
-import { generateOTP, verifyOTP } from "../auth/shared.js";
+import { OTPCounters } from "../auth/OTPCounters.js";
+import { clientRateLimitKey, enforceOTPIssueLimit, generateOTP, resolveOTPConfig, verifyOTP } from "../auth/shared.js";
+import { OTPConfig } from "../auth/types.js";
 
 const { Config, Init, Inject } = ObjectDecorators;
 const { Description, Returns, Summary } = DocDecorators;
@@ -34,14 +36,26 @@ export abstract class BaseAliasRoute<T extends Alias> extends CRUDRoute<T> {
     @Inject(MessagingUtils)
     protected messagingUtils?: MessagingUtils;
 
+    /** The configuration of the one-time codes sent by e-mail, SMS or WhatsApp (`auth:otp`). */
+    @Config("auth:otp", {})
+    protected otpConfig: OTPConfig = {};
+
     @Inject(RateLimiter)
     protected rateLimiter?: RateLimiter;
+
+    /** The counters behind the one-time code limits, guess counter and one-time claim. */
+    @Inject(OTPCounters)
+    protected otpCounters?: OTPCounters;
 
     @Config("trusted_roles", ["admin"])
     protected trustedRoles: string[] = ["admin"];
 
     @Init
     protected async init(): Promise<void> {
+        // Fail fast on an unsafe `auth:otp` configuration instead of on the first request.
+        resolveOTPConfig(this.otpConfig);
+        await this.otpCounters?.checkDeployment(this._objectFactory);
+
         if (!this.profileRepo && this.profileClass && this._objectFactory) {
             this.profileRepo = await this._objectFactory.newInstance(RepoUtils, {
                 name: this.profileClass.name,
@@ -239,8 +253,9 @@ export abstract class BaseAliasRoute<T extends Alias> extends CRUDRoute<T> {
             return;
         }
 
-        await this.rateLimiter?.checkAndIncrement(alias.alias, undefined, req);
-        const token = await generateOTP(req, { id: alias.alias });
+        await this.rateLimiter?.checkAndIncrement(clientRateLimitKey(alias.alias), undefined, req);
+        await enforceOTPIssueLimit(req, alias.alias, this.otpConfig, "contact", { counters: this.otpCounters });
+        const token = await generateOTP(req, { id: alias.alias }, this.otpConfig, "contact", alias.userUid);
 
         if (alias.type === AliasType.EMAIL) {
             this.messagingUtils?.sendEmail("verify-contact-otp", { totp: token }, { to: alias.alias }).catch((err) => {
@@ -311,12 +326,19 @@ export abstract class BaseAliasRoute<T extends Alias> extends CRUDRoute<T> {
             throw new ApiError(ApiErrors.NOT_FOUND, 404, ApiErrorMessages.NOT_FOUND);
         }
 
-        await this.rateLimiter?.checkAndIncrement(alias.alias, undefined, req);
+        await this.rateLimiter?.checkAndIncrement(clientRateLimitKey(alias.alias), undefined, req);
 
         let valid = false;
         try {
-            valid = await verifyOTP(req, { id: alias.alias, token: obj?.token });
-        } catch {
+            valid = await verifyOTP(req, { id: alias.alias, token: obj?.token }, this.otpConfig, "contact", {
+                counters: this.otpCounters,
+            });
+        } catch (err) {
+            // A rate limit is reported as such; everything else (no challenge, a challenge for something else) is
+            // simply an invalid code.
+            if (err instanceof ApiError && err.status === 429) {
+                throw err;
+            }
             valid = false;
         }
         if (!valid) {

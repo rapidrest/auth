@@ -257,7 +257,18 @@ export class TokenUtils {
                 req.session.lastElevated = now;
             }
             req.session.lastLogin = req.session.lastLogin ?? now;
+            // `userUid` is set here on a completed sign-in, and also by service-core's `JWTStrategy` from any valid
+            // access token presented with the session cookie (an impersonation token, or a stolen one, included), so
+            // on its own it does not prove that anyone signed in. `signedInUid` is written only here, only for a
+            // completed sign-in, and is what the OAuth authorize and consent endpoints require. A flow that has
+            // verified only part of a sign-in (the password step of MFA) must keep its pending identity in a field
+            // of its own (`mfaPendingUid`, `elevateUid`) and never put a partial identity in either.
             req.session.userUid = user.uid;
+            req.session.signedInUid = user.uid;
+            // When this sign-in happened (ms). Compared with `sessionsRevokedAt` by the OAuth authorize endpoint, which
+            // does not go through the refresh-token `iat` check, so "sign out everywhere" also stops it. Not
+            // `lastLogin`, which is only set once per session.
+            req.session.signedInAt = now;
         }
 
         if (!impersonation) {

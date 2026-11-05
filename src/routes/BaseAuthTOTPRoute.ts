@@ -18,6 +18,7 @@ import { Alias, AuthResult, Secret, SecretType, User } from "../models/types.js"
 import { TOTPStrategy, TOTPStrategyOptions } from "../auth/TOTPStrategy.js";
 import { TOTPConfig, TOTPSecret } from "../auth/types.js";
 import { TokenUtils } from "../auth/TokenUtils.js";
+import { clientRateLimitKey } from "../auth/shared.js";
 import { UserUtils } from "./UserUtils.js";
 
 const { Config, Init, Inject } = ObjectDecorators;
@@ -98,7 +99,7 @@ export abstract class BaseAuthTOTPRoute<U extends User, A extends Alias, S exten
 
         const options: TOTPStrategyOptions = new TOTPStrategyOptions();
         options.checkRateLimit = (identifier: string, req: HttpRequest) =>
-            this.rateLimiter!.checkAndIncrement(identifier, undefined, req);
+            this.rateLimiter!.checkAndIncrement(clientRateLimitKey(identifier), undefined, req);
         options.encryptionKey = this.totpConfig.encryption_key;
         options.getSecrets = this.getSecrets.bind(this);
         options.getUser = this.getUser.bind(this);

@@ -4,6 +4,78 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 /**
+ * Configuration of the one-time codes sent by e-mail, SMS or WhatsApp (`auth:otp`): sign-in, registration, contact
+ * verification and elevation. Every field is optional. Authenticator app (TOTP) factors are configured by
+ * `TOTPConfig` and are unaffected.
+ */
+export interface OTPConfig {
+    /** The number of characters in a code. Default is `6`. */
+    length?: number;
+    /**
+     * The characters codes are drawn from. Matching is case-insensitive, so it is upper-cased and de-duplicated.
+     * Default is the digits 2-9 and the letters A-Z without I, L and O.
+     */
+    alphabet?: string;
+    /**
+     * How long a code remains valid for, as a number of seconds or a duration string (e.g. `"10m"`). Default is
+     * `600`. A code also cannot outlive the session it is stored in (`session.ttl`).
+     */
+    ttl?: number | string;
+    /** How many wrong guesses a code tolerates before it is invalidated. Default is `5`. Must be 1 to 10. */
+    maxAttempts?: number;
+    /**
+     * Rate limits dedicated to sent codes. They are counted in Redis (the `cache` connection) when there is one, so
+     * they hold across server instances, and apply in addition to the generic per-identifier and per-IP limits.
+     */
+    limits?: OTPLimits;
+}
+
+/** A fixed-window limit: at most `maxAttempts` events per `windowSeconds`. */
+export interface OTPLimit {
+    maxAttempts?: number;
+    windowSeconds?: number;
+}
+
+/** The dedicated rate limits for sent one-time codes (`auth:otp:limits`). */
+export interface OTPLimits {
+    /** Codes sent to one contact from one IP address. Default is 5 per 900 seconds (15 minutes). */
+    issue?: OTPLimit;
+    /**
+     * Codes sent to one contact from any IP address in total. Keep it above `issue`: the per-IP limit alone stops one
+     * source from exhausting it. Default is 20 per 900 seconds.
+     */
+    issueTotal?: OTPLimit;
+    /**
+     * Verification attempts against one contact from one IP address, across every code issued to it (a success counts
+     * as one). Only attempts made in a session that holds a pending code for that contact count, so spending this
+     * budget first requires sending codes. Default is 20 per 3600 seconds.
+     */
+    verify?: OTPLimit;
+    /**
+     * Verification attempts against one contact from any IP address in total, mirroring `issueTotal`. Keep it above
+     * `verify`. Default is 60 per 3600 seconds.
+     */
+    verifyTotal?: OTPLimit;
+    /**
+     * Verification attempts against one user from one IP address, across every contact and code that reaches the
+     * account, per flow. The user is the one the code was issued for. Default is 50 per 3600 seconds.
+     */
+    user?: OTPLimit;
+    /**
+     * Verification attempts against one user from any IP address in total. Keep it above `user`. Default is 150 per
+     * 3600 seconds.
+     */
+    userTotal?: OTPLimit;
+}
+
+/**
+ * What a sent one-time code was issued for. A code issued for one purpose is never accepted for another:
+ * `login` (passwordless sign-in), `mfa` (second factor after a password), `elevate` (step-up re-verification),
+ * `register` (new account e-mail/phone ownership) and `contact` (verifying an alias or profile contact).
+ */
+export type OTPPurpose = "login" | "mfa" | "elevate" | "register" | "contact";
+
+/**
  * The different types of supported contact methods.
  */
 export enum OTPContactType {
@@ -26,6 +98,11 @@ export interface OTPContact {
     type: OTPContactType;
     /** Indicates if the contact has been verified. */
     verified?: boolean;
+    /**
+     * The uid of the user that owns the contact, when known. It is recorded in the code's challenge so the per-user
+     * verification limit can be applied without looking the user up first.
+     */
+    userUid?: string;
 }
 
 /**

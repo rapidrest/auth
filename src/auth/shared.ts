@@ -4,9 +4,14 @@
 ////////////////////////////////////////////////////////////////////////////////
 import * as crypto from "crypto";
 import { ApiError, MessagingUtils } from "@rapidrest/core";
+import parseDuration from "parse-duration";
 import { ApiErrors, HttpRequest, RepoUtils } from "@rapidrest/service-core";
 import { Secret } from "../models/types.js";
+import type { OTPCounters } from "./OTPCounters.js";
 import {
+    OTPConfig,
+    OTPLimit,
+    OTPPurpose,
     OTPContactType,
     PasskeyConfig,
     PasskeyTransport,
@@ -316,13 +321,318 @@ export const parseWhatsAppMethodId = function (id: string): string | undefined {
 // OTP
 ///////////////////////////////////////////////////////////////////////////////
 
+/** The cookie `BaseImpersonationRoute` stashes the impersonator's own session token in while they are impersonating. */
+export const IMPERSONATOR_COOKIE_NAME = "jwt_impersonator";
+
+/** The default number of characters in a sent one-time code. */
+export const DEFAULT_OTP_LENGTH = 6;
+
 /**
- * Generates and returns a new OTP token for authentication. This function stores relevant data for
- * validation of the OTP token in the request's session.
- * @param req The HTTP request to use for storing session data.
- * @returns The generated OTP token.
+ * The default alphabet sent one-time codes are drawn from: the digits 2-9 and the letters A-Z without I, L and O.
+ * `0`/`O` and `1`/`I`/`L` are the characters people misread or mistype when copying a code from an e-mail or SMS, so
+ * none of them is ever issued. 31 symbols over 6 characters gives roughly 887 million codes.
  */
-export const generateOTP = async function (req: HttpRequest, requestData?: any): Promise<string> {
+export const DEFAULT_OTP_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
+
+/** The default number of seconds a sent code remains valid for. */
+export const DEFAULT_OTP_TTL = 600;
+
+/** The default number of wrong guesses a sent one-time code tolerates before it is invalidated. */
+export const DEFAULT_OTP_MAX_ATTEMPTS = 5;
+
+/** The default limit on codes sent to one contact from one IP address: 5 per 15 minutes. */
+export const DEFAULT_OTP_ISSUE_LIMIT: Required<OTPLimit> = { maxAttempts: 5, windowSeconds: 900 };
+
+/** The default limit on codes sent to one contact from any IP address in total: 20 per 15 minutes. */
+export const DEFAULT_OTP_ISSUE_TOTAL_LIMIT: Required<OTPLimit> = { maxAttempts: 20, windowSeconds: 900 };
+
+/** The default limit on verification attempts against one contact from one IP address, across every code: 20 per hour. */
+export const DEFAULT_OTP_VERIFY_LIMIT: Required<OTPLimit> = { maxAttempts: 20, windowSeconds: 3600 };
+
+/** The default limit on verification attempts against one contact from any IP address in total: 60 per hour. */
+export const DEFAULT_OTP_VERIFY_TOTAL_LIMIT: Required<OTPLimit> = { maxAttempts: 60, windowSeconds: 3600 };
+
+/** The default limit on verification attempts against one user from one IP address, across every contact: 50 per hour. */
+export const DEFAULT_OTP_USER_LIMIT: Required<OTPLimit> = { maxAttempts: 50, windowSeconds: 3600 };
+
+/** The default limit on verification attempts against one user from any IP address in total: 150 per hour. */
+export const DEFAULT_OTP_USER_TOTAL_LIMIT: Required<OTPLimit> = { maxAttempts: 150, windowSeconds: 3600 };
+
+/** The longest a sent code may remain valid for, in seconds. */
+const MAX_OTP_TTL = 3600;
+
+/** The fewest bits of entropy a configured code must have: `length * log2(alphabet size)`. */
+const MIN_OTP_ENTROPY_BITS = 20;
+
+/** The longest identifier (contact or user uid) a one-time code or a rate limiter key is built from. */
+export const MAX_IDENTIFIER_LENGTH = 256;
+
+/** The session key the pending one-time code challenge is stored under. */
+const OTP_SESSION_KEY = "otp";
+
+/** The valid purposes, for validating challenges read back out of a (possibly tampered or older) session. */
+const OTP_PURPOSES: readonly OTPPurpose[] = ["login", "mfa", "elevate", "register", "contact"];
+
+/**
+ * Builds the key the generic `RateLimiter` counts a **client supplied** identifier (a login id, e-mail address, alias,
+ * contact and so on) under. The prefix puts every such identifier in a namespace of its own, so a client can never
+ * choose a value that lands on an internal key (`elevate:<uid>`, `oauth_token:<client>`, `ip:<address>` ...) and
+ * increment someone else's counter. Over-long or non-string values are bounded here too, so a request cannot make an
+ * arbitrarily large key.
+ *
+ * Hashed (over-long) values live under a different prefix (`idh:sha256:`) from literal ones (`id:`), so a short value
+ * a client types can never spell a hashed key and collide with another identifier's counter.
+ *
+ * Use it at every call site that passes something taken from a request to `RateLimiter.checkAndIncrement()`.
+ *
+ * @param identifier The client supplied identifier.
+ */
+export const clientRateLimitKey = function (identifier: unknown): string {
+    const value: string = typeof identifier === "string" ? identifier : String(identifier);
+    if (value.length > MAX_IDENTIFIER_LENGTH) {
+        return `idh:sha256:${crypto.createHash("sha256").update(value, "utf8").digest("hex")}`;
+    }
+    return `id:${value}`;
+};
+
+/**
+ * Makes one part of a counter key unambiguous: the hex SHA-256 of `part`. Raw subjects (contacts, uids) and IP
+ * addresses can contain the `:` the key's fields are separated by (IPv6 addresses always do), so concatenating them
+ * lets two different (subject, address) pairs spell the same key. A fixed-width hash cannot.
+ */
+export const counterKeyPart = function (part: string): string {
+    return crypto.createHash("sha256").update(part, "utf8").digest("hex");
+};
+
+/**
+ * Collaborators of `generateOTP()`, `verifyOTP()` and `enforceOTPIssueLimit()`.
+ */
+export interface OTPContext {
+    /**
+     * The counters for the dedicated limits, the per-code guess counter and the one-time claim of a success. They are
+     * atomic, and shared across instances when a Redis `cache` connection is configured, unlike the attempt count kept
+     * in the session, which a Redis-backed session store cannot update atomically across parallel requests. Without it
+     * only the session-held attempt count applies.
+     */
+    counters?: OTPCounters;
+}
+
+/** The state kept in the session for a pending one-time code challenge. The code itself is never stored. */
+interface OTPChallenge {
+    /** The identifier (contact or user uid) the code was issued for. */
+    id: string;
+    /** What the code was issued for. Only a verification for the same purpose accepts it. */
+    purpose: OTPPurpose;
+    /** The uid of the user the code was issued for, when known when it was issued. */
+    userUid?: string;
+    /** The per-challenge random salt, hex encoded. */
+    salt: string;
+    /** The HMAC-SHA256 of the normalized code keyed by the salt, hex encoded. */
+    hash: string;
+    /** The time, in milliseconds since the epoch, the code was issued at. */
+    issuedAt: number;
+    /** The number of wrong guesses made so far. */
+    attempts: number;
+}
+
+/**
+ * Normalizes a user entered one-time code for comparison: surrounding and internal whitespace and hyphens (people copy
+ * "k7m-p2q" or "K7M P2Q" out of a message) are removed and the result is upper-cased. The alphabet contains neither
+ * whitespace nor hyphens, so stripping them can never turn a wrong code into a right one.
+ */
+const normalizeOTP = function (token: string): string {
+    return token.replace(/[\s-]+/g, "").toUpperCase();
+};
+
+/** Returns the HMAC-SHA256 of the normalized code, keyed by the challenge's salt. */
+const hashOTP = function (salt: Buffer, code: string): Buffer {
+    return crypto.createHmac("sha256", salt).update(code, "utf8").digest();
+};
+
+/**
+ * Validates the identifier a one-time code is issued or verified for: a non-empty string of at most
+ * `MAX_IDENTIFIER_LENGTH` characters. It ends up in counter keys, so it is bounded before it is used for anything.
+ */
+const requireIdentifier = function (id: unknown): string {
+    if (typeof id !== "string" || id.length === 0 || id.length > MAX_IDENTIFIER_LENGTH) {
+        throw new Error("Invalid authentication request.");
+    }
+    return id;
+};
+
+/** The validated, defaulted form of an `OTPConfig`. */
+interface ResolvedOTPConfig {
+    /** The distinct, upper-cased characters codes are drawn from. */
+    alphabet: string[];
+    length: number;
+    maxAttempts: number;
+    /** In seconds. */
+    ttl: number;
+    issue: Required<OTPLimit>;
+    issueTotal: Required<OTPLimit>;
+    verify: Required<OTPLimit>;
+    verifyTotal: Required<OTPLimit>;
+    user: Required<OTPLimit>;
+    userTotal: Required<OTPLimit>;
+}
+
+const resolvedConfigs: WeakMap<object, ResolvedOTPConfig> = new WeakMap();
+let resolvedDefaults: ResolvedOTPConfig | undefined;
+
+/**
+ * Configuration reaching the process through environment variables arrives as strings. A string that is a plain
+ * number is converted; anything else is returned as it is, for the validation to reject.
+ */
+const toNumber = function (value: unknown): unknown {
+    return typeof value === "string" && /^\s*[+-]?\d+(\.\d+)?\s*$/.test(value) ? Number(value) : value;
+};
+
+const resolveOTPLimit = function (name: string, limit: OTPLimit | undefined, defaults: Required<OTPLimit>) {
+    const maxAttempts: unknown = toNumber(limit?.maxAttempts ?? defaults.maxAttempts);
+    const windowSeconds: unknown = toNumber(limit?.windowSeconds ?? defaults.windowSeconds);
+    if (typeof maxAttempts !== "number" || !Number.isInteger(maxAttempts) || maxAttempts < 1) {
+        throw new Error(`\`auth:otp:limits:${name}:maxAttempts\` must be an integer of at least 1.`);
+    }
+    if (typeof windowSeconds !== "number" || !Number.isInteger(windowSeconds) || windowSeconds < 1) {
+        throw new Error(`\`auth:otp:limits:${name}:windowSeconds\` must be an integer of at least 1.`);
+    }
+    return { maxAttempts, windowSeconds };
+};
+
+/**
+ * Validates `config` and fills in the defaults, throwing on anything unsafe:
+ *
+ * * `alphabet` must be printable ASCII (`!` to `~`) with no `-` (it is stripped from submitted codes);
+ * * `ttl` must be over 0 and at most 3600 seconds;
+ * * `maxAttempts` must be an integer from 1 to 10;
+ * * `length` must be an integer from 4 to 64;
+ * * `length * log2(distinct alphabet size)` must be at least 20 bits;
+ * * every limit in `limits` must be a positive integer.
+ *
+ * Numbers given as numeric strings (as environment variables are) are accepted; anything else that is not a number is
+ * rejected. Routes and strategies call this once at startup so a bad configuration fails fast; the result is memoized
+ * per config object so the per-request calls are a lookup.
+ */
+export const resolveOTPConfig = function (config?: OTPConfig): ResolvedOTPConfig {
+    const cached: ResolvedOTPConfig | undefined = config ? resolvedConfigs.get(config) : resolvedDefaults;
+    if (cached) {
+        return cached;
+    }
+
+    const rawAlphabet: unknown = config?.alphabet ?? DEFAULT_OTP_ALPHABET;
+    if (typeof rawAlphabet !== "string" || !/^[!-~]+$/.test(rawAlphabet) || rawAlphabet.includes("-")) {
+        throw new Error("`auth:otp:alphabet` must be printable ASCII characters (no spaces) and must not contain '-'.");
+    }
+    // Printable ASCII is one UTF-16 unit per character, so spreading into an array indexes whole characters.
+    const alphabet: string[] = Array.from(new Set(rawAlphabet.toUpperCase()));
+    const length: unknown = toNumber(config?.length ?? DEFAULT_OTP_LENGTH);
+    const maxAttempts: unknown = toNumber(config?.maxAttempts ?? DEFAULT_OTP_MAX_ATTEMPTS);
+    const ttl: number = parseDuration(String(config?.ttl ?? DEFAULT_OTP_TTL), "sec") ?? NaN;
+
+    if (alphabet.length < 2) {
+        throw new Error("`auth:otp:alphabet` must contain at least 2 distinct characters.");
+    }
+    if (typeof length !== "number" || !Number.isInteger(length) || length < 4 || length > 64) {
+        throw new Error("`auth:otp:length` must be an integer between 4 and 64.");
+    }
+    if (length * Math.log2(alphabet.length) < MIN_OTP_ENTROPY_BITS) {
+        throw new Error(
+            `\`auth:otp:length\` and \`auth:otp:alphabet\` give less than ${MIN_OTP_ENTROPY_BITS} bits of entropy.`,
+        );
+    }
+    if (typeof maxAttempts !== "number" || !Number.isInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > 10) {
+        throw new Error("`auth:otp:maxAttempts` must be an integer between 1 and 10.");
+    }
+    if (!(ttl > 0 && ttl <= MAX_OTP_TTL)) {
+        throw new Error(`\`auth:otp:ttl\` must be over 0 and at most ${MAX_OTP_TTL} seconds.`);
+    }
+
+    const resolved: ResolvedOTPConfig = {
+        alphabet,
+        length,
+        maxAttempts,
+        ttl,
+        issue: resolveOTPLimit("issue", config?.limits?.issue, DEFAULT_OTP_ISSUE_LIMIT),
+        issueTotal: resolveOTPLimit("issueTotal", config?.limits?.issueTotal, DEFAULT_OTP_ISSUE_TOTAL_LIMIT),
+        verify: resolveOTPLimit("verify", config?.limits?.verify, DEFAULT_OTP_VERIFY_LIMIT),
+        verifyTotal: resolveOTPLimit("verifyTotal", config?.limits?.verifyTotal, DEFAULT_OTP_VERIFY_TOTAL_LIMIT),
+        user: resolveOTPLimit("user", config?.limits?.user, DEFAULT_OTP_USER_LIMIT),
+        userTotal: resolveOTPLimit("userTotal", config?.limits?.userTotal, DEFAULT_OTP_USER_TOTAL_LIMIT),
+    };
+    if (config) {
+        resolvedConfigs.set(config, resolved);
+    } else {
+        resolvedDefaults = resolved;
+    }
+    return resolved;
+};
+
+/**
+ * Enforces the dedicated limits on codes sent to one contact (`auth:otp:limits:issue`, default 5 per 15 minutes per
+ * contact and IP address, and `auth:otp:limits:issueTotal`, default 20 per 15 minutes per contact across all
+ * addresses), throwing a 429 `ApiError` once exceeded. The counters are kept per `purpose`, so one flow can never use
+ * up another's allowance. Call it **before** looking the contact up and regardless of whether it exists, so the
+ * response never reveals which contacts are real. A no-op without `ctx.counters`.
+ *
+ * @param req The request the code is being requested by, for the caller's IP address.
+ * @param id The contact (or, for MFA and elevation, the user uid) the code would be sent for.
+ * @param config The one-time code configuration (`auth:otp`).
+ * @param purpose What the code is being requested for.
+ * @param ctx The counters, when available.
+ */
+export const enforceOTPIssueLimit = async function (
+    req: HttpRequest,
+    id: string,
+    config: OTPConfig | undefined,
+    purpose: OTPPurpose,
+    ctx?: OTPContext,
+): Promise<void> {
+    const subject: string = requireIdentifier(id).toLowerCase();
+    if (!OTP_PURPOSES.includes(purpose)) {
+        throw new Error("A valid one-time code purpose is required.");
+    }
+
+    const counters: OTPCounters | undefined = ctx?.counters;
+    if (!counters) {
+        return;
+    }
+    const { issue, issueTotal } = resolveOTPConfig(config);
+    // The per-address counter first: a source that is already refused does not also spend the contact-wide allowance.
+    // Every variable part is hashed (see `counterKeyPart()`), so the key has a fixed shape whatever the subject or address.
+    await counters.throttle(`issue:${purpose}:${counterKeyPart(subject)}:${counterKeyPart(counters.ipOf(req))}`, issue);
+    await counters.throttle(`issue-total:${purpose}:${counterKeyPart(subject)}`, issueTotal);
+};
+
+/**
+ * Generates and returns a new one-time code for authentication or contact verification. Only a salted hash of the code
+ * is stored in the request's session, along with the purpose, the time it was issued and a count of wrong guesses; the
+ * code itself is returned for the caller to deliver (e-mail, SMS, ...) and is never kept. Issuing a new code replaces
+ * any pending one.
+ *
+ * This is not TOTP. The code is a random string, valid until it is used, `auth:otp:ttl` has passed, or
+ * `auth:otp:maxAttempts` wrong guesses have been made. TOTP is only used for authenticator app factors.
+ *
+ * The code is bound to `purpose` as well as to `requestData.id`: `verifyOTP()` accepts it only for the same purpose,
+ * so a code issued by one flow (e.g. registration) can never complete another (e.g. the MFA second factor).
+ *
+ * Call `enforceOTPIssueLimit()` before this (and before looking up the contact) to apply the dedicated resend limit.
+ *
+ * @param req The HTTP request to use for storing session data.
+ * @param requestData The request data whose `id` the code is bound to. Defaults to the request payload.
+ * @param config The one-time code configuration (`auth:otp`). Defaults apply for anything not set.
+ * @param purpose What the code is being issued for. Required: there is deliberately no default, because a default
+ * would silently make every caller that forgot it interchangeable with the others.
+ * @param userUid The uid of the user the code is issued for, when known. It is kept in the challenge so the per-user
+ * verification limit (`auth:otp:limits:user`) applies without a lookup at verification time.
+ * @returns The generated code, in upper case.
+ */
+export const generateOTP = async function (
+    req: HttpRequest,
+    requestData: any | undefined,
+    config: OTPConfig | undefined,
+    purpose: OTPPurpose,
+    userUid?: string,
+): Promise<string> {
     if (!req.session) {
         throw new ApiError(
             ApiErrors.INTERNAL_ERROR,
@@ -331,27 +641,76 @@ export const generateOTP = async function (req: HttpRequest, requestData?: any):
                 "block so the session middleware is registered.",
         );
     }
+    if (!OTP_PURPOSES.includes(purpose)) {
+        throw new Error("A valid one-time code purpose is required.");
+    }
 
     requestData = requestData ?? getRequestData(req).payload;
+    const id: string = requireIdentifier(requestData.id);
+    const { alphabet, length } = resolveOTPConfig(config);
 
-    const otplib = await importOTPLib();
-    const secret = otplib.generateSecret();
-    const token: string = await otplib.generate({ secret });
+    // `randomInt` is uniform, so there is no modulo bias.
+    let token = "";
+    for (let i = 0; i < length; i++) {
+        token += alphabet[crypto.randomInt(alphabet.length)];
+    }
 
-    // Store the OTP data in the session for later verification
-    req.session.id = requestData.id;
-    req.session.secret = secret;
-    req.session.token = token;
+    const salt: Buffer = crypto.randomBytes(16);
+    const challenge: OTPChallenge = {
+        id,
+        purpose,
+        salt: salt.toString("hex"),
+        hash: hashOTP(salt, token).toString("hex"),
+        issuedAt: Date.now(),
+        attempts: 0,
+    };
+    if (typeof userUid === "string") {
+        challenge.userUid = userUid;
+    }
+    req.session[OTP_SESSION_KEY] = challenge;
 
     return token;
 };
 
 /**
- * Validates the provided token against the data stored in the request session.
- * @param token The OTP token to validate.
- * @param req The HTTP request with OTP session data.
+ * Whether a one-time code challenge is still pending in the request's session, i.e. after a wrong guess the code has
+ * neither expired nor run out of attempts.
  */
-export const verifyOTP = async function (req: HttpRequest, payload?: any): Promise<boolean> {
+export const isOTPChallengePending = function (req: HttpRequest): boolean {
+    return !!req.session?.[OTP_SESSION_KEY];
+};
+
+/**
+ * Validates the provided code against the challenge stored in the request session by `generateOTP()`.
+ *
+ * The code is compared case-insensitively, ignoring whitespace and hyphens, in constant time. A challenge is consumed
+ * (and cannot be used again) when it is verified successfully, when it has expired, when it runs out of attempts, and
+ * when the request names a different `id` or `purpose` than it was issued for. A wrong code on a live challenge only
+ * counts an attempt, so a typo does not force a resend. A submission longer than four times the code length is never
+ * compared and counts as a wrong guess.
+ *
+ * With `ctx.counters` the per-contact and per-user limits and the per-challenge guess counter are kept atomically
+ * outside the session (see `OTPContext`), and a success is claimed exactly once, so parallel requests cannot exceed
+ * `auth:otp:maxAttempts` or redeem a code twice even when a Redis-backed session store lets the last write win. The
+ * per-contact and per-user limits count only when the session holds a pending code for this `id` and `purpose`, so
+ * someone who can merely name a contact cannot use up its budget without first having a code sent. Exceeding either
+ * limit throws a 429 `ApiError`.
+ *
+ * @param req The HTTP request with OTP session data.
+ * @param payload The request data containing the `id` and `token` to validate. Defaults to the request payload.
+ * @param config The one-time code configuration (`auth:otp`). Defaults apply for anything not set.
+ * @param purpose What the code must have been issued for; a challenge issued for anything else is consumed and
+ * rejected. Required, with no default.
+ * @param ctx The counters, when available.
+ * @returns `true` if the code is correct, otherwise `false`.
+ */
+export const verifyOTP = async function (
+    req: HttpRequest,
+    payload: any | undefined,
+    config: OTPConfig | undefined,
+    purpose: OTPPurpose,
+    ctx?: OTPContext,
+): Promise<boolean> {
     if (!req.session) {
         throw new ApiError(
             ApiErrors.INTERNAL_ERROR,
@@ -362,29 +721,82 @@ export const verifyOTP = async function (req: HttpRequest, payload?: any): Promi
     }
 
     payload = payload ?? getRequestData(req).payload;
-
-    // The challenge is single-use regardless of outcome — cleared as soon as it's read, before
-    // verification is even attempted, so a captured/replayed token can never be verified twice.
-    const sessionId: any = req.session.id;
-    const sessionSecret: any = req.session.secret;
-    delete req.session.id;
-    delete req.session.secret;
-    delete req.session.token;
+    const { length, maxAttempts, ttl, verify, verifyTotal, user, userTotal } = resolveOTPConfig(config);
 
     if (!isOTPResponse(payload)) {
         throw new Error("Invalid authentication request.");
     }
+    const id: string = requireIdentifier(payload.id);
 
-    if (sessionId !== payload.id) {
+    const counters: OTPCounters | undefined = ctx?.counters;
+    const challenge: OTPChallenge | undefined = req.session[OTP_SESSION_KEY];
+    // Assigning `undefined` rather than `delete`ing keeps the session non-empty, so the session middleware still
+    // persists the removal when nothing else is stored in it.
+    const consume = () => {
+        req.session![OTP_SESSION_KEY] = undefined;
+    };
+
+    if (!challenge || typeof challenge.hash !== "string" || typeof challenge.salt !== "string") {
         throw new Error("Invalid authentication request.");
     }
 
-    const otplib = await importOTPLib();
-    const result = await otplib.verify({
-        secret: sessionSecret,
-        token: payload.token,
-    });
-    return result.valid;
+    if (challenge.id !== id || challenge.purpose !== purpose) {
+        consume();
+        throw new Error("Invalid authentication request.");
+    }
+
+    // Only a session that holds a code issued for exactly this id and purpose gets here, so the aggregate budgets are
+    // spent only by someone who first had a code sent (which is itself limited and visible to the contact's owner).
+    if (counters) {
+        // The per-address budgets come first and the contact- or user-wide ones second, so one address that has used
+        // up its own allowance cannot also drain the shared one that everyone else's attempts count against.
+        const subject: string = counterKeyPart(id.toLowerCase());
+        const address: string = counterKeyPart(counters.ipOf(req));
+        await counters.throttle(`verify:${purpose}:${subject}:${address}`, verify);
+        await counters.throttle(`verify-total:${purpose}:${subject}`, verifyTotal);
+        if (typeof challenge.userUid === "string") {
+            const owner: string = counterKeyPart(challenge.userUid);
+            await counters.throttle(`user:${purpose}:${owner}:${address}`, user);
+            await counters.throttle(`user-total:${purpose}:${owner}`, userTotal);
+        }
+    }
+
+    const age: number = Date.now() - Number(challenge.issuedAt);
+    const attempts: number = Number(challenge.attempts) || 0;
+    if (Number.isNaN(age) || age > ttl * 1000 || attempts >= maxAttempts) {
+        consume();
+        return false;
+    }
+
+    // The atomic attempt counter. It is anchored to the first guess and lives as long as the code can, so no number
+    // of parallel requests, nor a stale session write-back, can exceed `maxAttempts` guesses against one code.
+    if (counters && (await counters.increment(`attempts:${challenge.salt}`, ttl)) > maxAttempts) {
+        consume();
+        return false;
+    }
+
+    const expected: Buffer = Buffer.from(challenge.hash, "hex");
+    // Bounded before any processing so an oversized submission costs nothing; it is simply a wrong guess.
+    const submitted: string =
+        typeof payload.token === "string" && payload.token.length <= 4 * length ? normalizeOTP(payload.token) : "";
+    const actual: Buffer = hashOTP(Buffer.from(challenge.salt, "hex"), submitted);
+    const match: boolean =
+        submitted.length > 0 && expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
+
+    if (match) {
+        // Claim the success exactly once: whoever sets this key first wins. A parallel redemption, or a replay after a
+        // stale session write-back resurrected the challenge, is refused.
+        const claimed: boolean = counters ? await counters.claim(`used:${challenge.salt}`, ttl) : true;
+        consume();
+        return claimed;
+    }
+
+    if (attempts + 1 >= maxAttempts) {
+        consume();
+    } else {
+        req.session[OTP_SESSION_KEY] = { ...challenge, attempts: attempts + 1 };
+    }
+    return false;
 };
 
 ///////////////////////////////////////////////////////////////////////////////

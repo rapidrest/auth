@@ -18,6 +18,7 @@ import {
 import { Alias, AliasType, AuthResult, Secret, SecretType, User } from "../models/types.js";
 import { MFAMethod, MFAMethodType, MFAStrategy, MFAStrategyOptions } from "../auth/MFAStrategy.js";
 import {
+    OTPConfig,
     OTPContact,
     OTPContactType,
     PasskeyConfig,
@@ -30,8 +31,10 @@ import {
 import { AuditLogUtils } from "../auth/AuditLogUtils.js";
 import { AuthEventType } from "../auth/events.js";
 import {
+    clientRateLimitKey,
     importArgon2,
     isWhatsAppConfigured,
+    resolveOTPConfig,
     normalizePasswordSubmission,
     parseWhatsAppMethodId,
     toWhatsAppMethodId,
@@ -39,6 +42,7 @@ import {
     verifyDummyPassword,
     WeakClientHashError,
 } from "../auth/shared.js";
+import { OTPCounters } from "../auth/OTPCounters.js";
 import { TokenUtils } from "../auth/TokenUtils.js";
 import { UserUtils } from "./UserUtils.js";
 
@@ -92,11 +96,19 @@ export abstract class BaseAuthMFARoute<U extends User, S extends Secret, A exten
     @Inject(MessagingUtils)
     protected messagingUtils?: MessagingUtils;
 
+    /** The configuration of the one-time codes sent by e-mail, SMS or WhatsApp (`auth:otp`). */
+    @Config("auth:otp", {})
+    protected otpConfig: OTPConfig = {};
+
     @Config("auth:password", new PasswordConfig())
     protected passwordConfig: PasswordConfig = new PasswordConfig();
 
     @Inject(RateLimiter)
     protected rateLimiter?: RateLimiter;
+
+    /** The counters behind the one-time code limits, guess counter and one-time claim. */
+    @Inject(OTPCounters)
+    protected otpCounters?: OTPCounters;
 
     protected secretRepo?: RepoUtils<S>;
 
@@ -125,6 +137,10 @@ export abstract class BaseAuthMFARoute<U extends User, S extends Secret, A exten
      */
     @Init
     protected async initialize() {
+        // Fail fast on an unsafe `auth:otp` configuration instead of on the first request.
+        resolveOTPConfig(this.otpConfig);
+        await this.otpCounters?.checkDeployment(this._objectFactory);
+
         if (!this.authMiddleware) {
             throw new Error("authMiddleware is not set.");
         }
@@ -162,7 +178,12 @@ export abstract class BaseAuthMFARoute<U extends User, S extends Secret, A exten
 
         const options: MFAStrategyOptions = new MFAStrategyOptions();
         options.checkRateLimit = (identifier: string, req: HttpRequest) =>
-            this.rateLimiter!.checkAndIncrement(identifier, undefined, req);
+            this.rateLimiter!.checkAndIncrement(clientRateLimitKey(identifier), undefined, req);
+        // Phases 2 and 3 are counted on the uid that passed the password step, under a key no client input can reach
+        // (deliberately unprefixed, like `elevate:<uid>`), so neither the sign-in route nor a request that never
+        // passed the password step can exhaust it.
+        options.checkPendingRateLimit = (uid: string, req: HttpRequest) =>
+            this.rateLimiter!.checkAndIncrement(`mfa:${uid}`, undefined, req);
         options.consumeRecoveryCode = this.consumeRecoveryCode.bind(this);
         options.encryptionKey = this.totpConfig.encryption_key;
         options.fidoConfig = this.fido2Config;
@@ -171,6 +192,8 @@ export abstract class BaseAuthMFARoute<U extends User, S extends Secret, A exten
         options.getMethods = this.getMethods.bind(this);
         options.getUser = this.getUser.bind(this);
         options.notifyContact = this.notifyContact.bind(this);
+        options.otpConfig = this.otpConfig;
+        options.counters = this.otpCounters;
         options.updateCredentialCounter = this.updateCredentialCounter.bind(this);
         options.updateSecretTimeStep = this.updateSecretTimeStep.bind(this);
         options.verify = this.verify.bind(this);

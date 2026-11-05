@@ -4,14 +4,18 @@
 ////////////////////////////////////////////////////////////////////////////////
 import { ApiError, type JWTUser } from "@rapidrest/core";
 import { ApiErrors, AuthStrategy, HttpRequest, HttpResponse, AuthResult } from "@rapidrest/service-core";
-import { OTPContact, PasskeyConfig, RecoveryCodesSecret, StoredPasskeyCredential } from "./types.js";
+import type { OTPCounters } from "./OTPCounters.js";
+import { OTPConfig, OTPContact, PasskeyConfig, RecoveryCodesSecret, StoredPasskeyCredential } from "./types.js";
 import {
+    enforceOTPIssueLimit,
     generateOTP,
+    isOTPChallengePending,
     generatePasskeyChallenge,
     getRequestData,
     importArgon2,
     isOTPResponse,
     isPasskeyResponse,
+    resolveOTPConfig,
     verifyDummyPassword,
     verifyOTP,
     verifyPasskeyChallenge,
@@ -46,6 +50,13 @@ export interface MFAMethod {
  * @author Jean-Philippe Steinmetz
  */
 export class MFAStrategyOptions {
+    /** The one-time code configuration (`auth:otp`). Defaults apply for anything not set. */
+    public otpConfig?: OTPConfig;
+    /**
+     * The counters used for the dedicated one-time code limits (`auth:otp:limits`), the atomic per-code attempt
+     * counter and the one-time claim of a success. Without it only the session-held attempt count applies.
+     */
+    public counters?: OTPCounters;
     /** The name of the header to look for when performing header based authentication. Default value is `Authorization`. */
     public headerKey: string = "authorization";
     /** The authorization scheme type when using header based authentication. Default value is `basic`. */
@@ -71,6 +82,18 @@ export class MFAStrategyOptions {
      * `RateLimiter`). A no-op when not provided.
      */
     public checkRateLimit?(identifier: string, req: HttpRequest): Promise<void>;
+    /**
+     * Optional hook for rate limiting phases 2 and 3 (challenge and verify). It is invoked only after the request has
+     * been matched to the identity that passed phase 1 in this session, with that **server-side** uid and never with
+     * anything the client sent, so the counter it increments is out of reach of anyone who has not passed the password
+     * step. Implementations should key it so that nothing else (the sign-in route, for one) shares the counter, and
+     * throw to reject the request once a threshold has been exceeded.
+     *
+     * When it is not provided, `checkRateLimit` is invoked with the same uid instead. **A host that builds
+     * `MFAStrategy` itself must supply this**: that fallback typically shares its counter with the sign-in routes, so
+     * it can reopen the lockout this hook closes. The library's own `BaseAuthMFARoute` wires the safe `mfa:<uid>` key.
+     */
+    public checkPendingRateLimit?(uid: string, req: HttpRequest): Promise<void>;
     /**
      * Retrieves a previously-registered FIDO2 credential by its ID, for verifying a FIDO2 secondary
      * authentication challenge response. Returns `undefined` if no credential with that ID is known.
@@ -192,6 +215,8 @@ export class MFAStrategy implements AuthStrategy {
 
     constructor(options: MFAStrategyOptions) {
         this.options = options;
+        // Fail fast on an unsafe `auth:otp` configuration instead of on the first request.
+        resolveOTPConfig(options.otpConfig);
     }
 
     public async authenticate(
@@ -271,18 +296,24 @@ export class MFAStrategy implements AuthStrategy {
         // for the same claimed identity — otherwise an attacker could trigger/consume a 2FA challenge for
         // any account by supplying an arbitrary `id` and a `methodId` they control (e.g. their own verified
         // contact), without ever needing that account's password.
-        if (!req.session.userUid || req.session.userUid !== payload.id) {
+        //
+        // That identity is kept in `mfaPendingUid`, never in `userUid`: `userUid` is what the rest of the library reads as
+        // "this session is signed in" (the OAuth authorize endpoint trusts it), whereas a password alone is not a
+        // signed-in session when a second factor is required. `userUid` is set by `TokenUtils.createAuthResult()` on a
+        // completed sign-in, and by service-core's `JWTStrategy` from a valid access token; a partial identity must
+        // never be put in it.
+        const pendingUid: string | undefined = req.session.mfaPendingUid;
+        if (!pendingUid || pendingUid !== payload.id) {
+            this.clearPending(req);
             throw new Error("Invalid authentication request.");
         }
 
         // Rate limit challenge issuance itself, not just phase-1/3 credential verification — otherwise an
         // attacker who already knows the account's password could repeatedly trigger this phase to spam a
         // victim's contact with OTP notifications at no cost.
-        if (this.options.checkRateLimit) {
-            await this.options.checkRateLimit(payload.id, req);
-        }
+        await this.throttlePending(pendingUid, req);
 
-        const method: MFAMethod | undefined = await this.options.getMethod(payload.methodId, req.session.userUid);
+        const method: MFAMethod | undefined = await this.options.getMethod(payload.methodId, pendingUid);
         if (!method) {
             throw new Error("Invalid secondary authentication method.");
         }
@@ -315,7 +346,13 @@ export class MFAStrategy implements AuthStrategy {
                     // routing check would misroute this OTP submission into the wrong verify method.
                     delete req.session.mfaMethodId;
                     req.session.mfaMethodType = method.type;
-                    const totp: string = await generateOTP(req, payload);
+                    await enforceOTPIssueLimit(req, payload.id, this.options.otpConfig, "mfa", {
+                        counters: this.options.counters,
+                    });
+                    // The code is bound to the phase-1-verified user (`payload.id` was checked against the session
+                    // above) and to the `mfa` purpose, and was sent to that user's own method (`getMethod()` above is
+                    // scoped to the same user).
+                    const totp: string = await generateOTP(req, payload, this.options.otpConfig, "mfa", pendingUid);
                     await this.options.notifyContact(method.data, totp);
                     res.status(200);
                     res.json({});
@@ -351,6 +388,32 @@ export class MFAStrategy implements AuthStrategy {
         }
     }
 
+    /**
+     * Drops everything phases 1 and 2 left in the session: the phase-1-verified identity, the selected method and the
+     * pending FIDO2 challenge.
+     */
+    protected clearPending(req: HttpRequest): void {
+        if (req.session) {
+            delete req.session.mfaPendingUid;
+            delete req.session.mfaMethodId;
+            delete req.session.mfaMethodType;
+            delete req.session.challenge;
+        }
+    }
+
+    /**
+     * Rate limits phases 2 and 3 on the phase-1-verified uid, which comes from the session and never from the client.
+     * Callers must have matched the request to that uid first, so a request that did not pass the password step can
+     * never reach (and exhaust) the counter.
+     */
+    protected async throttlePending(pendingUid: string, req: HttpRequest): Promise<void> {
+        if (this.options.checkPendingRateLimit) {
+            await this.options.checkPendingRateLimit(pendingUid, req);
+        } else if (this.options.checkRateLimit) {
+            await this.options.checkRateLimit(pendingUid, req);
+        }
+    }
+
     protected async verifyBasic(payload: any, req: HttpRequest, res: HttpResponse): Promise<JWTUser | undefined> {
         // `payload` comes from authenticate()'s `getRequestData(req)`, which already covers both a JSON/form
         // body and an `Authorization: Basic` header — re-deriving via `getBasicData(req)` here would silently
@@ -361,6 +424,11 @@ export class MFAStrategy implements AuthStrategy {
             throw new Error("Invalid user id or password.");
         }
 
+        // A new password attempt always starts over: whatever an earlier attempt left pending (the identity, and the
+        // method and FIDO2 challenge selected for it) is dropped, so a failed or throttled one never leaves a previous
+        // identity usable, and a stale method can never misroute the next flow's submission.
+        this.clearPending(req);
+
         if (this.options.checkRateLimit) {
             await this.options.checkRateLimit(requestData.id, req);
         }
@@ -368,15 +436,17 @@ export class MFAStrategy implements AuthStrategy {
         // Verify the id and password
         const user: JWTUser | undefined = await this.options.verify(requestData.id, requestData.password);
         if (user) {
-            // Bind subsequent phases to this verified identity so phase 2/3 can't be invoked cold, or for a
-            // different identity than the one that just passed password verification.
-            if (req.session) {
-                req.session.userUid = user.uid;
-            }
-
             // Now retrieve the user's list of available 2FA methods
             const methods: MFAMethod[] = await this.options.getMethods(user.uid);
             if (methods.length > 0) {
+                // Bind subsequent phases to this verified identity so phase 2/3 can't be invoked cold, or for a
+                // different identity than the one that just passed password verification. This is deliberately NOT
+                // `session.userUid`: the password alone has not signed this session in, and `userUid` is what
+                // the rest of the library (the OAuth authorize endpoint, refresh) treats as proof that it has.
+                if (req.session) {
+                    req.session.mfaPendingUid = user.uid;
+                }
+
                 // Send the list of 2FA methods back to the client to select from. `uid` is included
                 // because phase 2/3 require it as the request's `id` — the internal uid, not
                 // whatever login identifier (email, alias, etc.) the client used for phase 1 — and
@@ -406,18 +476,18 @@ export class MFAStrategy implements AuthStrategy {
 
         // The phase-1-verified identity, phase-2-selected credential, and challenge are all
         // single-use — cleared once phase 3 completes, regardless of outcome, mirroring verifyOTP().
-        const userUid: string | undefined = req.session.userUid;
+        const userUid: string | undefined = req.session.mfaPendingUid;
         const methodId: string | undefined = req.session.mfaMethodId;
         const expectedChallenge: string | undefined = req.session.challenge;
-        delete req.session.userUid;
+        delete req.session.mfaPendingUid;
         delete req.session.mfaMethodId;
         delete req.session.challenge;
 
         // Rate limited by the phase-1-verified identity rather than `payload.id` — unlike OTP/TOTP,
         // a FIDO2 assertion's `id` is the credential id, not something an attacker-controlled value
         // can be reasonably bucketed on.
-        if (this.options.checkRateLimit && userUid) {
-            await this.options.checkRateLimit(userUid, req);
+        if (userUid) {
+            await this.throttlePending(userUid, req);
         }
 
         if (!userUid || !methodId || !expectedChallenge || !isPasskeyResponse(payload)) {
@@ -451,17 +521,37 @@ export class MFAStrategy implements AuthStrategy {
     }
 
     protected async verifyOTP(payload: any, req: HttpRequest, res: HttpResponse): Promise<JWTUser | undefined> {
-        if (this.options.checkRateLimit) {
-            await this.options.checkRateLimit(payload.id, req);
+        // Only the identity that just passed phase 1 may complete phase 3, exactly as for TOTP and recovery codes:
+        // a challenge in this session, whoever it was issued to, can never authenticate a different user.
+        const userUid: string | undefined = req.session?.mfaPendingUid;
+
+        // The phase-1-verified identity is single-use — cleared once phase 3 completes. The one exception is a wrong
+        // code on a challenge that is still live (attempts left, not expired): keeping the identity lets the user
+        // retry after a typo instead of starting over, and the challenge itself bounds the number of guesses. `keep`
+        // is only ever set on that path, so everything else, including anything that throws (a rate limit, no
+        // challenge, a wrong id or purpose), clears it and cannot leave it behind for later requests to reuse.
+        let valid = false;
+        let keep = false;
+        try {
+            // Matched to the phase-1-verified identity before anything is counted: a request that did not pass the
+            // password step must not be able to spend the counter that protects the account that did.
+            if (!userUid || payload.id !== userUid) {
+                this.clearPending(req);
+                return undefined;
+            }
+            await this.throttlePending(userUid, req);
+
+            valid = await verifyOTP(req, payload, this.options.otpConfig, "mfa", {
+                counters: this.options.counters,
+            });
+            keep = !valid && isOTPChallengePending(req);
+        } finally {
+            if (!keep) {
+                delete req.session?.mfaPendingUid;
+            }
         }
 
-        const valid: boolean = await verifyOTP(req, payload);
-
-        // The phase-1-verified identity is single-use — cleared once phase 3 completes, regardless of outcome.
-        const userUid: string | undefined = req.session?.userUid;
-        delete req.session?.userUid;
-
-        if (!valid || !userUid) {
+        if (!valid) {
             return undefined;
         }
         // Resolve the user from the session-bound identity established in verifyBasic(), not from the
@@ -470,19 +560,22 @@ export class MFAStrategy implements AuthStrategy {
     }
 
     protected async verifyTOTP(payload: any, req: HttpRequest, res: HttpResponse): Promise<JWTUser | undefined> {
-        if (this.options.checkRateLimit) {
-            await this.options.checkRateLimit(payload.id, req);
-        }
-
         // The phase-1-verified identity and the phase-2-selected secret are both single-use —
-        // cleared once phase 3 completes, regardless of outcome, mirroring verifyOTP().
-        const userUid: string | undefined = req.session?.userUid;
+        // cleared once phase 3 completes, regardless of outcome (a rate limit included, which is why they are cleared
+        // before it is checked), mirroring verifyOTP().
+        const userUid: string | undefined = req.session?.mfaPendingUid;
         const methodId: string | undefined = req.session?.mfaMethodId;
-        delete req.session?.userUid;
+        delete req.session?.mfaPendingUid;
         delete req.session?.mfaMethodId;
         delete req.session?.mfaMethodType;
 
-        if (!userUid || !methodId || payload.id !== userUid) {
+        // Matched to the phase-1-verified identity before anything is counted (see verifyOTP()).
+        if (!userUid || payload.id !== userUid) {
+            return undefined;
+        }
+        await this.throttlePending(userUid, req);
+
+        if (!methodId) {
             return undefined;
         }
 
@@ -510,19 +603,22 @@ export class MFAStrategy implements AuthStrategy {
         req: HttpRequest,
         res: HttpResponse,
     ): Promise<JWTUser | undefined> {
-        if (this.options.checkRateLimit) {
-            await this.options.checkRateLimit(payload.id, req);
-        }
-
         // The phase-1-verified identity and the phase-2-selected secret are both single-use —
-        // cleared once phase 3 completes, regardless of outcome, mirroring verifyTOTP().
-        const userUid: string | undefined = req.session?.userUid;
+        // cleared once phase 3 completes, regardless of outcome (a rate limit included, which is why they are cleared
+        // before it is checked), mirroring verifyTOTP().
+        const userUid: string | undefined = req.session?.mfaPendingUid;
         const methodId: string | undefined = req.session?.mfaMethodId;
-        delete req.session?.userUid;
+        delete req.session?.mfaPendingUid;
         delete req.session?.mfaMethodId;
         delete req.session?.mfaMethodType;
 
-        if (!userUid || !methodId || payload.id !== userUid) {
+        // Matched to the phase-1-verified identity before anything is counted (see verifyOTP()).
+        if (!userUid || payload.id !== userUid) {
+            return undefined;
+        }
+        await this.throttlePending(userUid, req);
+
+        if (!methodId) {
             return undefined;
         }
 

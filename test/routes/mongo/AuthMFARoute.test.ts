@@ -13,6 +13,7 @@ import {
     ObjectFactory,
     ConnectionManager,
     ACLAction,
+    RateLimiter,
 } from "@rapidrest/service-core";
 import { Logger, MessagingUtils } from "@rapidrest/core";
 import * as uuid from "uuid";
@@ -33,6 +34,10 @@ const hashPasswordForLogin = async function (password: string, userUid: string):
     const canonical = await normalizePasswordSubmission(password, userUid, new PasswordConfig());
     return argon2.hash(canonical);
 };
+
+// Requests from the loopback test client are treated as coming through a trusted proxy, so a test can give the attacker
+// and the victim different addresses with `X-Forwarded-For`. The rate limits are deliberately left at their defaults.
+config.set("trusted_proxies", ["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
 
 const mongod: MongoMemoryServer = new MongoMemoryServer({
     instance: {
@@ -313,4 +318,67 @@ describe("Route:AuthMFAMongo Tests", () => {
         const result = await client.post(baseUrl).send({ id: user.uid, methodId: uuid.v4() });
         expect(result.status).toBe(401);
     });
+
+    describe("under the default generic rate limits", () => {
+        const otpUrl = "/mongo/auth/otp";
+        const attackerIp = "203.0.113.7";
+        const victimIp = "198.51.100.9";
+
+        it("Cannot be locked out of phases 2 and 3 by floods that never passed the password step.", async () => {
+            const user: UserMongo = await createUserMongo();
+            await createPasswordSecretMongo({ userUid: user.uid });
+            const alias: AliasMongo = await createAliasMongo({ userUid: user.uid });
+            const limiter: any = objectFactory.getInstance<any>(RateLimiter);
+
+            // The victim has passed the password step and is about to ask for, and then enter, the second factor.
+            const victim = agent(server.getApplication());
+            const phase1 = await victim
+                .get(baseUrl)
+                .set("X-Forwarded-For", victimIp)
+                .set("Authorization", `basic ${Buffer.from(user.uid + ":password").toString("base64")}`);
+            expect(phase1.status).toBeLessThan(300);
+
+            // Anyone who knows the uid floods the unauthenticated routes that take it as an `id`. The default is 100 a
+            // minute per identifier, so this is well past it.
+            const attacker = agent(server.getApplication());
+            let refused = 0;
+            for (let i = 0; i < 130; i++) {
+                const sent = await attacker.post(otpUrl).set("X-Forwarded-For", attackerIp).send({ id: user.uid });
+                const guessed = await attacker
+                    .post(otpUrl)
+                    .set("X-Forwarded-For", attackerIp)
+                    .send({ id: user.uid, token: "AAAAAA" });
+                const mfa = await attacker
+                    .post(baseUrl)
+                    .set("X-Forwarded-For", attackerIp)
+                    .send({ id: user.uid, token: "AAAAAA" });
+                const probe = await attacker
+                    .post(baseUrl)
+                    .set("X-Forwarded-For", attackerIp)
+                    .send({ id: user.uid, methodId: alias.uid });
+                for (const result of [sent, guessed, mfa, probe]) {
+                    if (/too many attempts/i.test(JSON.stringify(result.body ?? ""))) {
+                        refused++;
+                    }
+                }
+            }
+            // The flood really did exhaust the generic limits it can reach (and not the one it must not).
+            expect(refused).toBeGreaterThan(100);
+            expect(limiter.memoryStore.load(`ratelimit:id:${user.uid}`).count).toBeGreaterThan(100);
+            expect(limiter.memoryStore.load(`ratelimit:mfa:${user.uid}`)).toBeUndefined();
+
+            // The victim's second and third phases still work.
+            const challenge = await victim
+                .post(baseUrl)
+                .set("X-Forwarded-For", victimIp)
+                .send({ id: user.uid, methodId: alias.uid });
+            expect(challenge.status).toBeLessThan(300);
+            const sendEmailMock = messagingUtils.sendEmail as any;
+            const token: string = sendEmailMock.mock.calls[sendEmailMock.mock.calls.length - 1][1].totp;
+            const done = await victim.post(baseUrl).set("X-Forwarded-For", victimIp).send({ id: user.uid, token });
+            expect(done.status).toBeLessThan(300);
+            expect(done.body.user.uid).toBe(user.uid);
+        });
+    });
 });
+

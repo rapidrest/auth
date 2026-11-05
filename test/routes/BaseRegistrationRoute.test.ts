@@ -5,10 +5,11 @@
 // Isolated unit tests for BaseRegistrationRoute — no HTTP server, no database. otplib is real (it's
 // already exercised this way throughout the auth test suites), so `start()`/`verify()` are tested
 // against genuine OTP tokens rather than mocked ones.
-import { EventUtils } from "@rapidrest/core";
+import { ApiError, EventUtils } from "@rapidrest/core";
 import { RepoUtils } from "@rapidrest/service-core";
 import { BaseRegistrationRoute } from "../../src/routes/BaseRegistrationRoute.js";
 import { AliasType } from "../../src/models/types.js";
+import { OTPCounters } from "../../src/auth/OTPCounters.js";
 import { generateOTP } from "../../src/auth/shared.js";
 import { AuthEventType } from "../../src/auth/events.js";
 import { TokenUtils } from "../../src/auth/TokenUtils.js";
@@ -80,8 +81,29 @@ function makeReq(overrides: any = {}): any {
     };
 }
 
+/** Counters that refuse every throttle whose key starts with the prefix, and otherwise behave normally. */
+const refusingCounters = (prefix: string): OTPCounters => {
+    const counters = new OTPCounters();
+    const real = counters.throttle.bind(counters);
+    vi.spyOn(counters, "throttle").mockImplementation(async (key, limit) => {
+        if (key.startsWith(prefix)) {
+            throw new ApiError("AUTH_PERMISSION_FAILURE", 429, "Too many attempts. Please try again later.");
+        }
+        return real(key, limit);
+    });
+    return counters;
+};
+
 describe("BaseRegistrationRoute Tests", () => {
     describe("initialize", () => {
+        it("Fails fast at startup on an unsafe auth:otp configuration.", async () => {
+            const route = new TestRegistrationRoute();
+            for (const bad of [{ ttl: 0 }, { maxAttempts: 11 }, { alphabet: "ab-cd" }, { length: 4, alphabet: "ab" }]) {
+                (route as any).otpConfig = bad;
+                await expect((route as any).initialize()).rejects.toThrow(/auth:otp/);
+            }
+        });
+
         it("Throws if objectFactory is not set.", async () => {
             const route = new TestRegistrationRoute();
             await expect((route as any).initialize()).rejects.toThrow(/objectFactory is not set/);
@@ -142,6 +164,42 @@ describe("BaseRegistrationRoute Tests", () => {
             await expect((route as any).start({ email: "not-an-email" }, req)).rejects.toThrow(
                 /valid e-mail address or phone number is required/,
             );
+        });
+
+        it("Enforces the dedicated issue limit before the existing-account lookup, so existing and new addresses are refused alike.", async () => {
+            for (const existing of [[], [{ alias: "user@example.com", verified: true }]]) {
+                const route = new TestRegistrationRoute();
+                const find = vi.fn().mockResolvedValue(existing);
+                (route as any).aliasRepo = { find };
+                (route as any).otpCounters = refusingCounters("issue:");
+                const sendEmail = vi.fn();
+                (route as any).messagingUtils = { sendEmail, sendSMS: vi.fn() };
+                const req = makeReq();
+
+                await expect((route as any).start({ email: "user@example.com" }, req)).rejects.toMatchObject({
+                    status: 429,
+                });
+                await expect((route as any).start({ phone: "+14155552671" }, req)).rejects.toMatchObject({
+                    status: 429,
+                });
+                expect(find).not.toHaveBeenCalled();
+                expect(sendEmail).not.toHaveBeenCalled();
+            }
+        });
+
+        it("Issues e-mail and phone codes for the register purpose.", async () => {
+            for (const body of [{ email: "user@example.com" }, { phone: "+14155552671" }]) {
+                const route = new TestRegistrationRoute();
+                (route as any).aliasRepo = { find: vi.fn().mockResolvedValue([]) };
+                (route as any).logger = { debug: vi.fn() };
+                (route as any).messagingUtils = {
+                    sendEmail: vi.fn().mockResolvedValue(undefined),
+                    sendSMS: vi.fn().mockResolvedValue(undefined),
+                };
+                const req = makeReq();
+                await (route as any).start(body, req);
+                expect(req.session.otp.purpose).toBe("register");
+            }
         });
 
         it("Does not send an OTP and returns silently when a verified e-mail alias already exists.", async () => {
@@ -210,8 +268,8 @@ describe("BaseRegistrationRoute Tests", () => {
                 { totp: expect.any(String) },
                 { to: "user@example.com" },
             );
-            expect(req.session.id).toBe("user@example.com");
-            expect(req.session.secret).toBeDefined();
+            expect(req.session.otp.id).toBe("user@example.com");
+            expect(req.session.otp.hash).toBeDefined();
         });
 
         it("Sends a one-time code by SMS.", async () => {
@@ -274,7 +332,7 @@ describe("BaseRegistrationRoute Tests", () => {
 
             await (route as any).start({ email: "user@example.com" }, req);
 
-            expect(checkAndIncrement).toHaveBeenCalledWith("user@example.com", undefined, req);
+            expect(checkAndIncrement).toHaveBeenCalledWith("id:user@example.com", undefined, req);
         });
 
         it("Rate-limits by the phone number before sending an OTP.", async () => {
@@ -288,7 +346,7 @@ describe("BaseRegistrationRoute Tests", () => {
 
             await (route as any).start({ phone: "+14155552671" }, req);
 
-            expect(checkAndIncrement).toHaveBeenCalledWith("+14155552671", undefined, req);
+            expect(checkAndIncrement).toHaveBeenCalledWith("id:+14155552671", undefined, req);
         });
 
         it("Propagates the rate limiter's error and does not send an OTP once the limit is exceeded.", async () => {
@@ -323,7 +381,7 @@ describe("BaseRegistrationRoute Tests", () => {
 
             await (route as any).start({ email: "user@example.com" }, req);
 
-            expect(checkAndIncrement).toHaveBeenCalledWith("user@example.com", undefined, req);
+            expect(checkAndIncrement).toHaveBeenCalledWith("id:user@example.com", undefined, req);
             expect(sendEmail).not.toHaveBeenCalled();
         });
 
@@ -339,7 +397,7 @@ describe("BaseRegistrationRoute Tests", () => {
 
             await (route as any).start({ phone: "+14155552671" }, req);
 
-            expect(checkAndIncrement).toHaveBeenCalledWith("+14155552671", undefined, req);
+            expect(checkAndIncrement).toHaveBeenCalledWith("id:+14155552671", undefined, req);
             expect(sendSMS).not.toHaveBeenCalled();
         });
 
@@ -439,7 +497,7 @@ describe("BaseRegistrationRoute Tests", () => {
         // first sent (see the "start" tests above).
         it("Rate-limits by the claimed id before verifying the code.", async () => {
             const req = makeReq();
-            await generateOTP(req, { id: "user@example.com" });
+            await generateOTP(req, { id: "user@example.com" }, undefined, "register");
 
             const route = new TestRegistrationRoute();
             (route as any).aliasRepo = {};
@@ -451,12 +509,33 @@ describe("BaseRegistrationRoute Tests", () => {
                 (route as any).verify({ email: "user@example.com", token: "000000" }, req),
             ).rejects.toThrow(/verification code is invalid or has expired/);
 
-            expect(checkAndIncrement).toHaveBeenCalledWith("user@example.com", undefined, req);
+            expect(checkAndIncrement).toHaveBeenCalledWith("id:user@example.com", undefined, req);
+        });
+
+        it("Reports the dedicated verification limit as a 429, and rejects codes issued by other flows.", async () => {
+            const route = new TestRegistrationRoute();
+            (route as any).aliasRepo = {};
+            (route as any).userRepo = {};
+            (route as any).otpCounters = refusingCounters("verify:");
+            const req = makeReq();
+            const token = await generateOTP(req, { id: "user@example.com" }, undefined, "register");
+            await expect((route as any).verify({ email: "user@example.com", token }, req)).rejects.toMatchObject({
+                status: 429,
+            });
+
+            (route as any).otpCounters = undefined;
+            for (const purpose of ["login", "mfa", "elevate", "contact"] as const) {
+                const other = makeReq();
+                const code = await generateOTP(other, { id: "user@example.com" }, undefined, purpose);
+                await expect((route as any).verify({ email: "user@example.com", token: code }, other)).rejects.toThrow(
+                    /verification code is invalid or has expired/,
+                );
+            }
         });
 
         it("Propagates the rate limiter's error and does not consume the OTP.", async () => {
             const req = makeReq();
-            const token = await generateOTP(req, { id: "user@example.com" });
+            const token = await generateOTP(req, { id: "user@example.com" }, undefined, "register");
 
             const route = new TestRegistrationRoute();
             (route as any).aliasRepo = {};
@@ -481,7 +560,7 @@ describe("BaseRegistrationRoute Tests", () => {
 
         it("Rejects an invalid or expired verification code.", async () => {
             const req = makeReq();
-            await generateOTP(req, { id: "user@example.com" });
+            await generateOTP(req, { id: "user@example.com" }, undefined, "register");
 
             const route = new TestRegistrationRoute();
             (route as any).aliasRepo = {};
@@ -494,7 +573,7 @@ describe("BaseRegistrationRoute Tests", () => {
 
         it("Creates a verified user and e-mail alias, and returns a signed JWT on success.", async () => {
             const req = makeReq();
-            const token = await generateOTP(req, { id: "user@example.com" });
+            const token = await generateOTP(req, { id: "user@example.com" }, undefined, "register");
 
             const route = new TestRegistrationRoute();
             const callOrder: string[] = [];
@@ -550,7 +629,7 @@ describe("BaseRegistrationRoute Tests", () => {
         // happens before any `User` row exists at all.
         it("Does not create a User when alias creation fails (no orphaned user row left behind).", async () => {
             const req = makeReq();
-            const token = await generateOTP(req, { id: "user@example.com" });
+            const token = await generateOTP(req, { id: "user@example.com" }, undefined, "register");
 
             const route = new TestRegistrationRoute();
             const aliasCreate = vi.fn().mockRejectedValue(new Error("IDENTIFIER_EXISTS"));
@@ -574,7 +653,7 @@ describe("BaseRegistrationRoute Tests", () => {
         // see the dedicated squatting-displacement integration tests in test/routes/sql and test/routes/mongo.
         it("Deletes a stale unverified e-mail alias claim for the same address before creating the real one.", async () => {
             const req = makeReq();
-            const token = await generateOTP(req, { id: "user@example.com" });
+            const token = await generateOTP(req, { id: "user@example.com" }, undefined, "register");
 
             const route = new TestRegistrationRoute();
             const aliasDelete = vi.fn().mockResolvedValue(undefined);
@@ -595,7 +674,7 @@ describe("BaseRegistrationRoute Tests", () => {
 
         it("Deletes a stale unverified phone alias claim for the same number before creating the real one.", async () => {
             const req = makeReq();
-            const token = await generateOTP(req, { id: "+15551234567" });
+            const token = await generateOTP(req, { id: "+15551234567" }, undefined, "register");
 
             const route = new TestRegistrationRoute();
             const aliasDelete = vi.fn().mockResolvedValue(undefined);
@@ -616,7 +695,7 @@ describe("BaseRegistrationRoute Tests", () => {
 
         it("Sets a `Set-Cookie` header when cookie issuance is enabled.", async () => {
             const req = makeReq();
-            const token = await generateOTP(req, { id: "user@example.com" });
+            const token = await generateOTP(req, { id: "user@example.com" }, undefined, "register");
 
             const route = new TestRegistrationRoute();
             const user = { uid: "user-1", roles: [], scopes: [] };
@@ -642,7 +721,7 @@ describe("BaseRegistrationRoute Tests", () => {
 
         it("Creates a phone alias when a phone number was verified instead of an e-mail.", async () => {
             const req = makeReq();
-            const token = await generateOTP(req, { id: "+15551234567" });
+            const token = await generateOTP(req, { id: "+15551234567" }, undefined, "register");
 
             const route = new TestRegistrationRoute();
             const aliasCreate = vi.fn().mockResolvedValue(undefined);
@@ -666,7 +745,7 @@ describe("BaseRegistrationRoute Tests", () => {
 
         it("Is single-use: a token cannot be verified twice.", async () => {
             const req = makeReq();
-            const token = await generateOTP(req, { id: "user@example.com" });
+            const token = await generateOTP(req, { id: "user@example.com" }, undefined, "register");
 
             const route = new TestRegistrationRoute();
             (route as any).aliasRepo = { find: vi.fn().mockResolvedValue([]), create: vi.fn().mockResolvedValue(undefined) };
@@ -687,7 +766,7 @@ describe("BaseRegistrationRoute Tests", () => {
 
         it("Records an auth.registration.completed event on success, including the caller's source IP.", async () => {
             const req = makeReq({ socket: { remoteAddress: "1.2.3.4" } });
-            const token = await generateOTP(req, { id: "user@example.com" });
+            const token = await generateOTP(req, { id: "user@example.com" }, undefined, "register");
 
             const route = new TestRegistrationRoute();
             const user = { uid: "new-user-uid", roles: [], scopes: [] };
@@ -709,7 +788,7 @@ describe("BaseRegistrationRoute Tests", () => {
 
         it("Does not throw when EventUtils.record() itself rejects.", async () => {
             const req = makeReq();
-            const token = await generateOTP(req, { id: "user@example.com" });
+            const token = await generateOTP(req, { id: "user@example.com" }, undefined, "register");
 
             const route = new TestRegistrationRoute();
             const user = { uid: "new-user-uid", roles: [], scopes: [] };
@@ -725,7 +804,7 @@ describe("BaseRegistrationRoute Tests", () => {
 
         it("Also records an auth.registration.completed entry via AuditLogUtils.", async () => {
             const req = makeReq({ socket: { remoteAddress: "1.2.3.4" } });
-            const token = await generateOTP(req, { id: "user@example.com" });
+            const token = await generateOTP(req, { id: "user@example.com" }, undefined, "register");
 
             const route = new TestRegistrationRoute();
             const user = { uid: "new-user-uid", roles: [], scopes: [] };
@@ -749,7 +828,7 @@ describe("BaseRegistrationRoute Tests", () => {
 
         it("Does not throw, and logs loudly, when AuditLogUtils.record() itself rejects.", async () => {
             const req = makeReq();
-            const token = await generateOTP(req, { id: "user@example.com" });
+            const token = await generateOTP(req, { id: "user@example.com" }, undefined, "register");
 
             const route = new TestRegistrationRoute();
             const user = { uid: "new-user-uid", roles: [], scopes: [] };
@@ -770,7 +849,7 @@ describe("BaseRegistrationRoute Tests", () => {
 
         it("Passes authMethod 'registration' to createAuthResult, in addition to elevated: true.", async () => {
             const req = makeReq();
-            const token = await generateOTP(req, { id: "user@example.com" });
+            const token = await generateOTP(req, { id: "user@example.com" }, undefined, "register");
 
             const route = new TestRegistrationRoute();
             const user = { uid: "new-user-uid", roles: [], scopes: [] };
@@ -808,7 +887,7 @@ describe("BaseRegistrationRoute Tests", () => {
 
         it("verify() rejects with 403 and creates nothing when registration was closed after the code was sent.", async () => {
             const req = makeReq();
-            const token = await generateOTP(req, { id: "user@example.com" });
+            const token = await generateOTP(req, { id: "user@example.com" }, undefined, "register");
             const route = makeRoute(false);
 
             await expect((route as any).verify({ email: "user@example.com", token }, req)).rejects.toMatchObject({

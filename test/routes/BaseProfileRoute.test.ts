@@ -5,9 +5,11 @@
 // Isolated unit tests for BaseProfileRoute — no HTTP server, no database. otplib is real (the
 // established pattern in this test suite, see BaseRegistrationRoute.test.ts), so the contact
 // verification tests below exercise genuine OTP tokens rather than mocked ones.
+import { ApiError } from "@rapidrest/core";
 import { CRUDRoute } from "@rapidrest/service-core";
 import { BaseProfileRoute } from "../../src/routes/BaseProfileRoute.js";
-import { generateOTP } from "../../src/auth/shared.js";
+import { OTPCounters } from "../../src/auth/OTPCounters.js";
+import { counterKeyPart as h, generateOTP } from "../../src/auth/shared.js";
 import { ContactType } from "../../src/models/types.js";
 
 class TestProfileRoute extends BaseProfileRoute<any> {}
@@ -29,7 +31,28 @@ function makeReq(overrides: any = {}): any {
     };
 }
 
+/** Counters that refuse every throttle whose key starts with `prefix`, and otherwise behave normally. */
+const refusingCounters = (prefix: string): OTPCounters => {
+    const counters = new OTPCounters();
+    const real = counters.throttle.bind(counters);
+    vi.spyOn(counters, "throttle").mockImplementation(async (key, limit) => {
+        if (key.startsWith(prefix)) {
+            throw new ApiError("AUTH_PERMISSION_FAILURE", 429, "Too many attempts. Please try again later.");
+        }
+        return real(key, limit);
+    });
+    return counters;
+};
+
 describe("BaseProfileRoute Tests", () => {
+    it("Fails fast at startup on an unsafe auth:otp configuration.", async () => {
+        const route = new TestProfileRoute();
+        for (const bad of [{ ttl: 0 }, { maxAttempts: 11 }, { alphabet: "ab-cd" }, { length: 4, alphabet: "ab" }]) {
+            (route as any).otpConfig = bad;
+            await expect((route as any).initializeOTP()).rejects.toThrow(/auth:otp/);
+        }
+    });
+
     afterEach(() => {
         vi.restoreAllMocks();
     });
@@ -460,7 +483,7 @@ describe("BaseProfileRoute Tests", () => {
             expect(spy).toHaveBeenCalledWith(obj, req, { uid: "user-1" });
             expect(sendContactsVerification).toHaveBeenCalledWith(req, [], [
                 { contact: "new@example.com", type: ContactType.EMAIL, verified: false },
-            ]);
+            ], "user-1");
             expect(result).toEqual({
                 uid: "user-1",
                 contacts: [{ contact: "new@example.com", type: ContactType.EMAIL, verified: false }],
@@ -492,8 +515,8 @@ describe("BaseProfileRoute Tests", () => {
             await route.create([{} as any, {} as any], req, { uid: "user-1" } as any);
 
             expect(sendContactsVerification).toHaveBeenCalledTimes(2);
-            expect(sendContactsVerification).toHaveBeenCalledWith(req, [], profileA.contacts);
-            expect(sendContactsVerification).toHaveBeenCalledWith(req, [], profileB.contacts);
+            expect(sendContactsVerification).toHaveBeenCalledWith(req, [], profileA.contacts, profileA.uid);
+            expect(sendContactsVerification).toHaveBeenCalledWith(req, [], profileB.contacts, profileB.uid);
         });
 
         it("Still returns the created profile even if sending verification throws.", async () => {
@@ -560,7 +583,7 @@ describe("BaseProfileRoute Tests", () => {
 
             expect(findOne).toHaveBeenCalledWith("user-1", { version: undefined, user, ignoreACL: true });
             expect(sendVerificationCode).toHaveBeenCalledTimes(1);
-            expect(sendVerificationCode).toHaveBeenCalledWith(existing.contacts[1], req);
+            expect(sendVerificationCode).toHaveBeenCalledWith(existing.contacts[1], req, "user-1");
         });
 
         it("Does nothing when no contact matches the given id.", async () => {
@@ -590,13 +613,13 @@ describe("BaseProfileRoute Tests", () => {
 
             await (route as any).sendContactsVerification(req, [], next);
 
-            expect(checkAndIncrement).toHaveBeenCalledWith("new@example.com", undefined, req);
+            expect(checkAndIncrement).toHaveBeenCalledWith("id:new@example.com", undefined, req);
             expect(sendEmail).toHaveBeenCalledWith(
                 "verify-contact-otp",
                 { totp: expect.any(String) },
                 { to: "new@example.com" },
             );
-            expect(req.session.id).toBe("new@example.com");
+            expect(req.session.otp.id).toBe("new@example.com");
         });
 
         it("Sends an SMS for a newly-added unverified phone contact.", async () => {
@@ -653,6 +676,32 @@ describe("BaseProfileRoute Tests", () => {
             await (route as any).sendVerificationCode(contact, makeReq());
 
             expect(checkAndIncrement).not.toHaveBeenCalled();
+        });
+
+        it("Enforces the dedicated issue limit and issues for the contact purpose.", async () => {
+            const route = new TestProfileRoute();
+            const sendEmail = vi.fn().mockResolvedValue(undefined);
+            (route as any).messagingUtils = { sendEmail, sendSMS: vi.fn() };
+            const contact: any = { contact: "user@example.com", type: ContactType.EMAIL, verified: false };
+
+            const ok = makeReq();
+            const counters = new OTPCounters();
+            const throttle = vi.spyOn(counters, "throttle");
+            (route as any).otpCounters = counters;
+            (route as any).rateLimiter = { checkAndIncrement: vi.fn().mockResolvedValue(undefined) };
+            await (route as any).sendVerificationCode(contact, ok, "user-1");
+            expect(ok.session.otp).toMatchObject({ purpose: "contact", userUid: "user-1" });
+            expect(throttle).toHaveBeenCalledWith(`issue:contact:${h("user@example.com")}:${h("unknown")}`, {
+                maxAttempts: 5,
+                windowSeconds: 900,
+            });
+
+            sendEmail.mockClear();
+            (route as any).otpCounters = refusingCounters("issue:");
+            const refused = makeReq();
+            await expect((route as any).sendVerificationCode(contact, refused)).rejects.toMatchObject({ status: 429 });
+            expect(sendEmail).not.toHaveBeenCalled();
+            expect(refused.session.otp).toBeUndefined();
         });
 
         it("Sends nothing for a contact of neither email nor phone type.", async () => {
@@ -891,7 +940,7 @@ describe("BaseProfileRoute Tests", () => {
         it("Rate-limits by the contact value before verifying the code.", async () => {
             const route = new TestProfileRoute();
             const req = makeReq();
-            await generateOTP(req, { id: "new@example.com" });
+            await generateOTP(req, { id: "new@example.com" }, undefined, "contact");
             const checkAndIncrement = vi.fn().mockResolvedValue(undefined);
             (route as any).rateLimiter = { checkAndIncrement };
             (route as any).repoUtils = {
@@ -909,13 +958,52 @@ describe("BaseProfileRoute Tests", () => {
                 } as any),
             ).rejects.toThrow(/invalid or expired/i);
 
-            expect(checkAndIncrement).toHaveBeenCalledWith("new@example.com", undefined, req);
+            expect(checkAndIncrement).toHaveBeenCalledWith("id:new@example.com", undefined, req);
+        });
+
+        it("Reports the dedicated verification limit as a 429, rejects other flows codes, and aggregates per user.", async () => {
+            const route = new TestProfileRoute();
+            const update = vi.fn().mockResolvedValue({});
+            (route as any).repoUtils = {
+                findOne: vi.fn().mockResolvedValue({
+                    uid: "user-1",
+                    version: 0,
+                    contacts: [{ contact: "new@example.com", type: ContactType.EMAIL, verified: false }],
+                }),
+                update,
+            };
+            const user = { uid: "user-1" } as any;
+
+            (route as any).otpCounters = refusingCounters("verify:");
+            const req = makeReq();
+            const token = await generateOTP(req, { id: "new@example.com" }, undefined, "contact");
+            await expect(route.verifyContact("user-1", { contact: "new@example.com", token }, req, user)).rejects.toMatchObject({
+                status: 429,
+            });
+            expect(update).not.toHaveBeenCalled();
+
+            const counters = new OTPCounters();
+            const throttle = vi.spyOn(counters, "throttle");
+            (route as any).otpCounters = counters;
+            for (const purpose of ["register", "login", "mfa", "elevate"] as const) {
+                const other = makeReq();
+                const code = await generateOTP(other, { id: "new@example.com" }, undefined, purpose);
+                await expect(
+                    route.verifyContact("user-1", { contact: "new@example.com", token: code }, other, user),
+                ).rejects.toThrow(/invalid or expired/i);
+            }
+            expect(update).not.toHaveBeenCalled();
+
+            const good = makeReq();
+            const goodCode = await generateOTP(good, { id: "new@example.com" }, undefined, "contact", "user-1");
+            await route.verifyContact("user-1", { contact: "new@example.com", token: goodCode }, good, user);
+            expect(throttle.mock.calls.map((c) => c[0])).toContain(`user:contact:${h("user-1")}:${h("unknown")}`);
         });
 
         it("Propagates the rate limiter's error and does not attempt verification.", async () => {
             const route = new TestProfileRoute();
             const req = makeReq();
-            const token = await generateOTP(req, { id: "new@example.com" });
+            const token = await generateOTP(req, { id: "new@example.com" }, undefined, "contact");
             const checkAndIncrement = vi.fn().mockRejectedValue(new Error("Too many attempts"));
             (route as any).rateLimiter = { checkAndIncrement };
             const update = vi.fn();
@@ -939,7 +1027,7 @@ describe("BaseProfileRoute Tests", () => {
         it("Throws 400 on a wrong/expired code and leaves the contact unverified.", async () => {
             const route = new TestProfileRoute();
             const req = makeReq();
-            await generateOTP(req, { id: "new@example.com" });
+            await generateOTP(req, { id: "new@example.com" }, undefined, "contact");
             const update = vi.fn();
             (route as any).repoUtils = {
                 findOne: vi.fn().mockResolvedValue({
@@ -995,7 +1083,7 @@ describe("BaseProfileRoute Tests", () => {
         it("Flips verified to true on a correct code, leaving other contacts untouched.", async () => {
             const route = new TestProfileRoute();
             const req = makeReq();
-            const token = await generateOTP(req, { id: "new@example.com" });
+            const token = await generateOTP(req, { id: "new@example.com" }, undefined, "contact");
             const existingProfile = {
                 uid: "user-1",
                 version: 0,

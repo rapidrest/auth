@@ -19,11 +19,15 @@ class FakeAuthorizationCodeClass {
 class FakeConsentGrantClass {
     static readonly name = "FakeConsentGrant";
 }
+class FakeUserClass {
+    static readonly name = "FakeUser";
+}
 
 class TestOAuthAuthorizeRoute extends BaseOAuthAuthorizeRoute<any, any, any> {
     protected authorizationCodeClass: any = FakeAuthorizationCodeClass;
     protected clientClass: any = FakeClientClass;
     protected consentGrantClass: any = FakeConsentGrantClass;
+    protected userClass: any = FakeUserClass;
     protected resourceOwnerStrategies: string[] = ["jwt"];
 }
 
@@ -57,12 +61,13 @@ function makeMockRepo<T extends { uid: string }>(identifierKey: keyof T = "uid")
     };
 }
 
-function makeMockObjectFactory(clientRepo: any, authorizationCodeRepo: any, consentGrantRepo: any) {
+function makeMockObjectFactory(clientRepo: any, authorizationCodeRepo: any, consentGrantRepo: any, userRepo?: any) {
     const newInstance = vi.fn(async (type: any, opts: any) => {
         if (type === RepoUtils) {
             if (opts.name === FakeClientClass.name) return clientRepo;
             if (opts.name === FakeAuthorizationCodeClass.name) return authorizationCodeRepo;
             if (opts.name === FakeConsentGrantClass.name) return consentGrantRepo;
+            if (opts.name === FakeUserClass.name) return userRepo;
         }
         return undefined;
     });
@@ -92,18 +97,25 @@ function makeRoute(overrides: { client?: Client } = {}) {
     const clientRepo = makeMockRepo<Client>();
     const authorizationCodeRepo = makeMockRepo<AuthorizationCode>("codeHash");
     const consentGrantRepo = makeMockRepo<ConsentGrant>();
+    // Any user the tests name exists, unless a test removes it or stamps a revocation on it.
+    const userRepo: any = {
+        findOne: vi.fn(async (id: string) => userRepo._users.get(id) ?? (userRepo._missing.has(id) ? undefined : { uid: id })),
+        _users: new Map<string, any>(),
+        _missing: new Set<string>(),
+    };
 
     const client = overrides.client ?? makeClient();
     clientRepo._store.set(client.uid, client);
 
     const route = new TestOAuthAuthorizeRoute();
-    (route as any)._objectFactory = makeMockObjectFactory(clientRepo, authorizationCodeRepo, consentGrantRepo);
+    (route as any)._objectFactory = makeMockObjectFactory(clientRepo, authorizationCodeRepo, consentGrantRepo, userRepo);
     (route as any).clientRepo = clientRepo;
+    (route as any).userRepo = userRepo;
     (route as any).authorizationCodeRepo = authorizationCodeRepo;
     (route as any).consentGrantRepo = consentGrantRepo;
     (route as any).jwtConfig = { secret: JWT_SECRET };
 
-    return { route, clientRepo, authorizationCodeRepo, consentGrantRepo, client };
+    return { route, clientRepo, authorizationCodeRepo, consentGrantRepo, userRepo, client };
 }
 
 function makeRequest(overrides: any = {}) {
@@ -135,10 +147,12 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
             const clientRepo = makeMockRepo();
             const authorizationCodeRepo = makeMockRepo();
             const consentGrantRepo = makeMockRepo();
+            const userRepo = makeMockRepo();
             const route = new TestOAuthAuthorizeRoute();
-            (route as any)._objectFactory = makeMockObjectFactory(clientRepo, authorizationCodeRepo, consentGrantRepo);
+            (route as any)._objectFactory = makeMockObjectFactory(clientRepo, authorizationCodeRepo, consentGrantRepo, userRepo);
 
             await (route as any).initialize();
+            expect((route as any).userRepo).toBe(userRepo);
 
             expect((route as any).clientRepo).toBe(clientRepo);
             expect((route as any).authorizationCodeRepo).toBe(authorizationCodeRepo);
@@ -210,7 +224,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
                         response_type: "code",
                         scope: "openid",
                     },
-                    session: { userUid: "user-1" },
+                    session: { userUid: "user-1", signedInUid: "user-1" },
                 }),
                 res,
             );
@@ -259,7 +273,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
                         code_challenge: "challenge-value",
                         code_challenge_method: "S256",
                     },
-                    session: { userUid: "user-1" },
+                    session: { userUid: "user-1", signedInUid: "user-1" },
                 }),
                 res,
             );
@@ -273,7 +287,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
             const result = await route.authorize(
                 makeRequest({
                     query: { client_id: "client-record-1", redirect_uri: "https://app.example.com/callback", response_type: "code" },
-                    session: { userUid: "user-1" },
+                    session: { userUid: "user-1", signedInUid: "user-1" },
                 }),
                 res,
             );
@@ -303,7 +317,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
                         response_type: "code",
                         code_challenge: "challenge-value",
                     },
-                    session: { userUid: "user-1" },
+                    session: { userUid: "user-1", signedInUid: "user-1" },
                 }),
                 res,
             );
@@ -330,7 +344,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
             const result = await route.authorize(
                 makeRequest({
                     query: { client_id: client.uid, redirect_uri: "https://app.example.com/callback", response_type: "code" },
-                    session: { userUid: "user-1" },
+                    session: { userUid: "user-1", signedInUid: "user-1" },
                 }),
                 res,
             );
@@ -338,18 +352,105 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
             expect(result.redirectTo).toContain("code=");
         });
 
-        it("Falls back to authMiddleware.authenticate() when no session is present.", async () => {
+        it("Falls back to authMiddleware.authenticate() when the session names no user, if it completed a sign-in for that user.", async () => {
             const { route, client } = makeRoute({ client: makeClient({ firstParty: true }) });
             const authenticate = vi.fn(async () => ({ method: "jwt", user: { uid: "user-1", roles: [], scopes: [] } }));
             (route as any).authMiddleware = { authenticate };
             const result = await route.authorize(
                 makeRequest({
                     query: { client_id: client.uid, redirect_uri: "https://app.example.com/callback", response_type: "code" },
+                    session: { signedInUid: "user-1" },
                 }),
                 res,
             );
             expect(authenticate).toHaveBeenCalledWith(["jwt"], expect.anything(), res, false);
             expect(result.redirectTo).toContain("code=");
+        });
+
+        describe("a session that has not completed a sign-in for the authenticated user is not a resource owner", () => {
+            const query = { redirect_uri: "https://app.example.com/callback", response_type: "code" };
+            const attempt = async (session: any, extra: any = {}, authenticated = true) => {
+                const { route, client } = makeRoute({ client: makeClient({ firstParty: true }) });
+                const authenticate = vi.fn(async () =>
+                    authenticated ? { method: "jwt", user: { uid: "user-1", roles: [], scopes: [] } } : undefined,
+                );
+                (route as any).authMiddleware = { authenticate };
+                return route.authorize(makeRequest({ query: { ...query, client_id: client.uid }, session, ...extra }), res);
+            };
+
+            it("Refuses a userUid that nothing but an access token vouches for.", async () => {
+                expect(await attempt({ userUid: "user-1" })).toEqual({ loginRequired: true });
+            });
+
+            it("Refuses a session with neither, even when the strategies authenticate someone.", async () => {
+                expect(await attempt({})).toEqual({ loginRequired: true });
+                expect(await attempt(undefined)).toEqual({ loginRequired: true });
+            });
+
+            it("Refuses a sign-in that was for a different user than the one authenticated now.", async () => {
+                expect(await attempt({ userUid: "user-1", signedInUid: "admin-1" })).toEqual({ loginRequired: true });
+                expect(await attempt({ signedInUid: "admin-1" })).toEqual({ loginRequired: true });
+            });
+
+            it("Refuses when nobody is authenticated and the session names no one.", async () => {
+                expect(await attempt({ signedInUid: "user-1" }, {}, false)).toEqual({ loginRequired: true });
+            });
+
+            describe("sign out everywhere (sessionsRevokedAt)", () => {
+                const attemptWith = async (user: any, session: any) => {
+                    const { route, client, userRepo } = makeRoute({ client: makeClient({ firstParty: true }) });
+                    (route as any).authMiddleware = { authenticate: vi.fn() };
+                    if (user === null) {
+                        userRepo._missing.add("user-1");
+                    } else if (user) {
+                        userRepo._users.set("user-1", { uid: "user-1", ...user });
+                    }
+                    const result = await route.authorize(
+                        makeRequest({ query: { ...query, client_id: client.uid }, session }),
+                        res,
+                    );
+                    return { result, userRepo };
+                };
+                const session = (signedInAt?: any) => ({ userUid: "user-1", signedInUid: "user-1", signedInAt });
+
+                it("Loads the user with ignoreACL.", async () => {
+                    const { userRepo } = await attemptWith(undefined, session(Date.now()));
+                    expect(userRepo.findOne).toHaveBeenCalledWith("user-1", { ignoreACL: true });
+                });
+
+                it("Refuses a session whose user no longer exists.", async () => {
+                    expect((await attemptWith(null, session(Date.now()))).result).toEqual({ loginRequired: true });
+                });
+
+                it("Refuses a session that signed in before the revocation, or has no signedInAt at all.", async () => {
+                    const revoked = { sessionsRevokedAt: 2000 };
+                    expect((await attemptWith(revoked, session(1999))).result).toEqual({ loginRequired: true });
+                    expect((await attemptWith(revoked, session(undefined))).result).toEqual({ loginRequired: true });
+                    expect((await attemptWith(revoked, session("2500"))).result).toEqual({ loginRequired: true });
+                });
+
+                it("Accepts a session that signed in at or after the revocation, and any session when nothing was revoked.", async () => {
+                    const revoked = { sessionsRevokedAt: 2000 };
+                    expect((await attemptWith(revoked, session(2000))).result.redirectTo).toContain("code=");
+                    expect((await attemptWith(revoked, session(3000))).result.redirectTo).toContain("code=");
+                    expect((await attemptWith({}, session(undefined))).result.redirectTo).toContain("code=");
+                });
+
+                it("Refuses when there is no user repository to check against.", async () => {
+                    const { route, client } = makeRoute({ client: makeClient({ firstParty: true }) });
+                    (route as any).userRepo = undefined;
+                    const result = await route.authorize(
+                        makeRequest({ query: { ...query, client_id: client.uid }, session: session(Date.now()) }),
+                        res,
+                    );
+                    expect(result).toEqual({ loginRequired: true });
+                });
+            });
+
+            it("Refuses a request carrying the impersonation cookie, whatever the session says.", async () => {
+                const session = { userUid: "user-1", signedInUid: "user-1" };
+                expect(await attempt(session, { cookies: { jwt_impersonator: "stashed" } })).toEqual({ loginRequired: true });
+            });
         });
 
         it("Falls back to a 60 second code expiry when codeTTL is not a valid duration.", async () => {
@@ -360,7 +461,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
             await route.authorize(
                 makeRequest({
                     query: { client_id: client.uid, redirect_uri: "https://app.example.com/callback", response_type: "code" },
-                    session: { userUid: "user-1" },
+                    session: { userUid: "user-1", signedInUid: "user-1" },
                 }),
                 res,
             );
@@ -377,7 +478,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
             const result = await route.authorize(
                 makeRequest({
                     query: { client_id: client.uid, redirect_uri: "https://app.example.com/callback", response_type: "code" },
-                    session: { userUid: "user-1" },
+                    session: { userUid: "user-1", signedInUid: "user-1" },
                 }),
                 res,
             );
@@ -398,7 +499,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
                         scope: "openid profile",
                         state: "xyz",
                     },
-                    session: { userUid: "user-1" },
+                    session: { userUid: "user-1", signedInUid: "user-1" },
                 }),
                 res,
             );
@@ -423,7 +524,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
                         response_type: "code",
                         scope: "openid profile admin",
                     },
-                    session: { userUid: "user-1" },
+                    session: { userUid: "user-1", signedInUid: "user-1" },
                 }),
                 res,
             );
@@ -440,7 +541,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
                         response_type: "code",
                         scope: "openid profile",
                     },
-                    session: { userUid: "user-1" },
+                    session: { userUid: "user-1", signedInUid: "user-1" },
                 }),
                 res,
             );
@@ -470,7 +571,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
                         response_type: "code",
                         scope: "openid profile",
                     },
-                    session: { userUid: "user-1" },
+                    session: { userUid: "user-1", signedInUid: "user-1" },
                 }),
                 res,
             );
@@ -502,7 +603,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
                         response_type: "code",
                         scope: "openid profile",
                     },
-                    session: { userUid: "user-1" },
+                    session: { userUid: "user-1", signedInUid: "user-1" },
                 }),
                 res,
             );
@@ -521,7 +622,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
                             response_type: "code",
                             prompt: "none login",
                         },
-                        session: { userUid: "user-1" },
+                        session: { userUid: "user-1", signedInUid: "user-1" },
                     }),
                     res,
                 );
@@ -560,7 +661,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
                             scope: "openid profile",
                             prompt: "none",
                         },
-                        session: { userUid: "user-1" },
+                        session: { userUid: "user-1", signedInUid: "user-1" },
                     }),
                     res,
                 );
@@ -578,7 +679,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
                             response_type: "code",
                             prompt: "none",
                         },
-                        session: { userUid: "user-1" },
+                        session: { userUid: "user-1", signedInUid: "user-1" },
                     }),
                     res,
                 );
@@ -597,7 +698,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
                             response_type: "code",
                             prompt: "login",
                         },
-                        session: { userUid: "user-1" },
+                        session: { userUid: "user-1", signedInUid: "user-1" },
                     }),
                     res,
                 );
@@ -615,7 +716,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
                             response_type: "code",
                             prompt: "select_account",
                         },
-                        session: { userUid: "user-1" },
+                        session: { userUid: "user-1", signedInUid: "user-1" },
                     }),
                     res,
                 );
@@ -644,7 +745,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
                             scope: "openid profile",
                             prompt: "consent",
                         },
-                        session: { userUid: "user-1" },
+                        session: { userUid: "user-1", signedInUid: "user-1" },
                     }),
                     res,
                 );
@@ -662,7 +763,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
                             response_type: "code",
                             prompt: "consent",
                         },
-                        session: { userUid: "user-1" },
+                        session: { userUid: "user-1", signedInUid: "user-1" },
                     }),
                     res,
                 );
@@ -711,7 +812,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
                         makeRequest({
                             method: "POST",
                             body: { requestId: ticket, approved: true },
-                            session: { userUid: "user-1" },
+                            session: { userUid: "user-1", signedInUid: "user-1" },
                             cookies: { csrf: "tok-abc" },
                             headers: { "x-csrf-token": "tok-different" },
                         }),
@@ -727,7 +828,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
                     makeRequest({
                         method: "POST",
                         body: { requestId: ticket, approved: true },
-                        session: { userUid: "user-1" },
+                        session: { userUid: "user-1", signedInUid: "user-1" },
                         cookies: { csrf: "tok-abc" },
                         headers: { "x-csrf-token": "tok-abc" },
                     }),
@@ -744,7 +845,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
                     makeRequest({
                         method: "POST",
                         body: { requestId: ticket, approved: true },
-                        session: { userUid: "user-1" },
+                        session: { userUid: "user-1", signedInUid: "user-1" },
                         cookies: {},
                         headers: { origin: "https://mail.example.com", host: "auth.example.com" },
                     }),
@@ -761,7 +862,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
                     makeRequest({
                         method: "POST",
                         body: { requestId: ticket, approved: true },
-                        session: { userUid: "user-1" },
+                        session: { userUid: "user-1", signedInUid: "user-1" },
                         cookies: {},
                         headers: {},
                     }),
@@ -796,7 +897,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
             );
             await expect(
                 route.decideConsent(
-                    makeRequest({ body: { requestId: notATicket }, session: { userUid: "user-1" } }),
+                    makeRequest({ body: { requestId: notATicket }, session: { userUid: "user-1", signedInUid: "user-1" } }),
                     res,
                 ),
             ).rejects.toThrow(/invalid or has expired/);
@@ -814,7 +915,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
             const { route } = makeRoute();
             await expect(
                 route.decideConsent(
-                    makeRequest({ body: { requestId: "not-a-real-ticket" }, session: { userUid: "user-1" } }),
+                    makeRequest({ body: { requestId: "not-a-real-ticket" }, session: { userUid: "user-1", signedInUid: "user-1" } }),
                     res,
                 ),
             ).rejects.toThrow(/invalid or has expired/);
@@ -825,7 +926,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
             const ticket = await makeTicket(route);
             await expect(
                 route.decideConsent(
-                    makeRequest({ body: { requestId: ticket }, session: { userUid: "someone-else" } }),
+                    makeRequest({ body: { requestId: ticket }, session: { userUid: "someone-else", signedInUid: "someone-else" } }),
                     res,
                 ),
             ).rejects.toThrow(/does not belong to the current user/);
@@ -836,7 +937,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
             const ticket = await makeTicket(route, { clientId: "no-longer-exists" });
             await expect(
                 route.decideConsent(
-                    makeRequest({ body: { requestId: ticket }, session: { userUid: "user-1" } }),
+                    makeRequest({ body: { requestId: ticket }, session: { userUid: "user-1", signedInUid: "user-1" } }),
                     res,
                 ),
             ).rejects.toThrow(/Unknown or disabled/);
@@ -847,7 +948,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
             const ticket = await makeTicket(route);
 
             const result = await route.decideConsent(
-                makeRequest({ body: { requestId: ticket, approved: false }, session: { userUid: "user-1" } }),
+                makeRequest({ body: { requestId: ticket, approved: false }, session: { userUid: "user-1", signedInUid: "user-1" } }),
                 res,
             );
 
@@ -862,7 +963,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
             const ticket = await makeTicket(route);
 
             const result = await route.decideConsent(
-                makeRequest({ body: { requestId: ticket, approved: true }, session: { userUid: "user-1" } }),
+                makeRequest({ body: { requestId: ticket, approved: true }, session: { userUid: "user-1", signedInUid: "user-1" } }),
                 res,
             );
 
@@ -888,7 +989,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
             const ticket = await makeTicket(route, { scope: "openid profile" });
 
             await route.decideConsent(
-                makeRequest({ body: { requestId: ticket, approved: true }, session: { userUid: "user-1" } }),
+                makeRequest({ body: { requestId: ticket, approved: true }, session: { userUid: "user-1", signedInUid: "user-1" } }),
                 res,
             );
 
@@ -905,7 +1006,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
             await route.decideConsent(
                 makeRequest({
                     body: { requestId: ticket, approved: true, scope: ["openid", "admin"] },
-                    session: { userUid: "user-1" },
+                    session: { userUid: "user-1", signedInUid: "user-1" },
                 }),
                 res,
             );
@@ -921,7 +1022,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
             await route.decideConsent(
                 makeRequest({
                     body: { requestId: ticket, approved: true, scope: ["openid"] },
-                    session: { userUid: "user-1" },
+                    session: { userUid: "user-1", signedInUid: "user-1" },
                 }),
                 res,
             );
@@ -935,7 +1036,7 @@ describe("BaseOAuthAuthorizeRoute Tests", () => {
             const ticket = await makeTicket(route, { scope: "" });
 
             await route.decideConsent(
-                makeRequest({ body: { requestId: ticket, approved: true }, session: { userUid: "user-1" } }),
+                makeRequest({ body: { requestId: ticket, approved: true }, session: { userUid: "user-1", signedInUid: "user-1" } }),
                 res,
             );
 

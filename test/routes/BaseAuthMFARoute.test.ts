@@ -46,6 +46,14 @@ function makeMockObjectFactory(aliasRepo: any, secretRepo: any, userRepo: any, u
 }
 
 describe("BaseAuthMFARoute Tests", () => {
+    it("Fails fast at startup on an unsafe auth:otp configuration.", async () => {
+        const route = new TestAuthMFARoute();
+        for (const bad of [{ ttl: 0 }, { maxAttempts: 11 }, { alphabet: "ab-cd" }, { length: 4, alphabet: "ab" }]) {
+            (route as any).otpConfig = bad;
+            await expect((route as any).initialize()).rejects.toThrow(/auth:otp/);
+        }
+    });
+
     it("Throws during initialize() if authMiddleware was not injected.", async () => {
         const route = new TestAuthMFARoute();
         (route as any)._objectFactory = makeMockObjectFactory({}, {}, {}, {});
@@ -730,7 +738,7 @@ describe("BaseAuthMFARoute Tests", () => {
                 const req: any = {
                     headers: {},
                     body: { id: "user-1", methodId },
-                    session: { userUid: "user-1" },
+                    session: { mfaPendingUid: "user-1" },
                 };
                 const res: any = { status: vi.fn().mockReturnThis(), json: vi.fn().mockReturnThis() };
                 await strategy.authenticate(req, res);

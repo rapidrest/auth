@@ -15,8 +15,9 @@ import {
 } from "@rapidrest/service-core";
 import { Alias, AliasType, AuthResult, Secret, User } from "../models/types.js";
 import { OTPStrategy, OTPStrategyOptions } from "../auth/OTPStrategy.js";
-import { OTPContact, OTPContactType } from "../auth/types.js";
-import { isWhatsAppConfigured } from "../auth/shared.js";
+import { OTPConfig, OTPContact, OTPContactType } from "../auth/types.js";
+import { OTPCounters } from "../auth/OTPCounters.js";
+import { clientRateLimitKey, isWhatsAppConfigured, resolveOTPConfig } from "../auth/shared.js";
 import { TokenUtils } from "../auth/TokenUtils.js";
 import { UserUtils } from "./UserUtils.js";
 
@@ -55,8 +56,16 @@ export abstract class BaseAuthOTPRoute<U extends User, A extends Alias, S extend
     @Inject(MessagingUtils)
     protected messagingUtils?: MessagingUtils;
 
+    /** The configuration of the one-time codes sent by e-mail, SMS or WhatsApp (`auth:otp`). */
+    @Config("auth:otp", {})
+    protected otpConfig: OTPConfig = {};
+
     @Inject(RateLimiter)
     protected rateLimiter?: RateLimiter;
+
+    /** The counters behind the one-time code limits, guess counter and one-time claim. */
+    @Inject(OTPCounters)
+    protected otpCounters?: OTPCounters;
 
     protected secretRepo?: RepoUtils<S>;
 
@@ -75,6 +84,10 @@ export abstract class BaseAuthOTPRoute<U extends User, A extends Alias, S extend
      */
     @Init
     protected async initialize() {
+        // Fail fast on an unsafe `auth:otp` configuration instead of on the first request.
+        resolveOTPConfig(this.otpConfig);
+        await this.otpCounters?.checkDeployment(this._objectFactory);
+
         if (!this.authMiddleware) {
             throw new Error("authMiddleware is not set.");
         }
@@ -112,11 +125,13 @@ export abstract class BaseAuthOTPRoute<U extends User, A extends Alias, S extend
 
         const options: OTPStrategyOptions = new OTPStrategyOptions();
         options.checkRateLimit = (identifier: string, req: HttpRequest) =>
-            this.rateLimiter!.checkAndIncrement(identifier, undefined, req);
+            this.rateLimiter!.checkAndIncrement(clientRateLimitKey(identifier), undefined, req);
         options.getContact = this.getContact.bind(this);
         options.getContacts = this.getContacts.bind(this);
         options.getUser = this.getUser.bind(this);
         options.notifyContact = this.notifyContact.bind(this);
+        options.otpConfig = this.otpConfig;
+        options.counters = this.otpCounters;
         const strategy: OTPStrategy = await this._objectFactory.newInstance(OTPStrategy, {
             name: "default",
             args: [options],
@@ -191,6 +206,7 @@ export abstract class BaseAuthOTPRoute<U extends User, A extends Alias, S extend
             contact: alias.alias,
             type,
             verified: alias.verified,
+            userUid: alias.userUid,
         };
     }
 

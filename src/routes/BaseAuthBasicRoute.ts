@@ -19,6 +19,7 @@ import { BasicStrategy, BasicStrategyOptions } from "../auth/BasicStrategy.js";
 import { AuditLogUtils } from "../auth/AuditLogUtils.js";
 import { AuthEventType } from "../auth/events.js";
 import {
+    clientRateLimitKey,
     importArgon2,
     normalizePasswordSubmission,
     touchSecretLastUsedAt,
@@ -127,7 +128,7 @@ export abstract class BaseAuthBasicRoute<U extends User, S extends Secret, A ext
 
         const options: BasicStrategyOptions = new BasicStrategyOptions();
         options.checkRateLimit = (identifier: string, req: HttpRequest) =>
-            this.rateLimiter!.checkAndIncrement(identifier, undefined, req);
+            this.rateLimiter!.checkAndIncrement(clientRateLimitKey(identifier), undefined, req);
         options.verify = async (name: string, password: string, req?: HttpRequest): Promise<JWTUser | undefined> => {
             if (!this.secretRepo) {
                 throw new Error("Secret repository not set.");

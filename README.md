@@ -28,13 +28,14 @@ For complete documentation please visit [RapidREST.dev](https://rapidrest.dev).
 
 ### Security Features
 
-* Rate limiting on every credential-verification endpoint, layered per-identifier and per-source-IP (reverse-proxy aware) — via `@rapidrest/service-core`'s `RateLimiter`
+* Rate limiting on every credential-verification endpoint, layered per-identifier and per-source-IP (reverse-proxy aware), with dedicated, stricter limits on sent one-time codes kept in Redis (see "Sent one-time codes") — via `@rapidrest/service-core`'s `RateLimiter` and this library's `OTPCounters`
 * App passwords — user-generated, individually-revocable Basic-auth-only credentials for legacy clients that can't complete an MFA challenge
 * Secret usage tracking (`Secret.lastUsedAt`) and security event hooks for secret lifecycle/use (password changed, app password created/removed/used, recovery code used), alongside the existing login/registration/elevation/MFA events — see `AuthEventType`
 * Durable audit logging (`AuditLogUtils`) for a curated set of security-relevant actions — every genuine sign-in (`SIGNED_IN`, excluding token refresh), impersonation (`IMPERSONATED`), elevation, account deletion, session revocation, and secret lifecycle/use — separate from the best-effort `EventUtils` telemetry above; see "Audit logging" below
 * MFA recovery/backup codes as a first-class secondary authentication method
 * Account elevation (`@RequiresElevation`) for step-up re-verification before sensitive actions
 * Session revocation ("log out everywhere") that invalidates every outstanding refresh token for an account
+* One-time codes sent by e-mail, SMS or WhatsApp (sign-in, registration, contact verification, elevation) are short random codes, valid for `auth:otp:ttl` (10 minutes by default) with a limited number of attempts, stored only as a salted hash in the session - see "Sent one-time codes" below
 * Optional TOTP secret encryption at rest (AES-256-GCM)
 * Configurable Argon2 password hashing cost parameters
 * Client-side pre-hashed (Argon2id) password support, alongside plaintext, so a capable client's real password never reaches the server (accepts any Argon2 library's PHC parameter order)
@@ -155,6 +156,165 @@ is a separate, dedicated mechanism for that:
   (`ACCOUNT_DELETED`, `SESSIONS_REVOKED`, `ELEVATED`, `APP_PASSWORD_USED`, `RECOVERY_CODE_USED`,
   `REGISTRATION_COMPLETED`, `MFA_ENROLLED`/`MFA_REMOVED`, `PASSWORD_CHANGED`,
   `APP_PASSWORD_CREATED`/`APP_PASSWORD_REMOVED`).
+
+#### Sent one-time codes
+
+The codes `BaseAuthOTPRoute`, `BaseAuthMFARoute`, `BaseAuthElevationRoute`, `BaseRegistrationRoute`, `BaseAliasRoute` and
+`BaseProfileRoute` send by e-mail, SMS or WhatsApp (`generateOTP()`/`verifyOTP()`) are not TOTP. Authenticator app
+factors (`TOTPStrategy`, `BaseAuthTOTPRoute`, `totp` secrets) are unchanged and still use RFC 6238.
+
+* A code is 6 characters from the digits 2-9 and the letters A-Z without I, L and O (so nothing is mistaken for 0, 1 or
+  O), shown upper case and generated with `crypto.randomInt`. Entry is case-insensitive and ignores surrounding
+  whitespace and internal spaces or hyphens.
+* Only an HMAC-SHA256 of the code (keyed by a per-challenge random salt), the flow and user it was issued for, the
+  issue time and an attempt counter are kept in the session (`req.session.otp`) - never the code. It is compared in
+  constant time.
+* A code is bound to the flow that issued it (`login`, `mfa`, `elevate`, `register` or `contact`) and to the identity it
+  was sent for: a code from one flow is rejected, and discarded, by every other. The MFA one-time-code step additionally
+  requires the code to name the user who just passed the password step.
+* A code is single use. It stops working after `auth:otp:ttl` seconds, after `auth:otp:maxAttempts` wrong tries, or once
+  it is used. A wrong code on a live challenge only counts an attempt, so a typo does not force a resend. Issuing a new
+  code replaces the pending one. The code cannot outlive its session, so keep `session.ttl` at or above `auth:otp:ttl`.
+* Submitted codes longer than four times the configured length are counted as a wrong guess without being processed.
+* The messaging template variable stays `totp` (it now holds the sent code), so existing templates keep working.
+
+| Config key | Default | Description |
+| --- | --- | --- |
+| `auth:otp:length` | `6` | Number of characters in a code (4-64) |
+| `auth:otp:alphabet` | `23456789ABCDEFGHJKMNPQRSTUVWXYZ` | Characters codes are drawn from (case-insensitive, no whitespace or `-`) |
+| `auth:otp:ttl` | `600` | Seconds a code is valid for, or a duration such as `"10m"` |
+| `auth:otp:maxAttempts` | `5` | Wrong tries before the code is invalidated (1-10) |
+| `auth:otp:limits:issue` | `{ maxAttempts: 5, windowSeconds: 900 }` | Codes sent to one contact from one IP address |
+| `auth:otp:limits:issueTotal` | `{ maxAttempts: 20, windowSeconds: 900 }` | Codes sent to one contact from all addresses together |
+| `auth:otp:limits:verify` | `{ maxAttempts: 20, windowSeconds: 3600 }` | Verification attempts against one contact, across every code (a success counts as one) |
+| `auth:otp:limits:user` | `{ maxAttempts: 50, windowSeconds: 3600 }` | Verification attempts against the user a code was issued for, across every contact |
+
+The configuration is validated when the server starts and an unsafe one stops it: `alphabet` must be printable ASCII
+(`!` to `~`) without `-`, `ttl` must be over 0 and at most 3600 seconds, `maxAttempts` 1 to 10, `length` 4 to 64, and
+`length * log2(alphabet size)` at least 20 bits. That last floor is **above** six decimal digits (6 * log2(10) = 19.9
+bits), so an all-numeric configuration needs a `length` of 7 or more; the default alphabet gives 29.7 bits at 6
+characters. Numbers may be given as numeric strings, as they are when they come from environment variables
+(`auth__otp__maxattempts=3`); anything else that is not a number is rejected.
+
+##### Where the counters live
+
+Three things must hold across parallel requests and across server instances, and none of them can be kept in the
+session: a Redis-backed session store gives every request its own copy of the session with the last write winning. They
+are therefore counted by `OTPCounters` (see `src/auth/OTPCounters.ts`), directly on the Redis `cache` connection:
+
+* the number of guesses made against one code (`auth:otp:attempts:<salt>`);
+* the one-time claim of a successful redemption (`auth:otp:used:<salt>`), so a code cannot be redeemed twice even if a
+  slow request writes the old session back afterwards;
+* the throttles above (`auth:otp:issue:<flow>:<contact>:<ip>`, `auth:otp:issue-total:<flow>:<contact>`,
+  `auth:otp:verify:<flow>:<contact>:<ip>`, `auth:otp:verify-total:<flow>:<contact>`,
+  `auth:otp:user:<flow>:<uid>:<ip>`, `auth:otp:user-total:<flow>:<uid>`). The flow is in every key, so one flow can
+  never spend another's allowance. The contact, uid and address parts are SHA-256 hashes (an IPv6 address contains the
+  `:` that separates the fields, so raw values could spell the same key from two different pairs).
+
+They use only `SET key 1 NX EX ttl`, and `MULTI`/`INCR`/`EXPIRE key ttl NX`/`EXEC`, so they need the **Redis 7.0 or
+later** command set and nothing else, which Redis Software, Redis Cloud and Memurai provide at the time of writing.
+Every route that uses them runs `OTPCounters.checkDeployment()` at startup, which tries that transaction on a scratch key
+and **refuses to start** (logs an error and throws) if the `cache` connection is older than Redis 7.0 or otherwise does
+not support it, and also if the connection is unreachable at that moment (the error then says so rather than blaming the
+version), so a Redis outage during a deployment can make the server crash-loop until it is back. If a reply is ever not a number the counter throws, so a broken server fails closed (the request errors)
+rather than letting guesses through. (service-core's own `RateLimiter`, used for
+the generic per-identifier and per-IP limits, relies on `INCREX`, which needs Redis 8.8; on an older server it quietly
+keeps those two limits per process. The one-time code counters do not depend on it.) The guess counter and the claim are
+security controls and apply whether or not rate limiting is enabled; the throttles follow `rateLimit:enabled`. Without a
+`cache` connection the counters are in-process, in a store of their own (not the shared cache that the rate limiter,
+sessions and access token denylist use). That is correct for a single instance, with one caveat: the store holds at most
+100,000 keys and evicts the oldest beyond that, so a flood of distinct keys can reset a counter or free a spent code.
+Use the `cache` connection wherever that matters. If the sessions are in Redis
+but there is no `cache` connection for the counters (a host that supplies its own session store), each route logs a
+warning at startup: with several instances the guesses allowed against one code, and the redemptions of one code, would
+multiply with the number of instances.
+
+The generic limiter's keys for anything a client types (a login id, an e-mail address, a contact, a claimed uid) are
+built with `clientRateLimitKey()`, which puts them under `ratelimit:id:` so a crafted value can never land on an
+internal key such as `elevate:<uid>`. Values longer than 256 characters are hashed under a different prefix
+(`ratelimit:idh:sha256:<hex>`), so no literal value can spell a hashed key. Use it when you add routes that rate limit on
+client input.
+
+The second and third phases of multi-factor authentication are counted separately, on the uid that passed the password
+step, under `ratelimit:mfa:<uid>` (unprefixed like `elevate:<uid>`, so no client input reaches it), and only once the
+request has been matched to that session-held uid. A host that builds `MFAStrategy` itself (not through
+`BaseAuthMFARoute`) **must supply `MFAStrategyOptions.checkPendingRateLimit`**: without it phases 2 and 3 fall back to
+`checkRateLimit(uid)`, which can share a counter with other flows and reopen the lockout. `BaseAuthMFARoute` wires the safe
+`mfa:<uid>` key. A request that never passed the password step, whatever `id` it
+names, and the sign-in route `/auth/otp` therefore cannot spend a user's second-factor allowance. (The password step
+itself is still limited by the identifier typed, as is `/auth/otp`, which is how guessing at those is slowed.)
+
+##### Limits and what they do not stop
+
+A request over a limit fails with a 429; when the failing call is made inside an authentication strategy (`/auth/otp`,
+`/auth/mfa`) the framework reports it as a 401 with the message "Too many attempts. Please try again later.".
+
+The issue limit is checked before the contact is looked up, so a contact that does not exist is throttled exactly like
+one that does. The verification budgets (`verify`, `verifyTotal`, `user`, `userTotal`) are counted only when the session
+holds a pending code for that contact and flow, so a stranger cannot use up a contact's budget by guessing at it: they
+would first have to have codes sent, which is limited per address and is visible to the contact's owner. `verify` and
+`user` are per contact (or user) **and IP address**, so one address cannot drain the allowance of everyone else
+(5 codes x 5 guesses an issue window would otherwise empty a shared 20-per-hour budget from a single address); the
+looser `verifyTotal` and `userTotal` cap the contact or user across all addresses, mirroring `issue` and `issueTotal`.
+The remaining trade-offs:
+
+* **Sign-in codes.** Someone who knows a contact can still send it codes, from several addresses, up to the contact-wide
+  `issueTotal` allowance, which stops the owner requesting a code for that window (and the owner receives every message).
+  Sign-in with another contact, a password or another factor is unaffected. Lower `issueTotal` and raise `issue` to
+  trade one risk for the other.
+* **Verification budgets.** Several addresses together can still use up `verifyTotal` (60 per hour by default) against
+  one contact, or `userTotal` (150 per hour) against one user, after sending codes to it, which blocks code sign-in for
+  that contact for the rest of the hour. Sign-in with another contact, a password or another factor is unaffected.
+* **Addresses.** The per-address keys use the address as the rate limiter sees it. If it cannot be determined it falls
+  back to `unknown`, and everyone without an address shares one allowance. If `trusted_proxies` is not set correctly for
+  your proxy or load balancer, every user appears to come from the proxy's address and shares one per-address allowance
+  (and, behind a proxy you list too broadly, a client can pick its own address with a forged header). Check this
+  setting before relying on any per-address limit.
+* **MFA and elevation.** The code counters there are per user. Someone who holds a user's password can start the MFA
+  step and use up that user's allowance for MFA codes, which blocks the e-mail/SMS factor for a while (not the
+  authenticator app, recovery codes or passkeys) and does not let them in. Elevation is only reachable with a valid
+  session.
+
+If you call the helpers directly: `generateOTP(req, data, config, purpose, userUid?)`, `verifyOTP(req, payload, config,
+purpose, { counters }?)` and `enforceOTPIssueLimit(req, id, config, purpose, { counters }?)` are exported; `purpose` is
+required, and `counters` is an `OTPCounters` (the routes get theirs by injection). Without `counters` only the
+session-held attempt count applies.
+
+Client input fields for these codes must accept letters as well as digits.
+
+##### Session identity during multi-factor authentication
+
+`session.userUid` is set by `TokenUtils.createAuthResult()` on a completed sign-in, and also by service-core's
+`JWTStrategy` from any valid access token presented with the session cookie. The library never puts a partial identity
+in it. Because of the second writer it does **not** prove that anyone signed in, so the OAuth authorize and consent
+endpoints do not use it alone: they require `session.signedInUid`, which only `TokenUtils.createAuthResult()` writes (on a
+completed sign-in; `BaseAuthLogoutRoute` clears it), to equal the authenticated user, and they refuse a request that
+carries the impersonation cookie (`jwt_impersonator`). The OAuth session-token exchange does not set it (it leaves the session alone). `createAuthResult()` also records
+`session.signedInAt` (milliseconds), and authorize and consent load the user and refuse a session that signed in before
+the user's `sessionsRevokedAt` (set by "sign out everywhere", `BaseAccountRoute.revokeSessions()`) or whose user no longer
+exists, so revoking all sessions also stops `/oauth/authorize`. Sessions that predate `signedInUid`/`signedInAt` must sign in
+again or refresh. Already-issued OAuth refresh tokens are not revoked by this. The password
+step of `BaseAuthMFARoute` does not sign the session in, so it records the pending user in `session.mfaPendingUid`
+instead, which phases 2 and 3 use and clear (a failed or throttled attempt clears it, and so does a request naming a
+different uid; a wrong one-time code on a live challenge keeps it so a typo can be retried). Starting a new password
+attempt also clears the method and challenge an earlier attempt selected. The elevation route keeps its own
+`session.elevateUid` in the same way.
+
+Because `JWTStrategy` copies the uid of a valid access token into the session, a `jwt` minted by impersonation, or a
+stolen access token, ends up in `session.userUid` too. Host code that reads it should treat it as "this session holds a
+valid access token for that user"; use `session.signedInUid` where a completed sign-in is what you need to know. A host
+that authenticates `/oauth/authorize` by some other means than a sign-in through this library's routes will now be
+told the user is not logged in.
+
+#### OAuth session-token exchange
+
+`BaseOAuthSessionTokenRoute` trades an OAuth access token for a full session JWT carrying the account's roles. It only
+accepts a token issued by this deployment (signature, issuer, expiry and revocation are verified) to a registered,
+enabled **first-party** client (`Client.firstParty`), whose id is both the token's `client_id` and its sole audience, for
+the authenticated user. Anything else is a 403. A native app signing in through PKCE with a first-party client is
+unaffected. The route now needs a `clientClass` (the Mongo and SQL variants provide it). It only mints the access token:
+the caller's own session (its `userUid`, `signedInUid`, refresh token and activity fields) is left untouched, and the
+response is just `{ token }`.
 
 #### WhatsApp one-time codes
 

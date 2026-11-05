@@ -4,8 +4,16 @@
 ////////////////////////////////////////////////////////////////////////////////
 import { ApiError, type JWTUser } from "@rapidrest/core";
 import { ApiErrors, AuthStrategy, HttpRequest, HttpResponse, AuthResult } from "@rapidrest/service-core";
-import { generateOTP, getRequestData, obfuscateContact, verifyOTP } from "./shared.js";
-import { OTPContact } from "./types.js";
+import type { OTPCounters } from "./OTPCounters.js";
+import {
+    enforceOTPIssueLimit,
+    generateOTP,
+    getRequestData,
+    obfuscateContact,
+    resolveOTPConfig,
+    verifyOTP,
+} from "./shared.js";
+import { OTPConfig, OTPContact } from "./types.js";
 
 /**
  * Describes the configuration options that can be used to initialize OTPStrategy.
@@ -13,6 +21,13 @@ import { OTPContact } from "./types.js";
  * @author Jean-Philippe Steinmetz
  */
 export class OTPStrategyOptions {
+    /** The one-time code configuration (`auth:otp`). Defaults apply for anything not set. */
+    public otpConfig?: OTPConfig;
+    /**
+     * The counters used for the dedicated one-time code limits (`auth:otp:limits`), the atomic per-code attempt
+     * counter and the one-time claim of a success. Without it only the session-held attempt count applies.
+     */
+    public counters?: OTPCounters;
     /**
      * Set to `true` to enable discovery of a user's aliases. Default is `false`.
      *
@@ -109,6 +124,8 @@ export class OTPStrategy implements AuthStrategy {
 
     constructor(options: OTPStrategyOptions) {
         this.options = options;
+        // Fail fast on an unsafe `auth:otp` configuration instead of on the first request.
+        resolveOTPConfig(options.otpConfig);
         this.regexHeaderScheme = new RegExp("^" + this.options.headerScheme + "$", "i");
     }
 
@@ -176,12 +193,17 @@ export class OTPStrategy implements AuthStrategy {
             await this.options.checkRateLimit(payload.id, req);
         }
 
+        // Before the lookup, and whether or not the contact exists, so the limit cannot reveal which contacts are real.
+        await enforceOTPIssueLimit(req, payload.id, this.options.otpConfig, "login", {
+            counters: this.options.counters,
+        });
+
         const contact: OTPContact | undefined = await this.options.getContact(
             payload.id,
             typeof payload.channel === "string" ? payload.channel : undefined,
         );
         if (contact) {
-            const token: string = await generateOTP(req, payload);
+            const token: string = await generateOTP(req, payload, this.options.otpConfig, "login", contact.userUid);
             await this.options.notifyContact(contact, token);
         }
 
@@ -199,9 +221,11 @@ export class OTPStrategy implements AuthStrategy {
         if (this.options.checkRateLimit) {
             await this.options.checkRateLimit(payload.id, req);
         }
-        if (!(await verifyOTP(req, payload))) {
-            return undefined;
-        }
-        return this.options.getUser(payload.id);
+        // No lookup before the code is checked: the per-user limit uses the user the code was issued for, which the
+        // challenge recorded when the contact was resolved to send it.
+        const valid: boolean = await verifyOTP(req, payload, this.options.otpConfig, "login", {
+            counters: this.options.counters,
+        });
+        return valid ? await this.options.getUser(payload.id) : undefined;
     }
 }

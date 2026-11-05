@@ -5,7 +5,7 @@
 import { MessagingUtils, ObjectDecorators } from "@rapidrest/core";
 import { RouteDecorators, DocDecorators, HttpRequest, RepoUtils, ObjectFactory, RateLimiter } from "@rapidrest/service-core";
 import { Alias, AliasType, Secret, SecretType, User } from "../models/types.js";
-import { isWhatsAppConfigured, obfuscateContact } from "../auth/shared.js";
+import { clientRateLimitKey, isWhatsAppConfigured, obfuscateContact } from "../auth/shared.js";
 import { OTPContactType } from "../auth/types.js";
 import { UserUtils } from "./UserUtils.js";
 
@@ -131,7 +131,7 @@ export abstract class BaseAuthDiscoverRoute<U extends User, A extends Alias, S e
             return EMPTY_RESULT;
         }
 
-        await this.rateLimiter?.checkAndIncrement(id, undefined, req);
+        await this.rateLimiter?.checkAndIncrement(clientRateLimitKey(id), undefined, req);
 
         try {
             const user: U | undefined = await this.userUtils?.lookup(id);

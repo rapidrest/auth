@@ -8,7 +8,7 @@ import { BaseAuthLogoutRoute } from "../../src/routes/BaseAuthLogoutRoute.js";
 class TestAuthLogoutRoute extends BaseAuthLogoutRoute {}
 
 function makeReq(overrides: any = {}): any {
-    return { session: { userUid: "user-1", refreshUid: "refresh-uid-1" }, ...overrides };
+    return { session: { userUid: "user-1", signedInUid: "user-1", signedInAt: 1, refreshUid: "refresh-uid-1" }, ...overrides };
 }
 
 function makeRes(): any {
@@ -52,6 +52,8 @@ describe("BaseAuthLogoutRoute Tests", () => {
 
             expect(req.session.userUid).toBeUndefined();
             expect(req.session.refreshUid).toBeUndefined();
+            expect(req.session.signedInUid).toBeUndefined();
+            expect(req.session.signedInAt).toBeUndefined();
         });
 
         it("Does not throw when the request has no session.", async () => {

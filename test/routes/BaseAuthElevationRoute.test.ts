@@ -10,13 +10,15 @@ vi.mock("@simplewebauthn/server", () => ({
     verifyAuthenticationResponse: vi.fn(),
 }));
 
-import { EventUtils, type JWTUser } from "@rapidrest/core";
+import { ApiError, EventUtils, type JWTUser } from "@rapidrest/core";
 import { RepoUtils, type HttpRequest, type HttpResponse } from "@rapidrest/service-core";
 import { generateAuthenticationOptions, verifyAuthenticationResponse } from "@simplewebauthn/server";
 import * as otplib from "otplib";
 import { MFAMethod, MFAMethodType } from "../../src/auth/MFAStrategy.js";
 import { AuthEventType } from "../../src/auth/events.js";
 import { BaseAuthElevationRoute } from "../../src/routes/BaseAuthElevationRoute.js";
+import { OTPCounters } from "../../src/auth/OTPCounters.js";
+import { counterKeyPart as h, generateOTP } from "../../src/auth/shared.js";
 import { UserUtils } from "../../src/routes/UserUtils.js";
 import { AliasType, SecretType } from "../../src/models/types.js";
 import { OTPContactType, PasskeyConfig, StoredPasskeyCredential } from "../../src/auth/types.js";
@@ -133,6 +135,14 @@ describe("BaseAuthElevationRoute Tests", () => {
     });
 
     describe("initialize", () => {
+        it("Fails fast at startup on an unsafe auth:otp configuration.", async () => {
+            const route = new TestAuthElevationRoute();
+            for (const bad of [{ ttl: 0 }, { maxAttempts: 11 }, { alphabet: "ab-cd" }, { length: 4, alphabet: "ab" }]) {
+                (route as any).otpConfig = bad;
+                await expect((route as any).initialize()).rejects.toThrow(/auth:otp/);
+            }
+        });
+
         it("Throws if objectFactory was not injected.", async () => {
             const route = new TestAuthElevationRoute();
             await expect((route as any).initialize()).rejects.toThrow(/objectFactory is not set/);
@@ -198,6 +208,22 @@ describe("BaseAuthElevationRoute Tests", () => {
             await expect(route.elevate({ id: "attacker-controlled-id", password: "x" }, jwtUser, req, makeRes())).rejects.toThrow();
 
             expect(checkAndIncrement).toHaveBeenCalledWith("elevate:user-uid-1", undefined, req);
+        });
+
+        it("Clears a half-finished challenge identity when the elevation rate limit refuses.", async () => {
+            const route = new TestAuthElevationRoute();
+            (route as any).tokenUtils = { createAuthResult: vi.fn() };
+            (route as any).rateLimiter = {
+                checkAndIncrement: vi.fn().mockRejectedValue(new ApiError("AUTH_PERMISSION_FAILURE", 429, "slow down")),
+            };
+            const req = makeReq({ session: { elevateUid: "user-uid-1", mfaMethodId: "secret-1" } });
+
+            await expect(route.elevate({ token: "123456" }, jwtUser, req, makeRes())).rejects.toMatchObject({
+                status: 429,
+            });
+
+            expect((req.session as any).elevateUid).toBeUndefined();
+            expect((req.session as any).mfaMethodId).toBeUndefined();
         });
 
         it("Ignores a client-supplied `id` in the body, forcing the authenticated caller's own uid.", async () => {
@@ -439,6 +465,35 @@ describe("BaseAuthElevationRoute Tests", () => {
             expect((req.session as any).mfaMethodId).toBeUndefined();
         });
 
+        it("Issues the code for the elevate purpose, bound to the caller, after enforcing the issue limit.", async () => {
+            const route = new TestAuthElevationRoute();
+            vi.spyOn(route as any, "getMethod").mockResolvedValue({
+                id: "method-1",
+                type: MFAMethodType.OTP,
+                data: { contact: "test@example.com", type: OTPContactType.EMAIL, verified: true },
+            });
+            vi.spyOn(route as any, "notifyContact").mockResolvedValue(undefined);
+            const counters = new OTPCounters();
+            const throttle = vi.spyOn(counters, "throttle");
+            (route as any).otpCounters = counters;
+            const req = makeReq({ session: {} });
+
+            await (route as any).beginChallenge("method-1", jwtUser, req);
+
+            expect((req.session as any).otp).toMatchObject({ id: "user-uid-1", purpose: "elevate", userUid: "user-uid-1" });
+            expect(throttle).toHaveBeenCalledWith(
+                `issue:elevate:${h("user-uid-1")}:${h("unknown")}`,
+                expect.objectContaining({ maxAttempts: 5 }),
+            );
+
+            throttle.mockRejectedValue(new ApiError("AUTH_PERMISSION_FAILURE", 429, "slow down"));
+            const refused = makeReq({ session: {} });
+            await expect((route as any).beginChallenge("method-1", jwtUser, refused)).rejects.toMatchObject({
+                status: 429,
+            });
+            expect((refused.session as any).otp).toBeUndefined();
+        });
+
         it("Acknowledges a TOTP method selection without sending a notification, and records the method id.", async () => {
             const route = new TestAuthElevationRoute();
             vi.spyOn(route as any, "getMethod").mockResolvedValue({ id: "method-1", type: MFAMethodType.TOTP, data: {} });
@@ -482,10 +537,9 @@ describe("BaseAuthElevationRoute Tests", () => {
     describe("verifyOTPChallenge", () => {
         it("Resolves the user via the session-bound identity, and clears it after, on a valid token.", async () => {
             const route = new TestAuthElevationRoute();
-            const secret = otplib.generateSecret();
-            const token = await otplib.generate({ secret });
             const getUserSpy = vi.spyOn(route as any, "getUser").mockResolvedValue(jwtUser);
-            const req = makeReq({ session: { id: "user-uid-1", secret, elevateUid: "user-uid-1" } });
+            const req = makeReq({ session: { elevateUid: "user-uid-1" } });
+            const token = await generateOTP(req, { id: "user-uid-1" }, undefined, "elevate");
 
             const result = await (route as any).verifyOTPChallenge({ id: "user-uid-1", token }, req);
 
@@ -494,17 +548,31 @@ describe("BaseAuthElevationRoute Tests", () => {
             expect((req.session as any).elevateUid).toBeUndefined();
         });
 
-        it("Returns undefined and clears session state when the token is invalid.", async () => {
+        it("Returns undefined and clears session state when the challenge is out of attempts.", async () => {
             const route = new TestAuthElevationRoute();
+            (route as any).otpConfig = { maxAttempts: 1 };
             const getUserSpy = vi.spyOn(route as any, "getUser");
-            const req = makeReq({
-                session: { id: "user-uid-1", secret: otplib.generateSecret(), elevateUid: "user-uid-1" },
-            });
+            const req = makeReq({ session: { elevateUid: "user-uid-1" } });
+            await generateOTP(req, { id: "user-uid-1" }, undefined, "elevate");
 
             const result = await (route as any).verifyOTPChallenge({ id: "user-uid-1", token: "000000" }, req);
 
             expect(result).toBeUndefined();
             expect(getUserSpy).not.toHaveBeenCalled();
+            expect((req.session as any).elevateUid).toBeUndefined();
+        });
+
+        it("Keeps the session-bound identity after a wrong token while the challenge is live, so a typo can be retried.", async () => {
+            const route = new TestAuthElevationRoute();
+            const getUserSpy = vi.spyOn(route as any, "getUser").mockResolvedValue(jwtUser);
+            const req = makeReq({ session: { elevateUid: "user-uid-1" } });
+            const token = await generateOTP(req, { id: "user-uid-1" }, undefined, "elevate");
+
+            expect(await (route as any).verifyOTPChallenge({ id: "user-uid-1", token: "000000" }, req)).toBeUndefined();
+            expect((req.session as any).elevateUid).toBe("user-uid-1");
+
+            expect(await (route as any).verifyOTPChallenge({ id: "user-uid-1", token }, req)).toEqual(jwtUser);
+            expect(getUserSpy).toHaveBeenCalledWith("user-uid-1");
             expect((req.session as any).elevateUid).toBeUndefined();
         });
 
@@ -519,18 +587,91 @@ describe("BaseAuthElevationRoute Tests", () => {
             const route = new TestAuthElevationRoute();
             const req = makeReq({
                 session: {
-                    id: "user-uid-1",
-                    secret: otplib.generateSecret(),
                     elevateUid: "user-uid-1",
                     userUid: "user-uid-1",
                     refreshUid: "refresh-uid-1",
                 },
             });
 
+            await generateOTP(req, { id: "user-uid-1" }, undefined, "elevate");
             await (route as any).verifyOTPChallenge({ id: "user-uid-1", token: "000000" }, req);
 
             expect((req.session as any).userUid).toBe("user-uid-1");
             expect((req.session as any).refreshUid).toBe("refresh-uid-1");
+        });
+    });
+
+    describe("verifyOTPChallenge (cross-flow and failure handling)", () => {
+        it("Clears the session-bound identity when verification throws.", async () => {
+            const route = new TestAuthElevationRoute();
+
+            // No challenge at all.
+            const none = makeReq({ session: { elevateUid: "user-uid-1" } });
+            expect(await (route as any).verifyOTPChallenge({ id: "user-uid-1", token: "AAAAAA" }, none)).toBeUndefined();
+            expect((none.session as any).elevateUid).toBeUndefined();
+
+            // A challenge issued for a different id.
+            const other = makeReq({ session: { elevateUid: "user-uid-1" } });
+            await generateOTP(other, { id: "someone-else" }, undefined, "elevate");
+            expect(await (route as any).verifyOTPChallenge({ id: "user-uid-1", token: "AAAAAA" }, other)).toBeUndefined();
+            expect((other.session as any).elevateUid).toBeUndefined();
+        });
+
+        it("Rejects a code issued by another flow (sign-in, MFA, registration, contact verification).", async () => {
+            const route = new TestAuthElevationRoute();
+            const getUserSpy = vi.spyOn(route as any, "getUser").mockResolvedValue(jwtUser);
+            for (const purpose of ["login", "mfa", "register", "contact"] as const) {
+                const req = makeReq({ session: { elevateUid: "user-uid-1" } });
+                const token = await generateOTP(req, { id: "user-uid-1" }, undefined, purpose);
+
+                expect(await (route as any).verifyOTPChallenge({ id: "user-uid-1", token }, req)).toBeUndefined();
+                expect((req.session as any).elevateUid).toBeUndefined();
+                expect((req.session as any).otp).toBeUndefined();
+            }
+            expect(getUserSpy).not.toHaveBeenCalled();
+        });
+
+        it("Refuses a payload id that is not the identity the challenge was begun for.", async () => {
+            const route = new TestAuthElevationRoute();
+            const getUserSpy = vi.spyOn(route as any, "getUser").mockResolvedValue(jwtUser);
+            const req = makeReq({ session: { elevateUid: "user-uid-1" } });
+            const token = await generateOTP(req, { id: "other-uid" }, undefined, "elevate");
+
+            expect(await (route as any).verifyOTPChallenge({ id: "other-uid", token }, req)).toBeUndefined();
+            expect(getUserSpy).not.toHaveBeenCalled();
+            expect((req.session as any).elevateUid).toBeUndefined();
+        });
+
+        it("Counts verification against the user's uid with the dedicated counters, and clears the identity when they refuse.", async () => {
+            const route = new TestAuthElevationRoute();
+            vi.spyOn(route as any, "getUser").mockResolvedValue(jwtUser);
+            const counters = new OTPCounters();
+            const throttle = vi.spyOn(counters, "throttle");
+            (route as any).otpCounters = counters;
+            const req = makeReq({ session: { elevateUid: "user-uid-1" } });
+            const token = await generateOTP(req, { id: "user-uid-1" }, undefined, "elevate", "user-uid-1");
+
+            expect(await (route as any).verifyOTPChallenge({ id: "user-uid-1", token }, req)).toEqual(jwtUser);
+            const keys = throttle.mock.calls.map((c: any[]) => c[0]);
+            expect(keys).toContain(`verify:elevate:${h("user-uid-1")}:${h("unknown")}`);
+            expect(keys).toContain(`user:elevate:${h("user-uid-1")}:${h("unknown")}`);
+
+            const limited = makeReq({ session: { elevateUid: "user-uid-1" } });
+            const limitedToken = await generateOTP(limited, { id: "user-uid-1" }, undefined, "elevate", "user-uid-1");
+            throttle.mockRejectedValue(new ApiError("AUTH_PERMISSION_FAILURE", 429, "slow down"));
+            await expect(
+                (route as any).verifyOTPChallenge({ id: "user-uid-1", token: limitedToken }, limited),
+            ).rejects.toMatchObject({ status: 429 });
+            // A throttled verification leaves nothing half-finished behind, even though the code is still pending.
+            expect((limited.session as any).elevateUid).toBeUndefined();
+        });
+
+        it("Clears the identity when the verification throws anything other than a rate limit.", async () => {
+            const route = new TestAuthElevationRoute();
+            const req = makeReq({ session: { elevateUid: "user-uid-1" } });
+            // No challenge at all: verifyOTP() throws, which is reported as a failed verification.
+            expect(await (route as any).verifyOTPChallenge({ id: "user-uid-1", token: "AAAAAA" }, req)).toBeUndefined();
+            expect((req.session as any).elevateUid).toBeUndefined();
         });
     });
 

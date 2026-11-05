@@ -34,6 +34,7 @@ import { OAuthRefreshTokenSQL } from "../../../src/models/sql/OAuthRefreshTokenS
 import { SigningKeySQL } from "../../../src/models/sql/SigningKeySQL.js";
 import { ClientType, SecretType, TokenEndpointAuthMethod } from "../../../src/models/types.js";
 import { normalizePasswordSubmission } from "../../../src/auth/shared.js";
+import { OAuthTokenUtils } from "../../../src/auth/OAuthTokenUtils.js";
 import { PasswordConfig } from "../../../src/auth/types.js";
 
 const hashPasswordForLogin = async function (password: string, userUid: string): Promise<string> {
@@ -308,6 +309,149 @@ describe("Route:OAuthSessionTokenSQL Tests", () => {
                 .set("Authorization", `Bearer ${accessToken}`);
 
             expect(result.status).toBe(401);
+        });
+
+        describe("only an access token issued to a first-party client can be exchanged", () => {
+            const exchange = (token: string) =>
+                request(server.getApplication()).post("/sql/oauth/session-token").set("Authorization", `Bearer ${token}`);
+
+            /** Signs an access token with the deployment's own key, claiming whatever the test needs. */
+            const sign = async (claims: Record<string, any>, userUid: string): Promise<string> => {
+                const utils: any = objectFactory.getInstance<any>(OAuthTokenUtils);
+                const { kid, privateKeyPem } = await utils.signingKeyUtils.getSigningMaterial();
+                return JWTUtils.createToken(
+                    { secret: privateKeyPem, options: utils.buildSignOptions(kid, 900) },
+                    { uid: userUid, roles: [], scopes: [] },
+                    { sub: userUid, scope: "openid", jti: crypto.randomUUID(), ...claims },
+                );
+            };
+
+            const createThirdPartyClient = (data: any = {}) =>
+                clientRepo.save(
+                    new ClientSQL({
+                        clientType: ClientType.PUBLIC,
+                        clientName: "third-party",
+                        redirectUris: ["https://third.example/cb"],
+                        grantTypes: ["authorization_code"],
+                        responseTypes: ["code"],
+                        scope: "openid profile",
+                        tokenEndpointAuthMethod: TokenEndpointAuthMethod.NONE,
+                        requirePkce: true,
+                        firstParty: false,
+                        ...data,
+                    }),
+                );
+
+            it("Refuses a token issued to a third-party client, however it was obtained.", async () => {
+                const user = await createUserSQL({ roles: ["editor"] });
+                const third = await createThirdPartyClient();
+                const utils: any = objectFactory.getInstance<any>(OAuthTokenUtils);
+                const issued = await utils.createAccessToken(third, { uid: user.uid, roles: [], scopes: [] }, ["openid"]);
+
+                const result = await exchange(issued.token);
+
+                expect(result.status).toBe(403);
+                expect(result.body?.token).toBeUndefined();
+            });
+
+            it("Still exchanges a first-party client's token (a native app signing in with PKCE).", async () => {
+                const user = await createUserSQL({ roles: ["editor"] });
+                await createSecretSQL({ userUid: user.uid });
+                const client = await createNativeClient();
+
+                const result = await exchange(await issueAccessToken(user, client, "openid profile"));
+
+                expect(result.status).toBe(200);
+                expect(typeof result.body.token).toBe("string");
+            });
+
+            it("Refuses a first-party client's token once the client is disabled.", async () => {
+                const user = await createUserSQL();
+                await createSecretSQL({ userUid: user.uid });
+                const client = await createNativeClient();
+                const token = await issueAccessToken(user, client, "openid");
+                client.disabled = true;
+                await clientRepo.save(client);
+
+                expect((await exchange(token)).status).toBe(403);
+            });
+
+            it("Refuses a token whose audience is not the client it names.", async () => {
+                const user = await createUserSQL();
+                const client = await createNativeClient();
+
+                const wrongAudience = await sign({ aud: "https://elsewhere.example", client_id: client.uid }, user.uid);
+                expect((await exchange(wrongAudience)).status).toBe(403);
+
+                const second = await sign({ aud: [client.uid, "https://elsewhere.example"], client_id: client.uid }, user.uid);
+                expect((await exchange(second)).status).toBe(403);
+
+                // The control: the same claims with a matching audience are accepted.
+                const matching = await sign({ aud: client.uid, client_id: client.uid }, user.uid);
+                expect((await exchange(matching)).status).toBe(200);
+            });
+
+            it("Refuses a token that names no client, or a client this deployment does not have.", async () => {
+                const user = await createUserSQL();
+
+                expect((await exchange(await sign({ aud: "nobody" }, user.uid))).status).toBe(403);
+                expect((await exchange(await sign({ aud: "ghost", client_id: "ghost" }, user.uid))).status).toBe(403);
+            });
+
+            it("Does not leave the caller's session marked as signed in by the exchange.", async () => {
+                const user = await createUserSQL({ roles: ["editor"] });
+                await createSecretSQL({ userUid: user.uid });
+                const client = await createNativeClient();
+                const token = await issueAccessToken(user, client, "openid");
+
+                const bystander = agent(server.getApplication());
+                await bystander.post("/sql/oauth/session-token").set("Authorization", `Bearer ${token}`);
+
+                // The session the exchange ran in cannot get an authorization code from /oauth/authorize.
+                const { challenge } = buildPkce();
+                const authorized = await bystander.get(
+                    withQuery("/sql/oauth/authorize", {
+                        response_type: "code",
+                        client_id: client.uid,
+                        redirect_uri: "rapidmx://auth/callback",
+                        scope: "openid",
+                        code_challenge: challenge,
+                        code_challenge_method: "S256",
+                    }),
+                );
+                expect(authorized.body).toEqual({ loginRequired: true });
+            });
+
+            it("Leaves a signed-in caller's own session untouched: still signed in, and its refresh token still works.", async () => {
+                const user = await createUserSQL({ roles: ["editor"] });
+                await createSecretSQL({ userUid: user.uid });
+                const client = await createNativeClient();
+                const token = await issueAccessToken(user, client, "openid");
+
+                const signedIn = await loginAgent(user);
+                const exchanged = await signedIn.post("/sql/oauth/session-token").set("Authorization", `Bearer ${token}`);
+                expect(exchanged.status).toBe(200);
+                expect(Object.keys(exchanged.body)).toEqual(["token"]);
+
+                // The exchange rotated nothing: the refresh cookie from the sign-in still refreshes (a rotated one would
+                // have been replaced, an overwritten `refreshUid` would be rejected)...
+                const refreshed = await signedIn.get("/sql/auth/refresh");
+                expect(refreshed.status).toBe(200);
+
+                // ...and the session is still the sign-in it was, so it can still be given an authorization code.
+                const { challenge } = buildPkce();
+                const authorized = await signedIn.get(
+                    withQuery("/sql/oauth/authorize", {
+                        response_type: "code",
+                        client_id: client.uid,
+                        redirect_uri: "rapidmx://auth/callback",
+                        scope: "openid",
+                        code_challenge: challenge,
+                        code_challenge_method: "S256",
+                    }),
+                );
+                expect(authorized.body.redirectTo).toContain("code=");
+            });
         });
     });
 });

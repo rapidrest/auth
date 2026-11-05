@@ -17,7 +17,9 @@ import {
 } from "@rapidrest/service-core";
 import { Alias, AliasType, AuthResult, SystemSettings, User } from "../models/types.js";
 import { SystemSettingsUtils } from "./SystemSettingsUtils.js";
-import { generateOTP, verifyOTP } from "../auth/shared.js";
+import { OTPCounters } from "../auth/OTPCounters.js";
+import { clientRateLimitKey, enforceOTPIssueLimit, generateOTP, resolveOTPConfig, verifyOTP } from "../auth/shared.js";
+import { OTPConfig } from "../auth/types.js";
 import { AuditLogUtils } from "../auth/AuditLogUtils.js";
 import { AuthEventType } from "../auth/events.js";
 import { TokenUtils } from "../auth/TokenUtils.js";
@@ -74,8 +76,16 @@ export abstract class BaseRegistrationRoute<U extends User, A extends Alias> {
     @Inject(MessagingUtils)
     protected messagingUtils?: MessagingUtils;
 
+    /** The configuration of the one-time codes sent by e-mail, SMS or WhatsApp (`auth:otp`). */
+    @Config("auth:otp", {})
+    protected otpConfig: OTPConfig = {};
+
     @Inject(RateLimiter)
     protected rateLimiter?: RateLimiter;
+
+    /** The counters behind the one-time code limits, guess counter and one-time claim. */
+    @Inject(OTPCounters)
+    protected otpCounters?: OTPCounters;
 
     @Inject(TokenUtils)
     protected tokenUtils?: TokenUtils;
@@ -88,6 +98,10 @@ export abstract class BaseRegistrationRoute<U extends User, A extends Alias> {
 
     @Init
     protected async initialize(): Promise<void> {
+        // Fail fast on an unsafe `auth:otp` configuration instead of on the first request.
+        resolveOTPConfig(this.otpConfig);
+        await this.otpCounters?.checkDeployment(this._objectFactory);
+
         if (!this._objectFactory) {
             throw new Error("objectFactory is not set.");
         }
@@ -159,7 +173,8 @@ export abstract class BaseRegistrationRoute<U extends User, A extends Alias> {
             // existing identifier and a non-existing one are throttled identically — otherwise the two
             // branches are distinguishable by request-rate tolerance alone, defeating the point of the
             // identical `{}` response used for both.
-            await this.rateLimiter?.checkAndIncrement(email, undefined, req);
+            await this.rateLimiter?.checkAndIncrement(clientRateLimitKey(email), undefined, req);
+            await enforceOTPIssueLimit(req, email, this.otpConfig, "register", { counters: this.otpCounters });
 
             const existing = await this.aliasRepo.find(
                 {
@@ -174,7 +189,7 @@ export abstract class BaseRegistrationRoute<U extends User, A extends Alias> {
                 return {};
             }
 
-            const token = await generateOTP(req, { id: email });
+            const token = await generateOTP(req, { id: email }, this.otpConfig, "register");
             this.messagingUtils?.sendEmail("register-otp", { totp: token }, { to: email }).catch((err) => {
                 this.logger.debug(`Failed to send verification e-mail: ${err}`);
             });
@@ -184,7 +199,8 @@ export abstract class BaseRegistrationRoute<U extends User, A extends Alias> {
         } else if (phone) {
             // See the email branch above for why this runs unconditionally, before the "already
             // registered" check.
-            await this.rateLimiter?.checkAndIncrement(phone, undefined, req);
+            await this.rateLimiter?.checkAndIncrement(clientRateLimitKey(phone), undefined, req);
+            await enforceOTPIssueLimit(req, phone, this.otpConfig, "register", { counters: this.otpCounters });
 
             const existing = await this.aliasRepo.find(
                 {
@@ -199,7 +215,7 @@ export abstract class BaseRegistrationRoute<U extends User, A extends Alias> {
                 return {};
             }
 
-            const token = await generateOTP(req, { id: phone });
+            const token = await generateOTP(req, { id: phone }, this.otpConfig, "register");
             this.messagingUtils?.sendSMS("register-otp", { totp: token }, { to: phone }).catch((err) => {
                 this.logger.debug(`Failed to send verification SMS: ${err}`);
             });
@@ -243,12 +259,19 @@ export abstract class BaseRegistrationRoute<U extends User, A extends Alias> {
             throw new ApiError(ApiErrors.INVALID_REQUEST, 400, "An id and verification code are required.");
         }
 
-        await this.rateLimiter?.checkAndIncrement(id, undefined, req);
+        await this.rateLimiter?.checkAndIncrement(clientRateLimitKey(id), undefined, req);
 
         let valid: boolean;
         try {
-            valid = await verifyOTP(req, { id, token });
+            valid = await verifyOTP(req, { id, token }, this.otpConfig, "register", {
+                counters: this.otpCounters,
+            });
         } catch (err) {
+            // A rate limit is reported as such; everything else (no challenge, a challenge for something else) is
+            // simply an invalid code.
+            if (err instanceof ApiError && err.status === 429) {
+                throw err;
+            }
             valid = false;
         }
         if (!valid) {

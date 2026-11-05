@@ -14,9 +14,11 @@ import {
 } from "@rapidrest/service-core";
 import { Contact, ContactType, Profile } from "../models/types.js";
 import { ApiError, JWTUser, MessagingUtils, ObjectDecorators, UserUtils } from "@rapidrest/core";
-import { generateOTP, verifyOTP } from "../auth/shared.js";
+import { OTPCounters } from "../auth/OTPCounters.js";
+import { clientRateLimitKey, enforceOTPIssueLimit, generateOTP, resolveOTPConfig, verifyOTP } from "../auth/shared.js";
+import { OTPConfig } from "../auth/types.js";
 
-const { Config, Inject, Logger } = ObjectDecorators;
+const { Config, Init, Inject, Logger } = ObjectDecorators;
 const { Description, Returns, Summary } = DocDecorators;
 const { Auth, Delete, Get, Param, Post, Put, Query, Request, User, Validate } = RouteDecorators;
 
@@ -33,8 +35,25 @@ export abstract class BaseProfileRoute<T extends Profile> extends CRUDRoute<T> {
     @Inject(MessagingUtils)
     protected messagingUtils?: MessagingUtils;
 
+    /** The configuration of the one-time codes sent by e-mail, SMS or WhatsApp (`auth:otp`). */
+    @Config("auth:otp", {})
+    protected otpConfig: OTPConfig = {};
+
     @Inject(RateLimiter)
     protected rateLimiter?: RateLimiter;
+
+    /** The counters behind the one-time code limits, guess counter and one-time claim. */
+    @Inject(OTPCounters)
+    protected otpCounters?: OTPCounters;
+
+    /**
+     * Called on server startup. Fails fast on an unsafe `auth:otp` configuration instead of on the first request.
+     */
+    @Init
+    protected async initializeOTP(): Promise<void> {
+        resolveOTPConfig(this.otpConfig);
+        await this.otpCounters?.checkDeployment(this._objectFactory);
+    }
 
     @Summary("Create Profile(s)")
     @Description(
@@ -48,7 +67,7 @@ export abstract class BaseProfileRoute<T extends Profile> extends CRUDRoute<T> {
         for (const r of results) {
             if (r.contacts) {
                 try {
-                    await this.sendContactsVerification(req, [], r.contacts);
+                    await this.sendContactsVerification(req, [], r.contacts, r.uid);
                 } catch (err) {
                     this.logger?.debug(`[BaseProfileRoute] Failed to send contact verification: ${err}`);
                 }
@@ -183,7 +202,7 @@ export abstract class BaseProfileRoute<T extends Profile> extends CRUDRoute<T> {
 
         for (const contact of existing.contacts) {
             if (contact.contact === contactId) {
-                await this.sendVerificationCode(contact, req);
+                await this.sendVerificationCode(contact, req, targetUid);
             }
         }
     }
@@ -208,12 +227,17 @@ export abstract class BaseProfileRoute<T extends Profile> extends CRUDRoute<T> {
      * present (by `contact`+`type`) in `previous` — i.e. a genuinely new, unverified addition, not a
      * resave of an unrelated profile field. Mirrors `BaseRegistrationRoute.start()`'s OTP issuance.
      *
-     * NOTE: `generateOTP`'s session state (`req.session.id/secret/token`) is a single unnamespaced slot
+     * NOTE: `generateOTP`'s session state (`req.session.otp`) is a single unnamespaced slot
      * shared with login-OTP and registration-OTP — if `next` contains more than one newly-added unverified
      * contact, only the last one processed remains verifiable in this session. Callers are expected to add
      * one contact at a time (matches this session's existing framework-wide limitation, not fixed here).
      */
-    protected async sendContactsVerification(req: HttpRequest, previous: Contact[], next: Contact[]): Promise<void> {
+    protected async sendContactsVerification(
+        req: HttpRequest,
+        previous: Contact[],
+        next: Contact[],
+        userUid?: string,
+    ): Promise<void> {
         const isNew = (c: Contact): boolean => !previous.some((p) => p.contact === c.contact && p.type === c.type);
 
         for (const contact of next) {
@@ -221,20 +245,21 @@ export abstract class BaseProfileRoute<T extends Profile> extends CRUDRoute<T> {
                 continue;
             }
 
-            await this.sendVerificationCode(contact, req);
+            await this.sendVerificationCode(contact, req, userUid);
         }
     }
 
     /**
      * Sends a one-time verification code to the unverified contact.
      */
-    protected async sendVerificationCode(contact: Contact, req: HttpRequest): Promise<void> {
+    protected async sendVerificationCode(contact: Contact, req: HttpRequest, userUid?: string): Promise<void> {
         if (contact.verified) {
             return;
         }
 
-        await this.rateLimiter?.checkAndIncrement(contact.contact, undefined, req);
-        const token = await generateOTP(req, { id: contact.contact });
+        await this.rateLimiter?.checkAndIncrement(clientRateLimitKey(contact.contact), undefined, req);
+        await enforceOTPIssueLimit(req, contact.contact, this.otpConfig, "contact", { counters: this.otpCounters });
+        const token = await generateOTP(req, { id: contact.contact }, this.otpConfig, "contact", userUid);
 
         if (contact.type === ContactType.EMAIL) {
             this.messagingUtils
@@ -291,7 +316,7 @@ export abstract class BaseProfileRoute<T extends Profile> extends CRUDRoute<T> {
         // no-op here. Failure to send (e.g. rate-limited) must not fail the profile update itself.
         if (obj.contacts) {
             try {
-                await this.sendContactsVerification(req, existing.contacts ?? [], obj.contacts);
+                await this.sendContactsVerification(req, existing.contacts ?? [], obj.contacts, existing.uid);
             } catch (err) {
                 this.logger?.debug(`[BaseProfileRoute] Failed to send contact verification: ${err}`);
             }
@@ -343,12 +368,19 @@ export abstract class BaseProfileRoute<T extends Profile> extends CRUDRoute<T> {
             throw new ApiError(ApiErrors.NOT_FOUND, 404, "No such contact on this Profile.");
         }
 
-        await this.rateLimiter?.checkAndIncrement(contact, undefined, req);
+        await this.rateLimiter?.checkAndIncrement(clientRateLimitKey(contact), undefined, req);
 
         let valid = false;
         try {
-            valid = await verifyOTP(req, { id: contact, token: obj?.token });
-        } catch {
+            valid = await verifyOTP(req, { id: contact, token: obj?.token }, this.otpConfig, "contact", {
+                counters: this.otpCounters,
+            });
+        } catch (err) {
+            // A rate limit is reported as such; everything else (no challenge, a challenge for something else) is
+            // simply an invalid code.
+            if (err instanceof ApiError && err.status === 429) {
+                throw err;
+            }
             valid = false;
         }
         if (!valid) {

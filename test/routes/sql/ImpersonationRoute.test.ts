@@ -9,6 +9,7 @@
 // actually rejected by the framework's own @RequiresTrustedRole() middleware.
 import config from "../../config";
 import * as argon2 from "argon2";
+import * as crypto from "crypto";
 import { agent, request } from "@rapidrest/service-core/test";
 import {
     ACLRecord,
@@ -25,7 +26,8 @@ import { Repository } from "typeorm";
 import { UserSQL } from "../../../src/models/sql/UserSQL.js";
 import { MongoMemoryServer } from "mongodb-memory-server";
 import { SecretSQL } from "../../../src/models/sql/SecretSQL.js";
-import { SecretType } from "../../../src/models/types.js";
+import { ClientSQL } from "../../../src/models/sql/ClientSQL.js";
+import { ClientType, SecretType, TokenEndpointAuthMethod } from "../../../src/models/types.js";
 import { normalizePasswordSubmission } from "../../../src/auth/shared.js";
 import { PasswordConfig } from "../../../src/auth/types.js";
 
@@ -57,6 +59,7 @@ describe("Route:ImpersonationSQL Tests", () => {
     let userRepo: Repository<UserSQL>;
     let aclRepo: MongoRepository<any>;
     let secretRepo: Repository<SecretSQL>;
+    let clientRepo: Repository<ClientSQL>;
 
     const withOwnerACL = async function (uid: string, parentUid: string, ownerId: string): Promise<void> {
         const records: ACLRecord[] = [
@@ -122,6 +125,7 @@ describe("Route:ImpersonationSQL Tests", () => {
         if (isSqlDataSource(conn)) {
             userRepo = conn.getRepository(UserSQL);
             secretRepo = conn.getRepository(SecretSQL);
+            clientRepo = conn.getRepository(ClientSQL);
         } else {
             throw new Error("Could not find sql connection");
         }
@@ -136,6 +140,7 @@ describe("Route:ImpersonationSQL Tests", () => {
     beforeEach(async () => {
         await userRepo.clear();
         await secretRepo.clear();
+        await clientRepo.clear();
     });
 
     it("Cannot impersonate without authentication.", async () => {
@@ -240,4 +245,220 @@ describe("Route:ImpersonationSQL Tests", () => {
             expect(secondStopResult.body).toEqual({ restored: false });
         },
     );
+
+    describe("a code from /oauth/authorize requires a completed sign-in in the session", () => {
+        // `session.userUid` is also written by service-core's `JWTStrategy` from any valid access token presented
+        // with the session cookie, so by itself it proves nothing. `session.signedInUid` is written only by a
+        // completed sign-in (`TokenUtils.createAuthResult()`), and is what `/oauth/authorize` requires.
+        const authorizeUrl = "/sql/oauth/authorize";
+        const logoutUrl = "/sql/auth/logout";
+        const aliasesUrl = "/sql/aliases";
+
+        const createOAuthClient = () =>
+            clientRepo.save(
+                new ClientSQL({
+                    clientType: ClientType.PUBLIC,
+                    clientName: "Mobile App",
+                    redirectUris: ["app://callback"],
+                    grantTypes: ["authorization_code"],
+                    responseTypes: ["code"],
+                    scope: "openid profile",
+                    tokenEndpointAuthMethod: TokenEndpointAuthMethod.NONE,
+                    requirePkce: true,
+                    firstParty: true,
+                }),
+            );
+
+        const authorize = async (client: any, oauthClient: any) => {
+            const challenge = crypto.createHash("sha256").update(crypto.randomBytes(32).toString("base64url"), "ascii");
+            const params = {
+                response_type: "code",
+                client_id: oauthClient.uid,
+                redirect_uri: "app://callback",
+                scope: "openid profile",
+                code_challenge: challenge.digest("base64url"),
+                code_challenge_method: "S256",
+            };
+            return await client.get(
+                `${authorizeUrl}?${Object.entries(params)
+                    .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
+                    .join("&")}`,
+            );
+        };
+
+        const issuedCode = (result: any): boolean =>
+            !!result.body?.redirectTo && new URL(result.body.redirectTo).searchParams.has("code");
+
+        it("Issues a code after a normal completed sign-in.", async () => {
+            const user = await createUserSQL();
+            await createSecretSQL(user.uid);
+            const oauthClient = await createOAuthClient();
+            const client = agent(server.getApplication());
+            await login(client, user.uid);
+
+            expect(issuedCode(await authorize(client, oauthClient))).toBe(true);
+        });
+
+        it("Refuses a jwt minted by impersonation, in the impersonator's own session and in a fresh one.", async () => {
+            const admin = await createUserSQL({ roles: ["admin"] });
+            await createSecretSQL(admin.uid);
+            const target = await createUserSQL();
+            const oauthClient = await createOAuthClient();
+            const client = agent(server.getApplication());
+            const loginToken = await login(client, admin.uid);
+            await elevate(client, loginToken);
+
+            const impersonated = await client.post(impersonateUrl).send({ userUid: target.uid });
+            expect(impersonated.status).toBeLessThan(300);
+
+            // An authenticated request makes `JWTStrategy` copy the impersonated uid into the session.
+            await client.get(aliasesUrl);
+            const result = await authorize(client, oauthClient);
+            expect(result.body).toEqual({ loginRequired: true });
+            expect(issuedCode(result)).toBe(false);
+
+            // The impersonation token on its own, with a session that never completed a sign-in.
+            const bystander = agent(server.getApplication());
+            await bystander.get(aliasesUrl).set("Authorization", "jwt " + impersonated.body.token);
+            const bare = await authorize(bystander, oauthClient);
+            expect(issuedCode(bare)).toBe(false);
+        });
+
+        it("Refuses a stolen access token presented in a session the thief already holds (signed out).", async () => {
+            const victim = await createUserSQL();
+            await createSecretSQL(victim.uid);
+            const thiefUser = await createUserSQL();
+            await createSecretSQL(thiefUser.uid);
+            const oauthClient = await createOAuthClient();
+            const stolen = await login(agent(server.getApplication()), victim.uid);
+
+            // A session the thief holds because they signed in as themselves, then logged out.
+            const thief = agent(server.getApplication());
+            await login(thief, thiefUser.uid);
+            expect((await thief.post(logoutUrl)).status).toBeLessThan(300);
+
+            // `JWTStrategy` copies the victim's uid into the session they already hold.
+            await thief.get(aliasesUrl).set("Authorization", "jwt " + stolen);
+            const result = await authorize(thief, oauthClient);
+            expect(result.body).toEqual({ loginRequired: true });
+            expect(issuedCode(result)).toBe(false);
+        });
+
+        it("Refuses once the user has logged out, because logout clears the sign-in marker.", async () => {
+            const user = await createUserSQL();
+            await createSecretSQL(user.uid);
+            const oauthClient = await createOAuthClient();
+            const client = agent(server.getApplication());
+            const token = await login(client, user.uid);
+            expect(issuedCode(await authorize(client, oauthClient))).toBe(true);
+
+            expect((await client.post(logoutUrl)).status).toBeLessThan(300);
+            // The access token is still valid and is presented again, as a stolen one would be.
+            await client.get(aliasesUrl).set("Authorization", "jwt " + token);
+
+            expect(issuedCode(await authorize(client, oauthClient))).toBe(false);
+        });
+
+        describe("signing out everywhere also stops /oauth/authorize", () => {
+            // `revokeSessions()` stamps `sessionsRevokedAt` on the user; a session whose sign-in (`signedInAt`) is older
+            // than that stamp is no longer a sign-in, even though its cookie and `signedInUid` are intact.
+            const refreshUrl = "/sql/auth/refresh";
+            const accountUrl = "/sql/account";
+            const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+            /** Signs `uid` in on a second session, elevates it and revokes every session of the account. */
+            const revokeFromSecondSession = async (uid: string) => {
+                const second = agent(server.getApplication());
+                const elevated = await elevate(second, await login(second, uid));
+                const result = await second.post(`${accountUrl}/${uid}/revokeSessions`).set("Authorization", "jwt " + elevated);
+                expect(result.status).toBeGreaterThanOrEqual(200);
+                expect(result.status).toBeLessThan(300);
+            };
+
+            it("Refuses a session that signed in before the revoke, and accepts it again once the user signs in anew.", async () => {
+                const user = await createUserSQL();
+                await createSecretSQL(user.uid);
+                const oauthClient = await createOAuthClient();
+                const first = agent(server.getApplication());
+                await login(first, user.uid);
+                expect(issuedCode(await authorize(first, oauthClient))).toBe(true);
+
+                await revokeFromSecondSession(user.uid);
+
+                const stale = await authorize(first, oauthClient);
+                expect(stale.body).toEqual({ loginRequired: true });
+
+                // Signing in again in that same session stamps a newer `signedInAt`.
+                await sleep(5);
+                await login(first, user.uid);
+                expect(issuedCode(await authorize(first, oauthClient))).toBe(true);
+            });
+
+            it("Refuses a stale session under prompt=none with login_required.", async () => {
+                const user = await createUserSQL();
+                await createSecretSQL(user.uid);
+                const oauthClient = await createOAuthClient();
+                const first = agent(server.getApplication());
+                await login(first, user.uid);
+                await revokeFromSecondSession(user.uid);
+
+                const result = await first.get(
+                    `${authorizeUrl}?response_type=code&client_id=${oauthClient.uid}&redirect_uri=${encodeURIComponent(
+                        "app://callback",
+                    )}&scope=openid&code_challenge=${"a".repeat(43)}&code_challenge_method=S256&prompt=none`,
+                );
+                expect(issuedCode(result)).toBe(false);
+                expect(String(result.body?.redirectTo ?? "")).toContain("error=login_required");
+            });
+
+            it("Refuses a session whose user no longer exists.", async () => {
+                const user = await createUserSQL();
+                await createSecretSQL(user.uid);
+                const oauthClient = await createOAuthClient();
+                const client = agent(server.getApplication());
+                await login(client, user.uid);
+                await userRepo.clear();
+
+                expect((await authorize(client, oauthClient)).body).toEqual({ loginRequired: true });
+            });
+
+            it("Still authorizes after a refresh, for a session that signed in after the revoke.", async () => {
+                const user = await createUserSQL();
+                await createSecretSQL(user.uid);
+                const oauthClient = await createOAuthClient();
+                await revokeFromSecondSession(user.uid);
+                // Refresh tokens are checked at whole-second precision (`iat`), so let the revoke's second pass.
+                await sleep(1100);
+
+                const client = agent(server.getApplication());
+                await login(client, user.uid);
+                const refreshed = await client.get(refreshUrl);
+                expect(refreshed.status).toBeGreaterThanOrEqual(200);
+                expect(refreshed.status).toBeLessThan(300);
+
+                expect(issuedCode(await authorize(client, oauthClient))).toBe(true);
+            });
+
+            it("Behaves as documented right after stopping an impersonation.", async () => {
+                // Observed behaviour: impersonation leaves the impersonator's own sign-in (`signedInUid`, `signedInAt`) in the
+                // session, and the restored cookie is theirs again, so authorize works immediately after the stop (and
+                // while the impersonation cookie is present it is refused, see the test above). Their sign-in is not older
+                // than any revoke.
+                const admin = await createUserSQL({ roles: ["admin"] });
+                await createSecretSQL(admin.uid);
+                const target = await createUserSQL();
+                const oauthClient = await createOAuthClient();
+                const client = agent(server.getApplication());
+                await elevate(client, await login(client, admin.uid));
+                expect((await client.post(impersonateUrl).send({ userUid: target.uid })).status).toBeLessThan(300);
+                await client.get(aliasesUrl);
+
+                expect((await client.post(stopUrl)).status).toBeLessThan(300);
+                expect(issuedCode(await authorize(client, oauthClient))).toBe(true);
+
+                await client.get(aliasesUrl);
+                expect(issuedCode(await authorize(client, oauthClient))).toBe(true);
+            });
+        });
+    });
 });

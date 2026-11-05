@@ -17,6 +17,7 @@ import { Alias, AuthResult, Secret, SecretType, User } from "../models/types.js"
 import { FIDO2Strategy, FIDO2StrategyOptions } from "../auth/FIDO2Strategy.js";
 import { PasskeyConfig, StoredPasskeyCredential } from "../auth/types.js";
 import { TokenUtils } from "../auth/TokenUtils.js";
+import { clientRateLimitKey } from "../auth/shared.js";
 import { UserUtils } from "./UserUtils.js";
 
 const { Config, Init, Inject } = ObjectDecorators;
@@ -120,7 +121,7 @@ export abstract class BaseAuthFIDO2Route<U extends User, A extends Alias, S exte
 
         const options: FIDO2StrategyOptions = new FIDO2StrategyOptions(this.fido2Config);
         options.checkRateLimit = (identifier: string, req: HttpRequest) =>
-            this.rateLimiter!.checkAndIncrement(identifier, undefined, req);
+            this.rateLimiter!.checkAndIncrement(clientRateLimitKey(identifier), undefined, req);
         options.getCredentialById = this.getCredentialById.bind(this);
         options.getCredentials = this.getCredentials.bind(this);
         options.updateCredentialCounter = this.updateCredentialCounter.bind(this);

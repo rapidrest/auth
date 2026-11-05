@@ -5,14 +5,32 @@
 // Isolated unit tests for BaseAliasRoute — no HTTP server, no database. otplib is real (the
 // established pattern in this test suite, see BaseRegistrationRoute.test.ts), so the verification
 // tests below exercise genuine OTP tokens rather than mocked ones.
+import { ApiError } from "@rapidrest/core";
 import { CRUDRoute } from "@rapidrest/service-core";
 import { BaseAliasRoute } from "../../src/routes/BaseAliasRoute.js";
-import { generateOTP } from "../../src/auth/shared.js";
+import { OTPCounters } from "../../src/auth/OTPCounters.js";
+import { counterKeyPart as h, generateOTP } from "../../src/auth/shared.js";
 import { AliasType, ContactType } from "../../src/models/types.js";
 
 class TestAliasRoute extends BaseAliasRoute<any> {
     protected profileClass: any = { name: "FakeProfile" };
 }
+
+/** Counters that refuse every throttle whose key starts with `prefix`, and otherwise behave normally. */
+const refusingCounters = (prefix: string): OTPCounters => {
+    const counters = new OTPCounters();
+    const real = counters.throttle.bind(counters);
+    vi.spyOn(counters, "throttle").mockImplementation(async (key, limit) => {
+        if (key.startsWith(prefix)) {
+            throw new ApiError("AUTH_PERMISSION_FAILURE", 429, "Too many attempts. Please try again later.");
+        }
+        return real(key, limit);
+    });
+    return counters;
+};
+
+/** A request with enough of the HTTP shape for the caller's address to be derived. */
+const httpReq = (): any => ({ session: {}, headers: {}, socket: { remoteAddress: "10.0.0.1" } });
 
 describe("BaseAliasRoute Tests", () => {
     afterEach(() => {
@@ -20,6 +38,14 @@ describe("BaseAliasRoute Tests", () => {
     });
 
     describe("init", () => {
+        it("Fails fast at startup on an unsafe auth:otp configuration.", async () => {
+            const route = new TestAliasRoute();
+            for (const bad of [{ ttl: 0 }, { maxAttempts: 11 }, { alphabet: "ab-cd" }, { length: 4, alphabet: "ab" }]) {
+                (route as any).otpConfig = bad;
+                await expect((route as any).init()).rejects.toThrow(/auth:otp/);
+            }
+        });
+
         it("Does nothing when objectFactory is not set.", async () => {
             const route = new TestAliasRoute();
 
@@ -516,7 +542,7 @@ describe("BaseAliasRoute Tests", () => {
 
             await (route as any).sendVerificationCode(alias, req);
 
-            expect(checkAndIncrement).toHaveBeenCalledWith("user@example.com", undefined, req);
+            expect(checkAndIncrement).toHaveBeenCalledWith("id:user@example.com", undefined, req);
             expect(sendEmail).toHaveBeenCalledWith(
                 "verify-contact-otp",
                 { totp: expect.any(String) },
@@ -525,7 +551,33 @@ describe("BaseAliasRoute Tests", () => {
             // generateOTP() stores the OTP session keyed on the alias's own value — verifyContact() must
             // check against this same value (regression guard for a bug where it instead compared against
             // the alias's uid, which could never match and made verification permanently impossible).
-            expect(req.session.id).toBe("user@example.com");
+            expect(req.session.otp.id).toBe("user@example.com");
+        });
+
+        it("Enforces the dedicated issue limit, issues for the contact purpose, and sends nothing when refused.", async () => {
+            const route = new TestAliasRoute();
+            const sendEmail = vi.fn().mockResolvedValue(undefined);
+            (route as any).messagingUtils = { sendEmail, sendSMS: vi.fn() };
+            const alias: any = { alias: "user@example.com", type: AliasType.EMAIL, verified: false, userUid: "user-1" };
+
+            const ok: any = httpReq();
+            const counters = new OTPCounters();
+            const throttle = vi.spyOn(counters, "throttle");
+            (route as any).otpCounters = counters;
+            (route as any).rateLimiter = { checkAndIncrement: vi.fn().mockResolvedValue(undefined) };
+            await (route as any).sendVerificationCode(alias, ok);
+            expect(ok.session.otp).toMatchObject({ purpose: "contact", userUid: "user-1" });
+            expect(throttle).toHaveBeenCalledWith(`issue:contact:${h("user@example.com")}:${h("10.0.0.1")}`, {
+                maxAttempts: 5,
+                windowSeconds: 900,
+            });
+
+            sendEmail.mockClear();
+            (route as any).otpCounters = refusingCounters("issue:");
+            const refused: any = httpReq();
+            await expect((route as any).sendVerificationCode(alias, refused)).rejects.toMatchObject({ status: 429 });
+            expect(sendEmail).not.toHaveBeenCalled();
+            expect(refused.session.otp).toBeUndefined();
         });
 
         it("Sends an SMS for an unverified phone alias.", async () => {
@@ -652,7 +704,7 @@ describe("BaseAliasRoute Tests", () => {
         it("Rate-limits by the alias value before verifying the code.", async () => {
             const route = new TestAliasRoute();
             const req: any = { session: {} };
-            await generateOTP(req, { id: "new@example.com" });
+            await generateOTP(req, { id: "new@example.com" }, undefined, "contact");
             const checkAndIncrement = vi.fn().mockResolvedValue(undefined);
             (route as any).rateLimiter = { checkAndIncrement };
             (route as any).repoUtils = {
@@ -670,13 +722,13 @@ describe("BaseAliasRoute Tests", () => {
                 route.verifyContact("alias-1", { token: "000000" }, req, { uid: "user-1" } as any),
             ).rejects.toThrow(/invalid or expired/i);
 
-            expect(checkAndIncrement).toHaveBeenCalledWith("new@example.com", undefined, req);
+            expect(checkAndIncrement).toHaveBeenCalledWith("id:new@example.com", undefined, req);
         });
 
         it("Propagates the rate limiter's error and does not attempt verification.", async () => {
             const route = new TestAliasRoute();
             const req: any = { session: {} };
-            const token = await generateOTP(req, { id: "new@example.com" });
+            const token = await generateOTP(req, { id: "new@example.com" }, undefined, "contact");
             const checkAndIncrement = vi.fn().mockRejectedValue(new Error("Too many attempts"));
             (route as any).rateLimiter = { checkAndIncrement };
             const update = vi.fn();
@@ -697,10 +749,55 @@ describe("BaseAliasRoute Tests", () => {
             expect(update).not.toHaveBeenCalled();
         });
 
+        it("Reports the dedicated verification limit as a 429 rather than as an invalid code, and rejects other flows codes.", async () => {
+            const route = new TestAliasRoute();
+            (route as any).otpCounters = refusingCounters("verify:");
+            const update = vi.fn();
+            (route as any).repoUtils = {
+                findOne: vi.fn().mockResolvedValue({
+                    uid: "alias-1",
+                    version: 0,
+                    alias: "new@example.com",
+                    userUid: "user-1",
+                    type: AliasType.EMAIL,
+                    verified: false,
+                }),
+                update,
+            };
+            const req: any = { session: {} };
+            const token = await generateOTP(req, { id: "new@example.com" }, undefined, "contact");
+
+            await expect(route.verifyContact("alias-1", { token }, req, { uid: "user-1" } as any)).rejects.toMatchObject({
+                status: 429,
+            });
+            expect(update).not.toHaveBeenCalled();
+
+            // Without the limit: a registration or sign-in code for the same contact is not accepted.
+            (route as any).otpCounters = new OTPCounters();
+            for (const purpose of ["register", "login", "mfa", "elevate"] as const) {
+                const other: any = { session: {} };
+                const code = await generateOTP(other, { id: "new@example.com" }, undefined, purpose);
+                await expect(
+                    route.verifyContact("alias-1", { token: code }, other, { uid: "user-1" } as any),
+                ).rejects.toThrow(/invalid or expired/i);
+            }
+            expect(update).not.toHaveBeenCalled();
+
+            // The per-user aggregate is keyed on the alias owner, recorded when the code was issued.
+            const counters = new OTPCounters();
+            const throttle = vi.spyOn(counters, "throttle");
+            (route as any).otpCounters = counters;
+            const good: any = { session: {} };
+            const goodCode = await generateOTP(good, { id: "new@example.com" }, undefined, "contact", "user-1");
+            update.mockResolvedValue({ verified: true });
+            await route.verifyContact("alias-1", { token: goodCode }, good, { uid: "user-1" } as any);
+            expect(throttle.mock.calls.map((c) => c[0])).toContain(`user:contact:${h("user-1")}:${h("unknown")}`);
+        });
+
         it("Throws 400 on a wrong code and leaves the alias unverified.", async () => {
             const route = new TestAliasRoute();
             const req: any = { session: {} };
-            await generateOTP(req, { id: "new@example.com" });
+            await generateOTP(req, { id: "new@example.com" }, undefined, "contact");
             const update = vi.fn();
             (route as any).repoUtils = {
                 findOne: vi.fn().mockResolvedValue({
@@ -750,7 +847,7 @@ describe("BaseAliasRoute Tests", () => {
         it("Flips verified to true on a correct code.", async () => {
             const route = new TestAliasRoute();
             const req: any = { session: {} };
-            const token = await generateOTP(req, { id: "new@example.com" });
+            const token = await generateOTP(req, { id: "new@example.com" }, undefined, "contact");
             const existingAlias = {
                 uid: "alias-1",
                 version: 0,

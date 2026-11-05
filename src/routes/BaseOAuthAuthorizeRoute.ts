@@ -17,8 +17,8 @@ import {
     verifyCsrfRequest,
 } from "@rapidrest/service-core";
 import parseDuration from "parse-duration";
-import { AuthorizationCode, Client, ConsentGrant } from "../models/types.js";
-import { hashOpaqueToken } from "../auth/shared.js";
+import { AuthorizationCode, Client, ConsentGrant, User } from "../models/types.js";
+import { hashOpaqueToken, IMPERSONATOR_COOKIE_NAME } from "../auth/shared.js";
 
 const { Config, Init, Inject } = ObjectDecorators;
 const { Summary, Description, Returns } = DocDecorators;
@@ -36,8 +36,9 @@ const CONSENT_TICKET_TYPE = "oauth_consent";
  * Deliberately does not authenticate the resource owner via a fixed `@Auth([...])` decorator (a decorator's
  * strategy list is fixed at class-declaration time — see the caveat documented on `BaseAuthOIDCRoute`).
  * Instead, `resolveUserUid()` first checks `req.session.userUid` (the field `TokenUtils.createAuthResult()`
- * already populates for every existing login strategy, including the OIDC relying-party flow against an
- * upstream IdP), falling back to `authMiddleware.authenticate(resourceOwnerStrategies, ...)` only when no
+ * alone populates, and only for a completed sign-in: the password step of MFA keeps its pending user in
+ * `mfaPendingUid` instead, so a half-finished sign-in is never accepted here; it is set for every existing login
+ * strategy, including the OIDC relying-party flow against an upstream IdP), falling back to `authMiddleware.authenticate(resourceOwnerStrategies, ...)` only when no
  * session is present. This is what lets a mobile app federate through an upstream IdP (e.g. Entra ID) with
  * zero changes to this library's relying-party code — the user simply logs in via the existing OIDC route
  * first, and `/authorize` observes the resulting session.
@@ -62,6 +63,7 @@ export abstract class BaseOAuthAuthorizeRoute<C extends Client, A extends Author
     protected abstract authorizationCodeClass: any;
     protected abstract clientClass: any;
     protected abstract consentGrantClass: any;
+    protected abstract userClass: any;
 
     // Automatically injected by ObjectFactory on instantiation
     private _objectFactory?: ObjectFactory;
@@ -86,6 +88,8 @@ export abstract class BaseOAuthAuthorizeRoute<C extends Client, A extends Author
     protected corsConfig: any = {};
 
     protected consentGrantRepo?: RepoUtils<G>;
+
+    protected userRepo?: RepoUtils<User>;
 
     @Config("auth")
     protected jwtConfig?: any;
@@ -126,6 +130,12 @@ export abstract class BaseOAuthAuthorizeRoute<C extends Client, A extends Author
                 args: [this.consentGrantClass],
             });
         }
+        if (!this.userRepo && this.userClass) {
+            this.userRepo = await this._objectFactory.newInstance(RepoUtils, {
+                name: this.userClass.name,
+                args: [this.userClass],
+            });
+        }
     }
 
     /**
@@ -133,11 +143,37 @@ export abstract class BaseOAuthAuthorizeRoute<C extends Client, A extends Author
      * See the class doc comment for why this doesn't use a fixed `@Auth([...])` decorator.
      */
     protected async resolveUserUid(req: HttpRequest, res: HttpResponse): Promise<string | undefined> {
-        if (typeof req.session?.userUid === "string") {
-            return req.session.userUid;
+        // An impersonation session is never a resource owner: a code issued from it would yield long-lived OAuth
+        // tokens that outlive the impersonation and are missing from its audit trail.
+        if (req.cookies?.[IMPERSONATOR_COOKIE_NAME]) {
+            return undefined;
         }
-        const result = await this.authMiddleware?.authenticate(this.resourceOwnerStrategies, req, res, false);
-        return result?.user?.uid;
+
+        let userUid: string | undefined = req.session?.userUid;
+        if (typeof userUid !== "string") {
+            const result = await this.authMiddleware?.authenticate(this.resourceOwnerStrategies, req, res, false);
+            userUid = result?.user?.uid;
+        }
+
+        // `userUid` alone does not prove a sign-in: service-core's `JWTStrategy` also writes it from any valid
+        // access token presented with the session cookie. Only `TokenUtils.createAuthResult()` writes `signedInUid`,
+        // on a completed sign-in, so the session must have completed one for exactly this user.
+        if (typeof userUid !== "string" || req.session?.signedInUid !== userUid) {
+            return undefined;
+        }
+
+        // "Sign out everywhere" (`BaseAccountRoute.revokeSessions()`) only stamps `sessionsRevokedAt` on the user; it
+        // cannot reach the session records themselves. A session whose sign-in is older than that stamp is therefore
+        // no longer a sign-in. A session created before `signedInAt` existed has none, and is treated as older.
+        const user = await this.userRepo?.findOne(userUid, { ignoreACL: true });
+        if (!user) {
+            return undefined;
+        }
+        const signedInAt: unknown = req.session?.signedInAt;
+        if (user.sessionsRevokedAt && (typeof signedInAt !== "number" || signedInAt < user.sessionsRevokedAt)) {
+            return undefined;
+        }
+        return userUid;
     }
 
     /** Builds the signing/verification config for a consent ticket — this deployment's shared `auth:secret`,

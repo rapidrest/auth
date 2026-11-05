@@ -343,6 +343,9 @@ describe("TokenUtils Tests", () => {
             await tokenUtils.createAuthResult(user, [], req);
 
             expect(req.session.userUid).toBe("user-1");
+            expect(req.session.signedInUid).toBe("user-1");
+            expect(req.session.signedInAt).toBeGreaterThanOrEqual(before);
+            expect(req.session.signedInAt).toBeLessThanOrEqual(Date.now());
             expect(req.session.lastAccess).toBeGreaterThanOrEqual(before);
             expect(req.session.lastLogin).toBeGreaterThanOrEqual(before);
         });

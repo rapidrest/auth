@@ -4,10 +4,11 @@
 ///////////////////////////////////////////////////////////////////////////////
 // Isolated unit tests for OTPStrategy — no HTTP server, no database. Uses the real shared.ts OTP
 // helpers (and real otplib), exactly as the HTTP-level AuthOTPRoute suites do.
-import type { JWTUser } from "@rapidrest/core";
+import { ApiError, type JWTUser } from "@rapidrest/core";
 import type { HttpRequest, HttpResponse } from "@rapidrest/service-core";
-import * as otplib from "otplib";
 import { OTPStrategy, OTPStrategyOptions } from "../../src/auth/OTPStrategy.js";
+import { OTPCounters } from "../../src/auth/OTPCounters.js";
+import { counterKeyPart as h, generateOTP } from "../../src/auth/shared.js";
 import { OTPContactType } from "../../src/auth/types.js";
 
 function makeReq(overrides: Partial<HttpRequest> = {}): HttpRequest {
@@ -195,6 +196,35 @@ describe("OTPStrategy Tests", () => {
             expect(res.json).toHaveBeenCalledWith({});
         });
 
+        it("Enforces the issue limit identically for known and unknown contacts, before the lookup.", async () => {
+            const counters = new OTPCounters();
+            const limit = vi
+                .spyOn(counters, "throttle")
+                .mockRejectedValue(new ApiError("AUTH_PERMISSION_FAILURE", 429, "slow down"));
+            options.counters = counters;
+            for (const contact of [undefined, { contact: "a@example.com", type: OTPContactType.EMAIL, verified: true }]) {
+                (options.getContact as any).mockResolvedValue(contact);
+                const req = makeReq({ body: { id: "contact-1" } });
+                await expect(strategy.authenticate(req, makeRes())).rejects.toMatchObject({ status: 429 });
+            }
+            expect(options.getContact).not.toHaveBeenCalled();
+            expect(options.notifyContact).not.toHaveBeenCalled();
+            expect(limit).toHaveBeenCalledWith(`issue:login:${h("contact-1")}:${h("unknown")}`, { maxAttempts: 5, windowSeconds: 900 });
+        });
+
+        it("Issues the code for the login purpose, recording the user the contact belongs to.", async () => {
+            (options.getContact as any).mockResolvedValue({
+                contact: "test@example.com",
+                type: OTPContactType.EMAIL,
+                verified: true,
+                userUid: "user-uid-1",
+            });
+            const req = makeReq({ body: { id: "contact-1" } });
+            await strategy.authenticate(req, makeRes());
+            expect((req.session as any).otp.purpose).toBe("login");
+            expect((req.session as any).otp.userUid).toBe("user-uid-1");
+        });
+
         it("Generates and sends a token, then completes the response.", async () => {
             const contact = { contact: "test@example.com", type: OTPContactType.EMAIL, verified: true };
             (options.getContact as any).mockResolvedValue(contact);
@@ -207,7 +237,7 @@ describe("OTPStrategy Tests", () => {
             expect(options.notifyContact).toHaveBeenCalledWith(contact, expect.any(String));
             expect(res.status).toHaveBeenCalledWith(200);
             expect(res.json).toHaveBeenCalledWith({});
-            expect((req.session as any).id).toBe("contact-1");
+            expect((req.session as any).otp.id).toBe("contact-1");
         });
 
         it("Looks the contact up without a channel when the request names none.", async () => {
@@ -228,7 +258,7 @@ describe("OTPStrategy Tests", () => {
 
             expect(options.getContact).toHaveBeenCalledWith("contact-1", "whatsapp");
             expect(options.notifyContact).toHaveBeenCalledWith(contact, expect.any(String));
-            expect((req.session as any).id).toBe("contact-1");
+            expect((req.session as any).otp.id).toBe("contact-1");
             expect(res.json).toHaveBeenCalledWith({});
         });
 
@@ -275,12 +305,9 @@ describe("OTPStrategy Tests", () => {
 
     describe("verify (phase 3)", () => {
         it("Authenticates when the OTP token is valid.", async () => {
-            const secret = otplib.generateSecret();
-            const token = await otplib.generate({ secret });
-            const req = makeReq({
-                body: { id: "contact-1", token },
-                session: { id: "contact-1", secret },
-            });
+            const req = makeReq({ body: { id: "contact-1" } });
+            const token = await generateOTP(req, { id: "contact-1" }, undefined, "login");
+            req.body.token = token;
             (options.getUser as any).mockResolvedValue(jwtUser);
 
             const result = await strategy.authenticate(req, makeRes());
@@ -295,24 +322,70 @@ describe("OTPStrategy Tests", () => {
         });
 
         it("Falls through to the required check when the OTP token is invalid.", async () => {
-            const req = makeReq({
-                body: { id: "contact-1", token: "000000" },
-                session: { id: "contact-1", secret: otplib.generateSecret() },
-            });
+            const req = makeReq({ body: { id: "contact-1", token: "000000" } });
+            await generateOTP(req, { id: "contact-1" }, undefined, "login");
+            (options.getUser as any).mockResolvedValue(jwtUser);
 
             const result = await strategy.authenticate(req, makeRes(), false);
 
-            expect(options.getUser).not.toHaveBeenCalled();
+            // The user is resolved up front (for the per-user limit) but never returned without a valid code.
             expect(result).toBeUndefined();
         });
 
+        // Regression (security): a code issued for another flow in the same session must not sign anyone in.
+        it("Rejects a code issued for another purpose (registration, MFA, elevation, contact verification).", async () => {
+            for (const purpose of ["register", "mfa", "elevate", "contact"] as const) {
+                const req = makeReq({ body: { id: "contact-1" } });
+                req.body.token = await generateOTP(req, { id: "contact-1" }, undefined, purpose);
+                (options.getUser as any).mockResolvedValue(jwtUser);
+
+                await expect(strategy.authenticate(req, makeRes(), false)).rejects.toThrow(
+                    /Invalid authentication request/,
+                );
+            }
+        });
+
+        it("Counts verification against the contact and the user the code was issued for, and refuses once limited.", async () => {
+            const req = makeReq({ body: { id: "contact-1" } });
+            req.body.token = await generateOTP(req, { id: "contact-1" }, undefined, "login", "user-uid-1");
+            const counters = new OTPCounters();
+            const throttle = vi.spyOn(counters, "throttle");
+            options.counters = counters;
+            (options.getUser as any).mockResolvedValue(jwtUser);
+
+            const result = await strategy.authenticate(req, makeRes());
+
+            expect(result?.user).toEqual(jwtUser);
+            const keys = throttle.mock.calls.map((c) => c[0]);
+            expect(keys).toContain(`verify:login:${h("contact-1")}:${h("unknown")}`);
+            expect(keys).toContain(`user:login:${h("user-uid-1")}:${h("unknown")}`);
+
+            const again = makeReq({ body: { id: "contact-1" } });
+            again.body.token = await generateOTP(again, { id: "contact-1" }, undefined, "login", "user-uid-1");
+            throttle.mockRejectedValue(new ApiError("AUTH_PERMISSION_FAILURE", 429, "slow down"));
+            await expect(strategy.authenticate(again, makeRes())).rejects.toMatchObject({ status: 429 });
+        });
+
+        it("Looks the user up only after the code has been verified, never before.", async () => {
+            const wrong = makeReq({ body: { id: "contact-1", token: "AAAAAA" } });
+            await generateOTP(wrong, { id: "contact-1" }, undefined, "login", "user-uid-1");
+            await strategy.authenticate(wrong, makeRes(), false);
+            expect(options.getUser).not.toHaveBeenCalled();
+
+            const none = makeReq({ body: { id: "contact-1", token: "AAAAAA" } });
+            await expect(strategy.authenticate(none, makeRes())).rejects.toThrow(/Invalid authentication request/);
+            expect(options.getUser).not.toHaveBeenCalled();
+        });
+
+        it("Fails fast, at construction, on an unsafe one-time code configuration.", () => {
+            const bad = new OTPStrategyOptions();
+            bad.otpConfig = { alphabet: "ab" };
+            expect(() => new OTPStrategy(bad)).toThrow(/entropy/);
+        });
+
         it("Aborts before verifying the token when checkRateLimit throws.", async () => {
-            const secret = otplib.generateSecret();
-            const token = await otplib.generate({ secret });
-            const req = makeReq({
-                body: { id: "contact-1", token },
-                session: { id: "contact-1", secret },
-            });
+            const req = makeReq({ body: { id: "contact-1" } });
+            req.body.token = await generateOTP(req, { id: "contact-1" }, undefined, "login");
             options.checkRateLimit = vi.fn().mockRejectedValue(new Error("Too many attempts."));
 
             await expect(strategy.authenticate(req, makeRes())).rejects.toThrow(/Too many attempts/);

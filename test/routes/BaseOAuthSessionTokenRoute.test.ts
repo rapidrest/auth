@@ -19,11 +19,15 @@ import { User } from "../../src/models/types.js";
 class FakeUserClass {
     static readonly name = "FakeUser";
 }
+class FakeClientClass {
+    static readonly name = "FakeClient";
+}
 class FakeSigningKeyClass {
     static readonly name = "FakeSigningKey";
 }
 
 class TestOAuthSessionTokenRoute extends BaseOAuthSessionTokenRoute<any> {
+    protected clientClass: any = FakeClientClass;
     protected userClass: any = FakeUserClass;
     protected signingKeyClass: any = FakeSigningKeyClass;
 }
@@ -60,8 +64,21 @@ function makeOAuthUser(overrides: Partial<JWTUser> = {}): JWTUser {
     return { uid: "user-1", roles: [], scopes: ["openid"], ...overrides };
 }
 
+/** A request bearing a bearer token (which `verifyAccessToken` is stubbed to accept) in a session of its own. */
+function makeReq(overrides: any = {}): any {
+    return { headers: { authorization: "Bearer access-token" }, session: {}, ...overrides };
+}
+
+/** The claims of an access token issued to `client-1` for `user-1`. */
+function makeClaims(overrides: any = {}) {
+    return { sub: "user-1", aud: "client-1", client_id: "client-1", azp: "client-1", scope: "openid", jti: "j", ...overrides };
+}
+
 function makeRoute() {
     const userRepo = makeMockRepo<User>();
+    const clientRepo = makeMockRepo<any>();
+    clientRepo._store.set("client-1", { uid: "client-1", firstParty: true, disabled: false });
+    const oauthTokenUtils = { verifyAccessToken: vi.fn(async (): Promise<any> => makeClaims()) };
     const authMiddleware = { register: vi.fn() };
     const tokenUtils = new TokenUtils();
     (tokenUtils as any).jwtConfig = authConfig;
@@ -72,6 +89,7 @@ function makeRoute() {
         newInstance: vi.fn(async (type: any, opts: any) => {
             if (type === RepoUtils) {
                 if (opts.name === FakeUserClass.name) return userRepo;
+                if (opts.name === FakeClientClass.name) return clientRepo;
                 if (opts.name === FakeSigningKeyClass.name) return makeMockRepo<any>();
             }
             if (type === SigningKeyUtils) return {};
@@ -83,9 +101,11 @@ function makeRoute() {
     };
     (route as any).authMiddleware = authMiddleware;
     (route as any).userRepo = userRepo;
+    (route as any).clientRepo = clientRepo;
+    (route as any).oauthTokenUtils = oauthTokenUtils;
     (route as any).tokenUtils = tokenUtils;
 
-    return { route, userRepo, authMiddleware, tokenUtils };
+    return { route, userRepo, clientRepo, oauthTokenUtils, authMiddleware, tokenUtils };
 }
 
 describe("BaseOAuthSessionTokenRoute Tests", () => {
@@ -145,8 +165,9 @@ describe("BaseOAuthSessionTokenRoute Tests", () => {
 
     describe("sessionToken", () => {
         it("Throws 401 when the access token's sub does not resolve to a real user account.", async () => {
-            const { route } = makeRoute();
-            const req: any = {};
+            const { route, oauthTokenUtils } = makeRoute();
+            oauthTokenUtils.verifyAccessToken.mockResolvedValue(makeClaims({ sub: "deleted-user" }));
+            const req: any = makeReq();
 
             await expect(route.sessionToken(makeOAuthUser({ uid: "deleted-user" }), req)).rejects.toThrow(
                 /invalid or missing authentication/i,
@@ -156,7 +177,7 @@ describe("BaseOAuthSessionTokenRoute Tests", () => {
         it("Looks up the user with ignoreACL, since the OAuth-token identity isn't an ACL-scoped app user.", async () => {
             const { route, userRepo } = makeRoute();
             userRepo._store.set("user-1", makeUser());
-            const req: any = {};
+            const req: any = makeReq();
 
             await route.sessionToken(makeOAuthUser(), req);
 
@@ -166,7 +187,7 @@ describe("BaseOAuthSessionTokenRoute Tests", () => {
         it("Returns only `token` — never `refresh` — for a valid access token.", async () => {
             const { route, userRepo } = makeRoute();
             userRepo._store.set("user-1", makeUser());
-            const req: any = {};
+            const req: any = makeReq();
 
             const result = await route.sessionToken(makeOAuthUser(), req);
 
@@ -187,7 +208,7 @@ describe("BaseOAuthSessionTokenRoute Tests", () => {
             // here isolates the behavior this route actually adds - carrying over the real account's roles
             // instead of the OAuth token's always-empty ones - from that unrelated, pre-existing stripping.
             userRepo._store.set("user-1", makeUser({ roles: ["editor"] }));
-            const req: any = {};
+            const req: any = makeReq();
 
             const result = await route.sessionToken(makeOAuthUser({ roles: [] }), req);
 
@@ -200,7 +221,7 @@ describe("BaseOAuthSessionTokenRoute Tests", () => {
         it("Produces a real, independently-verifiable session JWT signed with the configured secret.", async () => {
             const { route, userRepo } = makeRoute();
             userRepo._store.set("user-1", makeUser());
-            const req: any = {};
+            const req: any = makeReq();
 
             const result = await route.sessionToken(makeOAuthUser(), req);
 
@@ -212,7 +233,7 @@ describe("BaseOAuthSessionTokenRoute Tests", () => {
             const { route, userRepo } = makeRoute();
             (route as any).defaultScopes = ["api:default"];
             userRepo._store.set("user-1", makeUser());
-            const req: any = {};
+            const req: any = makeReq();
 
             const result = await route.sessionToken(makeOAuthUser({ scopes: ["openid", "profile"] }), req);
 
@@ -222,39 +243,110 @@ describe("BaseOAuthSessionTokenRoute Tests", () => {
         });
 
         // This route must never write a `Set-Cookie` header — the caller is a native app with no relevant
-        // cookie jar for this purpose, and the response body's `token` is the only thing that matters. Since
-        // TokenUtils.createAuthResult() only ever appends Set-Cookie when it's given a `res`, the structural
-        // guarantee here is that this route's implementation never passes one through at all.
-        it("Calls createAuthResult() without a `res`, so no cookie is ever written even when cookies are enabled server-wide.", async () => {
+        // cookie jar for this purpose, and the response body's `token` is the only thing that matters. It only mints an
+        // access token (`createAccessToken`), which has no `res` to write to at all.
+        it("Only mints an access token, so no cookie, refresh token, session write or SIGNED_IN audit entry can result.", async () => {
             const { route, userRepo, tokenUtils } = makeRoute();
             (tokenUtils as any).cookieConfig = { enabled: true, access: { name: "jwt" }, refresh: { name: "refresh" } };
             userRepo._store.set("user-1", makeUser());
-            const createAuthResult = vi.spyOn(tokenUtils, "createAuthResult");
-            const req: any = {};
-
-            await route.sessionToken(makeOAuthUser(), req);
-
-            expect(createAuthResult).toHaveBeenCalledTimes(1);
-            // (user, scopes, req) — no 4th (`res`) argument at all.
-            expect(createAuthResult.mock.calls[0]).toHaveLength(3);
-            expect(createAuthResult.mock.calls[0][3]).toBeUndefined();
-        });
-
-        // This exchange verifies no new credential of its own — the real credential check already happened
-        // when the access token's underlying authorization was granted through the interactive
-        // /oauth/authorize flow — so, exactly like BaseAuthRefreshRoute's routine refresh, it must never
-        // fire a SIGNED_IN audit entry (TokenUtils.createAuthResult() only fires one when given an
-        // `authMethod`).
-        it("Calls createAuthResult() without an authMethod, so this exchange never fires a SIGNED_IN audit entry.", async () => {
-            const { route, userRepo, tokenUtils } = makeRoute();
-            userRepo._store.set("user-1", makeUser());
             const auditLogUtils = { record: vi.fn() };
             (tokenUtils as any).auditLogUtils = auditLogUtils;
-            const req: any = {};
+            const createAuthResult = vi.spyOn(tokenUtils, "createAuthResult");
+            const createRefreshToken = vi.spyOn(tokenUtils, "createRefreshToken");
+            const createAccessToken = vi.spyOn(tokenUtils, "createAccessToken");
 
-            await route.sessionToken(makeOAuthUser(), req);
+            await route.sessionToken(makeOAuthUser(), makeReq());
 
+            expect(createAccessToken).toHaveBeenCalledTimes(1);
+            expect(createAuthResult).not.toHaveBeenCalled();
+            expect(createRefreshToken).not.toHaveBeenCalled();
             expect(auditLogUtils.record).not.toHaveBeenCalled();
+        });
+
+        describe("only a token issued to a first-party client of this deployment is exchanged", () => {
+            const forbidden = { status: 403 };
+
+            it("Refuses a token issued to a third-party client.", async () => {
+                const { route, userRepo, clientRepo } = makeRoute();
+                userRepo._store.set("user-1", makeUser());
+                clientRepo._store.set("client-1", { uid: "client-1", firstParty: false });
+
+                await expect(route.sessionToken(makeOAuthUser(), makeReq())).rejects.toMatchObject(forbidden);
+            });
+
+            it("Refuses a client with no firstParty flag at all, and a disabled first-party client.", async () => {
+                const { route, userRepo, clientRepo } = makeRoute();
+                userRepo._store.set("user-1", makeUser());
+                clientRepo._store.set("client-1", { uid: "client-1" });
+                await expect(route.sessionToken(makeOAuthUser(), makeReq())).rejects.toMatchObject(forbidden);
+
+                clientRepo._store.set("client-1", { uid: "client-1", firstParty: true, disabled: true });
+                await expect(route.sessionToken(makeOAuthUser(), makeReq())).rejects.toMatchObject(forbidden);
+            });
+
+            it("Refuses a token whose client is not registered here, looking the client up with ignoreACL.", async () => {
+                const { route, userRepo, clientRepo, oauthTokenUtils } = makeRoute();
+                userRepo._store.set("user-1", makeUser());
+                oauthTokenUtils.verifyAccessToken.mockResolvedValue(makeClaims({ aud: "ghost", client_id: "ghost" }));
+
+                await expect(route.sessionToken(makeOAuthUser(), makeReq())).rejects.toMatchObject(forbidden);
+                expect(clientRepo.findOne).toHaveBeenCalledWith("ghost", { ignoreACL: true });
+            });
+
+            it("Refuses a token whose audience is not exactly the client it names.", async () => {
+                const { route, userRepo, oauthTokenUtils } = makeRoute();
+                userRepo._store.set("user-1", makeUser());
+                for (const aud of ["https://elsewhere.example", ["client-1", "other"], [], undefined]) {
+                    oauthTokenUtils.verifyAccessToken.mockResolvedValue(makeClaims({ aud }));
+                    await expect(route.sessionToken(makeOAuthUser(), makeReq())).rejects.toMatchObject(forbidden);
+                }
+                oauthTokenUtils.verifyAccessToken.mockResolvedValue(makeClaims({ aud: ["client-1"] }));
+                await expect(route.sessionToken(makeOAuthUser(), makeReq())).resolves.toHaveProperty("token");
+            });
+
+            it("Refuses a token with no client_id, a different subject, no bearer token, or one that no longer verifies.", async () => {
+                const { route, userRepo, oauthTokenUtils } = makeRoute();
+                userRepo._store.set("user-1", makeUser());
+
+                oauthTokenUtils.verifyAccessToken.mockResolvedValue(makeClaims({ client_id: undefined }));
+                await expect(route.sessionToken(makeOAuthUser(), makeReq())).rejects.toMatchObject(forbidden);
+
+                oauthTokenUtils.verifyAccessToken.mockResolvedValue(makeClaims({ sub: "user-2" }));
+                await expect(route.sessionToken(makeOAuthUser(), makeReq())).rejects.toMatchObject(forbidden);
+
+                oauthTokenUtils.verifyAccessToken.mockResolvedValue(makeClaims());
+                await expect(route.sessionToken(makeOAuthUser(), makeReq({ headers: {} }))).rejects.toMatchObject(forbidden);
+
+                oauthTokenUtils.verifyAccessToken.mockResolvedValue(undefined);
+                await expect(route.sessionToken(makeOAuthUser(), makeReq())).rejects.toMatchObject(forbidden);
+            });
+
+            it("Leaves the caller's session exactly as it was.", async () => {
+                const { route, userRepo } = makeRoute();
+                userRepo._store.set("user-1", makeUser());
+
+                const bare = makeReq();
+                await route.sessionToken(makeOAuthUser(), bare);
+                expect(bare.session).toEqual({});
+
+                const before = {
+                    userUid: "someone-else",
+                    signedInUid: "someone-else",
+                    signedInAt: 123,
+                    refreshUid: "r1",
+                    ip: "1.2.3.4",
+                    lastAccess: 1,
+                    lastLogin: 2,
+                };
+                const signedIn = makeReq({ session: { ...before } });
+                await route.sessionToken(makeOAuthUser(), signedIn);
+                expect(signedIn.session).toEqual(before);
+
+                // No session at all is fine too.
+                await expect(route.sessionToken(makeOAuthUser(), makeReq({ session: undefined }))).resolves.toHaveProperty(
+                    "token",
+                );
+            });
         });
     });
 });

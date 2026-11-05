@@ -17,6 +17,7 @@ import { Alias, AuthResult, Secret, SecretType, User } from "../models/types.js"
 import { PasskeyStrategy, PasskeyStrategyOptions } from "../auth/PasskeyStrategy.js";
 import { PasskeyConfig, StoredPasskeyCredential } from "../auth/types.js";
 import { TokenUtils } from "../auth/TokenUtils.js";
+import { clientRateLimitKey } from "../auth/shared.js";
 import { UserUtils } from "./UserUtils.js";
 
 const { Config, Init, Inject } = ObjectDecorators;
@@ -112,7 +113,7 @@ export abstract class BaseAuthPasskeyRoute<U extends User, A extends Alias, S ex
 
         const options: PasskeyStrategyOptions = new PasskeyStrategyOptions(this.passkeyConfig);
         options.checkRateLimit = (identifier: string, req: HttpRequest) =>
-            this.rateLimiter!.checkAndIncrement(identifier, undefined, req);
+            this.rateLimiter!.checkAndIncrement(clientRateLimitKey(identifier), undefined, req);
         options.getCredentialById = this.getCredentialById.bind(this);
         options.getCredentials = this.getCredentials.bind(this);
         options.updateCredentialCounter = this.updateCredentialCounter.bind(this);

@@ -58,7 +58,11 @@ export abstract class BaseAuthLogoutRoute {
         // leave the stale `userUid`/`refreshUid` values sitting in the store, forever unpersisted-over.
         if (req.session) {
             req.session.userUid = undefined;
+            req.session.signedInUid = undefined;
+            req.session.signedInAt = undefined;
             req.session.refreshUid = undefined;
+            req.session.mfaPendingUid = undefined;
+            req.session.elevateUid = undefined;
         }
     }
 }

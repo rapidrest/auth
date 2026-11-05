@@ -10,11 +10,13 @@ vi.mock("@simplewebauthn/server", () => ({
     verifyAuthenticationResponse: vi.fn(),
 }));
 
-import type { JWTUser } from "@rapidrest/core";
+import { ApiError, type JWTUser } from "@rapidrest/core";
 import type { HttpRequest, HttpResponse } from "@rapidrest/service-core";
 import { generateAuthenticationOptions, verifyAuthenticationResponse } from "@simplewebauthn/server";
 import * as otplib from "otplib";
 import { MFAMethod, MFAMethodType, MFAStrategy, MFAStrategyOptions } from "../../src/auth/MFAStrategy.js";
+import { OTPCounters } from "../../src/auth/OTPCounters.js";
+import { counterKeyPart as h, generateOTP } from "../../src/auth/shared.js";
 import { OTPContactType, PasskeyConfig, StoredPasskeyCredential } from "../../src/auth/types.js";
 
 const mockGenerateAuthenticationOptions = generateAuthenticationOptions as any;
@@ -114,12 +116,9 @@ describe("MFAStrategy Tests", () => {
 
     describe("Dispatch", () => {
         it("Routes an OTP-shaped payload (id+token) to verifyOTP and authenticates on success.", async () => {
-            const secret = otplib.generateSecret();
-            const token = await otplib.generate({ secret });
-            const req = makeReq({
-                body: { id: "user-uid-1", token },
-                session: { id: "user-uid-1", secret, userUid: "user-uid-1" },
-            });
+            const req = makeReq({ body: { id: "user-uid-1" }, session: { mfaPendingUid: "user-uid-1" } });
+            const token = await generateOTP(req, { id: "user-uid-1" }, undefined, "mfa");
+            req.body.token = token;
             (options.getUser as any).mockResolvedValue(jwtUser);
 
             const result = await strategy.authenticate(req, makeRes());
@@ -134,10 +133,8 @@ describe("MFAStrategy Tests", () => {
         });
 
         it("Falls through to the required check when the OTP token is invalid.", async () => {
-            const req = makeReq({
-                body: { id: "user-uid-1", token: "000000" },
-                session: { id: "user-uid-1", secret: otplib.generateSecret() },
-            });
+            const req = makeReq({ body: { id: "user-uid-1", token: "000000" } });
+            await generateOTP(req, { id: "user-uid-1" }, undefined, "mfa");
 
             const result = await strategy.authenticate(req, makeRes(), false);
 
@@ -220,7 +217,7 @@ describe("MFAStrategy Tests", () => {
         it("Routes an id+methodId payload to challenge() and returns undefined.", async () => {
             const req = makeReq({
                 body: { id: "user-uid-1", methodId: "method-1" },
-                session: { userUid: "user-uid-1" },
+                session: { mfaPendingUid: "user-uid-1" },
             });
             (options.getMethod as any).mockResolvedValue({
                 id: "method-1",
@@ -267,7 +264,7 @@ describe("MFAStrategy Tests", () => {
         it("Throws when the session-bound identity does not match the claimed payload id.", async () => {
             const req = makeReq({
                 body: { id: "victim-uid", methodId: "method-1" },
-                session: { userUid: "attacker-uid" },
+                session: { mfaPendingUid: "attacker-uid" },
             });
 
             await expect(strategy.authenticate(req, makeRes())).rejects.toThrow(/Invalid authentication request/);
@@ -277,7 +274,7 @@ describe("MFAStrategy Tests", () => {
         it("Throws when the selected method id does not resolve.", async () => {
             const req = makeReq({
                 body: { id: "user-uid-1", methodId: "bogus" },
-                session: { userUid: "user-uid-1" },
+                session: { mfaPendingUid: "user-uid-1" },
             });
             (options.getMethod as any).mockResolvedValue(undefined);
 
@@ -289,7 +286,7 @@ describe("MFAStrategy Tests", () => {
         it("Throws for a FIDO2 method when no fidoConfig is configured.", async () => {
             const req = makeReq({
                 body: { id: "user-uid-1", methodId: "method-1" },
-                session: { userUid: "user-uid-1" },
+                session: { mfaPendingUid: "user-uid-1" },
             });
             (options.getMethod as any).mockResolvedValue({ id: "method-1", type: MFAMethodType.FIDO2, data: {} });
 
@@ -305,7 +302,7 @@ describe("MFAStrategy Tests", () => {
             options.fidoConfig = makeFidoConfig();
             const req = makeReq({
                 body: { id: "user-uid-1", methodId: "method-1" },
-                session: { userUid: "user-uid-1" },
+                session: { mfaPendingUid: "user-uid-1" },
             });
             (options.getMethod as any).mockResolvedValue({
                 id: "method-1",
@@ -329,7 +326,7 @@ describe("MFAStrategy Tests", () => {
         it("Acknowledges a TOTP method selection without sending a notification, and records the method id.", async () => {
             const req = makeReq({
                 body: { id: "user-uid-1", methodId: "method-1" },
-                session: { userUid: "user-uid-1" },
+                session: { mfaPendingUid: "user-uid-1" },
             });
             (options.getMethod as any).mockResolvedValue({ id: "method-1", type: MFAMethodType.TOTP, data: {} });
             const res = makeRes();
@@ -347,7 +344,7 @@ describe("MFAStrategy Tests", () => {
         it("Acknowledges a RECOVERY_CODE method selection without sending a notification, and records the method id/type.", async () => {
             const req = makeReq({
                 body: { id: "user-uid-1", methodId: "method-1" },
-                session: { userUid: "user-uid-1" },
+                session: { mfaPendingUid: "user-uid-1" },
             });
             (options.getMethod as any).mockResolvedValue({
                 id: "method-1",
@@ -369,7 +366,7 @@ describe("MFAStrategy Tests", () => {
         it("Throws for an unsupported method type.", async () => {
             const req = makeReq({
                 body: { id: "user-uid-1", methodId: "method-1" },
-                session: { userUid: "user-uid-1" },
+                session: { mfaPendingUid: "user-uid-1" },
             });
             (options.getMethod as any).mockResolvedValue({ id: "method-1", type: "unknown", data: {} });
 
@@ -389,7 +386,7 @@ describe("MFAStrategy Tests", () => {
         it("Clears a stale mfaMethodId left over from a previous TOTP/FIDO2 selection when OTP is selected.", async () => {
             const req = makeReq({
                 body: { id: "user-uid-1", methodId: "otp-method" },
-                session: { userUid: "user-uid-1", mfaMethodId: "stale-totp-secret-id" },
+                session: { mfaPendingUid: "user-uid-1", mfaMethodId: "stale-totp-secret-id" },
             });
             (options.getMethod as any).mockResolvedValue({
                 id: "otp-method",
@@ -406,7 +403,7 @@ describe("MFAStrategy Tests", () => {
         // the correct OTP code authenticate — before the fix, this always failed because the leftover
         // `mfaMethodId` from the TOTP selection misrouted the OTP submission into verifyTOTP().
         it("Regression: switching from a TOTP selection to OTP still authenticates on the correct OTP code.", async () => {
-            const session: any = { userUid: "user-uid-1" };
+            const session: any = { mfaPendingUid: "user-uid-1" };
 
             // Phase 2a: select TOTP first, recording its method id in the session.
             (options.getMethod as any).mockResolvedValue({ id: "totp-method", type: MFAMethodType.TOTP, data: {} });
@@ -526,7 +523,7 @@ describe("MFAStrategy Tests", () => {
 
             await strategy.authenticate(req, makeRes());
 
-            expect((req.session as any).userUid).toBe("user-uid-1");
+            expect((req.session as any).mfaPendingUid).toBe("user-uid-1");
         });
 
         it("Throws when there are no 2FA methods and require2FA is true (the default).", async () => {
@@ -575,47 +572,209 @@ describe("MFAStrategy Tests", () => {
     });
 
     describe("verifyOTP (phase 3)", () => {
-        it("Resolves the user via the session-bound identity, not the client-supplied payload id, and clears it after.", async () => {
-            const secret = otplib.generateSecret();
-            const token = await otplib.generate({ secret });
-            // The attacker claims `payload.id` is the victim, but only controls a challenge that was
-            // actually bound (via session.userUid, set in verifyBasic) to their own identity.
-            const req = makeReq({
-                body: { id: "victim-uid", token },
-                session: { id: "victim-uid", secret, userUid: "attacker-uid" },
-            });
-            (options.getUser as any).mockResolvedValue({ uid: "attacker-uid", name: "attacker", roles: [] });
+        // Regression (security): verifyOTP used to skip the `payload.id === session.mfaPendingUid` check that TOTP and
+        // recovery codes perform, and to return `getUser(session.mfaPendingUid)` for ANY valid one-time code in the
+        // session - including one the attacker had issued to themselves through another flow.
+        it("Refuses a payload id that is not the phase-1-verified identity, even with a valid code for that id.", async () => {
+            const req = makeReq({ body: { id: "attacker@example.com" }, session: { mfaPendingUid: "victim-uid" } });
+            req.body.token = await generateOTP(req, { id: "attacker@example.com" }, undefined, "mfa");
+            (options.getUser as any).mockResolvedValue({ uid: "victim-uid", name: "victim", roles: [] });
+
+            const result = await strategy.authenticate(req, makeRes(), false);
+
+            expect(result).toBeUndefined();
+            expect(options.getUser).not.toHaveBeenCalled();
+            expect((req.session as any).mfaPendingUid).toBeUndefined();
+        });
+
+        it("Refuses a code issued by another flow to the attacker's own contact (registration or sign-in).", async () => {
+            for (const purpose of ["register", "login", "contact", "elevate"] as const) {
+                const req = makeReq({ body: { id: "attacker@example.com" }, session: { mfaPendingUid: "victim-uid" } });
+                req.body.token = await generateOTP(req, { id: "attacker@example.com" }, undefined, purpose);
+                (options.getUser as any).mockResolvedValue({ uid: "victim-uid", name: "victim", roles: [] });
+
+                expect(await strategy.authenticate(req, makeRes(), false)).toBeUndefined();
+                expect(options.getUser).not.toHaveBeenCalled();
+            }
+        });
+
+        it("Refuses a code issued by another flow even when its id is the verified user's uid.", async () => {
+            for (const purpose of ["register", "login", "contact", "elevate"] as const) {
+                const req = makeReq({ body: { id: "user-uid-1" }, session: { mfaPendingUid: "user-uid-1" } });
+                req.body.token = await generateOTP(req, { id: "user-uid-1" }, undefined, purpose);
+                (options.getUser as any).mockResolvedValue(jwtUser);
+
+                await expect(strategy.authenticate(req, makeRes(), false)).rejects.toThrow(
+                    /Invalid authentication request/,
+                );
+                expect(options.getUser).not.toHaveBeenCalled();
+                // The mismatched challenge was consumed, and the identity cleared with it.
+                expect((req.session as any).otp).toBeUndefined();
+                expect((req.session as any).mfaPendingUid).toBeUndefined();
+            }
+        });
+
+        it("Resolves the user via the session-bound identity and clears it after.", async () => {
+            const req = makeReq({ body: { id: "user-uid-1" }, session: { mfaPendingUid: "user-uid-1" } });
+            req.body.token = await generateOTP(req, { id: "user-uid-1" }, undefined, "mfa");
+            (options.getUser as any).mockResolvedValue(jwtUser);
 
             await strategy.authenticate(req, makeRes());
 
-            expect(options.getUser).toHaveBeenCalledWith("attacker-uid");
-            expect(options.getUser).not.toHaveBeenCalledWith("victim-uid");
-            expect((req.session as any).userUid).toBeUndefined();
+            expect(options.getUser).toHaveBeenCalledWith("user-uid-1");
+            expect((req.session as any).mfaPendingUid).toBeUndefined();
         });
 
-        it("Clears the session-bound identity even when the OTP token is invalid.", async () => {
-            const req = makeReq({
-                body: { id: "user-uid-1", token: "000000" },
-                session: { id: "user-uid-1", secret: otplib.generateSecret(), userUid: "user-uid-1" },
-            });
+        it("Clears the session-bound identity when verification throws, instead of leaving it for later requests.", async () => {
+            // No challenge at all.
+            const none = makeReq({ body: { id: "user-uid-1", token: "AAAAAA" }, session: { mfaPendingUid: "user-uid-1" } });
+            await expect(strategy.authenticate(none, makeRes())).rejects.toThrow(/Invalid authentication request/);
+            expect((none.session as any).mfaPendingUid).toBeUndefined();
+
+            // A challenge for a different id.
+            const other = makeReq({ body: { id: "user-uid-1", token: "AAAAAA" }, session: { mfaPendingUid: "user-uid-1" } });
+            await generateOTP(other, { id: "someone-else" }, undefined, "mfa");
+            await expect(strategy.authenticate(other, makeRes())).rejects.toThrow(/Invalid authentication request/);
+            expect((other.session as any).mfaPendingUid).toBeUndefined();
+
+            // A challenge for a different purpose.
+            const purpose = makeReq({ body: { id: "user-uid-1", token: "AAAAAA" }, session: { mfaPendingUid: "user-uid-1" } });
+            await generateOTP(purpose, { id: "user-uid-1" }, undefined, "register");
+            await expect(strategy.authenticate(purpose, makeRes())).rejects.toThrow(/Invalid authentication request/);
+            expect((purpose.session as any).mfaPendingUid).toBeUndefined();
+        });
+
+        it("Clears the session-bound identity when the dedicated limit refuses, even though the challenge is pending.", async () => {
+            const req = makeReq({ body: { id: "user-uid-1" }, session: { mfaPendingUid: "user-uid-1" } });
+            req.body.token = await generateOTP(req, { id: "user-uid-1" }, undefined, "mfa", "user-uid-1");
+            const counters = new OTPCounters();
+            vi.spyOn(counters, "throttle").mockRejectedValue(new ApiError("AUTH_PERMISSION_FAILURE", 429, "slow down"));
+            options.counters = counters;
+
+            await expect(strategy.authenticate(req, makeRes())).rejects.toMatchObject({ status: 429 });
+            expect((req.session as any).mfaPendingUid).toBeUndefined();
+            expect(options.getUser).not.toHaveBeenCalled();
+        });
+
+        it("Clears the session-bound identity when the generic rate limit refuses, before anything is verified.", async () => {
+            const req = makeReq({ body: { id: "user-uid-1" }, session: { mfaPendingUid: "user-uid-1" } });
+            req.body.token = await generateOTP(req, { id: "user-uid-1" }, undefined, "mfa");
+            options.checkRateLimit = vi.fn().mockRejectedValue(new ApiError("AUTH_PERMISSION_FAILURE", 429, "slow down"));
+
+            await expect(strategy.authenticate(req, makeRes())).rejects.toMatchObject({ status: 429 });
+            expect((req.session as any).mfaPendingUid).toBeUndefined();
+        });
+
+        it("Clears the pending identity and method when the generic rate limit refuses a TOTP or recovery code.", async () => {
+            for (const type of [MFAMethodType.TOTP, MFAMethodType.RECOVERY_CODE]) {
+                const req = makeReq({
+                    body: { id: "user-uid-1", token: "123456" },
+                    session: { mfaPendingUid: "user-uid-1", mfaMethodId: "secret-1", mfaMethodType: type },
+                });
+                options.checkRateLimit = vi.fn().mockRejectedValue(new ApiError("AUTH_PERMISSION_FAILURE", 429, "slow"));
+
+                await expect(strategy.authenticate(req, makeRes())).rejects.toMatchObject({ status: 429 });
+                expect((req.session as any).mfaPendingUid).toBeUndefined();
+                expect((req.session as any).mfaMethodId).toBeUndefined();
+            }
+        });
+
+        it("Counts verification against the user's uid with the dedicated counters, per flow.", async () => {
+            const req = makeReq({ body: { id: "user-uid-1" }, session: { mfaPendingUid: "user-uid-1" } });
+            req.body.token = await generateOTP(req, { id: "user-uid-1" }, undefined, "mfa", "user-uid-1");
+            const counters = new OTPCounters();
+            const throttle = vi.spyOn(counters, "throttle");
+            options.counters = counters;
+            (options.getUser as any).mockResolvedValue(jwtUser);
+
+            await strategy.authenticate(req, makeRes());
+
+            const keys = throttle.mock.calls.map((c) => c[0]);
+            expect(keys).toContain(`verify:mfa:${h("user-uid-1")}:${h("unknown")}`);
+            expect(keys).toContain(`user:mfa:${h("user-uid-1")}:${h("unknown")}`);
+            expect(options.getUser).toHaveBeenCalledWith("user-uid-1");
+        });
+
+        it("Keeps the session-bound identity after a wrong OTP token while the challenge is still live, so a typo can be retried.", async () => {
+            const req = makeReq({ body: { id: "user-uid-1" }, session: { mfaPendingUid: "user-uid-1" } });
+            const token = await generateOTP(req, { id: "user-uid-1" }, undefined, "mfa");
+            req.body.token = token === "AAAAAA" ? "BBBBBB" : "AAAAAA";
 
             await strategy.authenticate(req, makeRes(), false);
 
             expect(options.getUser).not.toHaveBeenCalled();
-            expect((req.session as any).userUid).toBeUndefined();
+            expect((req.session as any).mfaPendingUid).toBe("user-uid-1");
+
+            // The retry with the right code then succeeds.
+            req.body.token = token;
+            (options.getUser as any).mockResolvedValue(jwtUser);
+            await strategy.authenticate(req, makeRes());
+            expect(options.getUser).toHaveBeenCalledWith("user-uid-1");
+            expect((req.session as any).mfaPendingUid).toBeUndefined();
+        });
+
+        it("Clears the session-bound identity when the OTP challenge is out of attempts.", async () => {
+            const req = makeReq({ body: { id: "user-uid-1", token: "AAAAAA" }, session: { mfaPendingUid: "user-uid-1" } });
+            options.otpConfig = { maxAttempts: 1 };
+            const token = await generateOTP(req, { id: "user-uid-1" }, options.otpConfig, "mfa");
+            if (token === "AAAAAA") {
+                req.body.token = "BBBBBB";
+            }
+
+            await strategy.authenticate(req, makeRes(), false);
+
+            expect(options.getUser).not.toHaveBeenCalled();
+            expect((req.session as any).mfaPendingUid).toBeUndefined();
         });
 
         it("Aborts before verifying the OTP token when checkRateLimit throws.", async () => {
-            const secret = otplib.generateSecret();
-            const token = await otplib.generate({ secret });
-            const req = makeReq({
-                body: { id: "user-uid-1", token },
-                session: { id: "user-uid-1", secret, userUid: "user-uid-1" },
-            });
+            const req = makeReq({ body: { id: "user-uid-1" }, session: { mfaPendingUid: "user-uid-1" } });
+            req.body.token = await generateOTP(req, { id: "user-uid-1" }, undefined, "mfa");
             options.checkRateLimit = vi.fn().mockRejectedValue(new Error("Too many attempts."));
 
             await expect(strategy.authenticate(req, makeRes())).rejects.toThrow(/Too many attempts/);
             expect(options.getUser).not.toHaveBeenCalled();
+        });
+    });
+
+    describe("one-time code challenge (phase 2)", () => {
+        const otpMethod = {
+            id: "otp-method",
+            type: MFAMethodType.OTP,
+            data: { contact: "test@example.com", type: OTPContactType.EMAIL, verified: true },
+        };
+
+        it("Issues the code for the mfa purpose, bound to the verified user.", async () => {
+            const req = makeReq({
+                body: { id: "user-uid-1", methodId: "otp-method" },
+                session: { mfaPendingUid: "user-uid-1" },
+            });
+            (options.getMethod as any).mockResolvedValue(otpMethod);
+
+            await strategy.authenticate(req, makeRes());
+
+            expect((req.session as any).otp).toMatchObject({ id: "user-uid-1", purpose: "mfa", userUid: "user-uid-1" });
+        });
+
+        it("Enforces the dedicated issue limit before sending anything.", async () => {
+            const req = makeReq({
+                body: { id: "user-uid-1", methodId: "otp-method" },
+                session: { mfaPendingUid: "user-uid-1" },
+            });
+            (options.getMethod as any).mockResolvedValue(otpMethod);
+            const counters = new OTPCounters();
+            vi.spyOn(counters, "throttle").mockRejectedValue(new ApiError("AUTH_PERMISSION_FAILURE", 429, "slow down"));
+            options.counters = counters;
+
+            await expect(strategy.authenticate(req, makeRes())).rejects.toMatchObject({ status: 429 });
+            expect(options.notifyContact).not.toHaveBeenCalled();
+            expect((req.session as any).otp).toBeUndefined();
+        });
+
+        it("Fails fast, at construction, on an unsafe one-time code configuration.", () => {
+            const bad = new MFAStrategyOptions();
+            bad.otpConfig = { maxAttempts: 50 };
+            expect(() => new MFAStrategy(bad)).toThrow(/maxAttempts/);
         });
     });
 
@@ -624,7 +783,7 @@ describe("MFAStrategy Tests", () => {
             return makeReq({
                 body: makeAssertionBody(),
                 session: {
-                    userUid: "user-uid-1",
+                    mfaPendingUid: "user-uid-1",
                     mfaMethodId: "cred-id-1",
                     challenge: "stored-challenge",
                 },
@@ -651,7 +810,7 @@ describe("MFAStrategy Tests", () => {
             expect(options.updateCredentialCounter).toHaveBeenCalledWith("cred-id-1", 6);
             expect(options.getUser).toHaveBeenCalledWith("user-uid-1");
             expect(result?.user).toEqual(jwtUser);
-            expect((req.session as any).userUid).toBeUndefined();
+            expect((req.session as any).mfaPendingUid).toBeUndefined();
             expect((req.session as any).mfaMethodId).toBeUndefined();
             expect((req.session as any).challenge).toBeUndefined();
         });
@@ -673,7 +832,7 @@ describe("MFAStrategy Tests", () => {
 
         it("Returns undefined when the credential id does not match the one selected during phase 2.", async () => {
             const req = makeFidoSessionReq({
-                session: { userUid: "user-uid-1", mfaMethodId: "some-other-cred", challenge: "stored-challenge" },
+                session: { mfaPendingUid: "user-uid-1", mfaMethodId: "some-other-cred", challenge: "stored-challenge" },
             });
             (options.getCredentialById as any).mockResolvedValue(storedCredential);
 
@@ -738,7 +897,7 @@ describe("MFAStrategy Tests", () => {
         function makeTotpSessionReq(body: any): HttpRequest {
             return makeReq({
                 body,
-                session: { userUid: "user-uid-1", mfaMethodId: "secret-1", mfaMethodType: MFAMethodType.TOTP },
+                session: { mfaPendingUid: "user-uid-1", mfaMethodId: "secret-1", mfaMethodType: MFAMethodType.TOTP },
             });
         }
 
@@ -754,7 +913,7 @@ describe("MFAStrategy Tests", () => {
             expect(options.getMethod).toHaveBeenCalledWith("secret-1", "user-uid-1");
             expect(options.getUser).toHaveBeenCalledWith("user-uid-1");
             expect(result?.user).toEqual(jwtUser);
-            expect((req.session as any).userUid).toBeUndefined();
+            expect((req.session as any).mfaPendingUid).toBeUndefined();
             expect((req.session as any).mfaMethodId).toBeUndefined();
             expect((req.session as any).mfaMethodType).toBeUndefined();
         });
@@ -822,7 +981,7 @@ describe("MFAStrategy Tests", () => {
 
             await strategy.authenticate(req, makeRes(), false);
 
-            expect((req.session as any).userUid).toBeUndefined();
+            expect((req.session as any).mfaPendingUid).toBeUndefined();
             expect((req.session as any).mfaMethodId).toBeUndefined();
             expect((req.session as any).mfaMethodType).toBeUndefined();
         });
@@ -837,7 +996,7 @@ describe("MFAStrategy Tests", () => {
         function makeRecoverySessionReq(body: any): HttpRequest {
             return makeReq({
                 body,
-                session: { userUid: "user-uid-1", mfaMethodId: "secret-1", mfaMethodType: MFAMethodType.RECOVERY_CODE },
+                session: { mfaPendingUid: "user-uid-1", mfaMethodId: "secret-1", mfaMethodType: MFAMethodType.RECOVERY_CODE },
             });
         }
 
@@ -855,7 +1014,7 @@ describe("MFAStrategy Tests", () => {
             expect(options.getMethod).toHaveBeenCalledWith("secret-1", "user-uid-1");
             expect(options.getUser).toHaveBeenCalledWith("user-uid-1");
             expect(result?.user).toEqual(jwtUser);
-            expect((req.session as any).userUid).toBeUndefined();
+            expect((req.session as any).mfaPendingUid).toBeUndefined();
             expect((req.session as any).mfaMethodId).toBeUndefined();
             expect((req.session as any).mfaMethodType).toBeUndefined();
         });
@@ -947,7 +1106,7 @@ describe("MFAStrategy Tests", () => {
 
             await strategy.authenticate(req, makeRes(), false);
 
-            expect((req.session as any).userUid).toBeUndefined();
+            expect((req.session as any).mfaPendingUid).toBeUndefined();
             expect((req.session as any).mfaMethodId).toBeUndefined();
             expect((req.session as any).mfaMethodType).toBeUndefined();
         });
@@ -1013,3 +1172,234 @@ describe("MFAStrategy Tests", () => {
         });
     });
 });
+
+describe("MFAStrategy session identity (MFA bypass of OAuth authorize)", () => {
+    let options: MFAStrategyOptions;
+    let strategy: MFAStrategy;
+
+    beforeEach(() => {
+        options = new MFAStrategyOptions();
+        options.getCredentialById = vi.fn();
+        options.getMethod = vi.fn();
+        options.getMethods = vi.fn();
+        options.getUser = vi.fn();
+        options.notifyContact = vi.fn();
+        options.updateCredentialCounter = vi.fn();
+        options.verify = vi.fn();
+        strategy = new MFAStrategy(options);
+    });
+
+    it("Never writes session.userUid after the password step, only the pending identity.", async () => {
+        const req = makeReq({ body: { id: "user-uid-1", password: "password" } });
+        (options.verify as any).mockResolvedValue(jwtUser);
+        (options.getMethods as any).mockResolvedValue([{ id: "m", type: MFAMethodType.TOTP, data: {} }]);
+
+        await strategy.authenticate(req, makeRes());
+
+        expect((req.session as any).userUid).toBeUndefined();
+        expect((req.session as any).mfaPendingUid).toBe("user-uid-1");
+    });
+
+    it("Does not leave a pending identity when no second factor applies (the caller signs in for real).", async () => {
+        const req = makeReq({ body: { id: "user-uid-1", password: "password" } });
+        options.require2FA = false;
+        (options.verify as any).mockResolvedValue(jwtUser);
+        (options.getMethods as any).mockResolvedValue([]);
+
+        const result = await strategy.authenticate(req, makeRes());
+
+        expect(result?.user).toEqual(jwtUser);
+        expect((req.session as any).userUid).toBeUndefined();
+        expect((req.session as any).mfaPendingUid).toBeUndefined();
+    });
+
+    it("Drops an earlier pending identity when a new password attempt fails.", async () => {
+        const req = makeReq({ body: { id: "user-uid-1", password: "wrong" }, session: { mfaPendingUid: "user-uid-1" } });
+        (options.verify as any).mockResolvedValue(undefined);
+
+        await expect(strategy.authenticate(req, makeRes())).rejects.toThrow(/Invalid user id or password/);
+
+        expect((req.session as any).mfaPendingUid).toBeUndefined();
+    });
+
+    it("Ignores a signed-in session's userUid as proof of the password step.", async () => {
+        const req = makeReq({
+            body: { id: "user-uid-1", methodId: "otp-method" },
+            session: { userUid: "user-uid-1" },
+        });
+
+        await expect(strategy.authenticate(req, makeRes())).rejects.toThrow(/Invalid authentication request/);
+        expect(options.getMethod).not.toHaveBeenCalled();
+    });
+
+    it.each([
+        ["a one-time code", { id: "user-uid-1", token: "AAAAAA" }, {}],
+        ["a TOTP code", { id: "user-uid-1", token: "123456" }, { mfaMethodId: "s", mfaMethodType: MFAMethodType.TOTP }],
+        [
+            "a recovery code",
+            { id: "user-uid-1", token: "AAAAA-AAAAA" },
+            { mfaMethodId: "s", mfaMethodType: MFAMethodType.RECOVERY_CODE },
+        ],
+        ["a passkey", makeAssertionBody(), { mfaMethodId: "cred-id-1", challenge: "c" }],
+    ])("A failed second factor (%s) never signs out an existing real session.", async (_name, body, extra) => {
+        (options.getMethod as any).mockResolvedValue(undefined);
+        (options.getCredentialById as any).mockResolvedValue(undefined);
+        const req = makeReq({
+            body,
+            session: { userUid: "user-uid-1", refreshUid: "refresh-1", mfaPendingUid: "user-uid-1", ...extra },
+        });
+
+        await strategy.authenticate(req, makeRes(), false).catch(() => undefined);
+
+        expect((req.session as any).userUid).toBe("user-uid-1");
+        expect((req.session as any).refreshUid).toBe("refresh-1");
+        expect((req.session as any).mfaPendingUid).toBeUndefined();
+    });
+
+    describe("rate limiting of phases 2 and 3 is matched to the phase-1-verified identity first", () => {
+        // Each phase with the session state that makes it reach its rate limit, and a body naming the pending user.
+        const phases: Array<[string, any, any]> = [
+            ["challenge", { id: "user-uid-1", methodId: "m" }, {}],
+            ["a one-time code", { id: "user-uid-1", token: "AAAAAA" }, {}],
+            ["a TOTP code", { id: "user-uid-1", token: "123456" }, { mfaMethodId: "s", mfaMethodType: MFAMethodType.TOTP }],
+            [
+                "a recovery code",
+                { id: "user-uid-1", token: "AAAAA-AAAAA" },
+                { mfaMethodId: "s", mfaMethodType: MFAMethodType.RECOVERY_CODE },
+            ],
+            ["a passkey", makeAssertionBody(), { mfaMethodId: "cred-id-1", challenge: "c" }],
+        ];
+
+        beforeEach(() => {
+            options.checkRateLimit = vi.fn().mockResolvedValue(undefined);
+            options.checkPendingRateLimit = vi.fn().mockResolvedValue(undefined);
+            (options.getMethod as any).mockResolvedValue(undefined);
+            (options.getCredentialById as any).mockResolvedValue(undefined);
+        });
+
+        it.each(phases)(
+            "Counts %s on the session's pending uid through checkPendingRateLimit, and not on the client's id.",
+            async (_name, body, extra) => {
+                const req = makeReq({ body, session: { mfaPendingUid: "user-uid-1", ...extra } });
+
+                await strategy.authenticate(req, makeRes(), false).catch(() => undefined);
+
+                expect(options.checkPendingRateLimit).toHaveBeenCalledTimes(1);
+                expect(options.checkPendingRateLimit).toHaveBeenCalledWith("user-uid-1", req);
+                expect(options.checkRateLimit).not.toHaveBeenCalled();
+            },
+        );
+
+        it.each(phases)(
+            "Counts nothing for %s when there is no pending identity, whatever id the request names.",
+            async (_name, body, extra) => {
+                const req = makeReq({ body: { ...body, ...(body.id === "user-uid-1" ? { id: "victim-uid" } : {}) }, session: extra });
+
+                await strategy.authenticate(req, makeRes(), false).catch(() => undefined);
+
+                expect(options.checkPendingRateLimit).not.toHaveBeenCalled();
+                expect(options.checkRateLimit).not.toHaveBeenCalled();
+            },
+        );
+
+        it.each(phases.filter(([name]) => name !== "a passkey"))(
+            "Counts nothing for %s when the request names someone other than the pending user, and drops the pending state.",
+            async (_name, body, extra) => {
+                const req = makeReq({
+                    body: { ...body, id: "victim-uid" },
+                    session: { mfaPendingUid: "user-uid-1", ...extra },
+                });
+
+                await strategy.authenticate(req, makeRes(), false).catch(() => undefined);
+
+                expect(options.checkPendingRateLimit).not.toHaveBeenCalled();
+                expect(options.checkRateLimit).not.toHaveBeenCalled();
+                expect((req.session as any).mfaPendingUid).toBeUndefined();
+            },
+        );
+
+        // A refused challenge keeps the pending identity (the user retries once the window passes); every phase-3 outcome clears it.
+        it.each(phases.filter(([name]) => name !== "challenge"))("Clears the pending state and fails when the limit for %s refuses.", async (_name, body, extra) => {
+            options.checkPendingRateLimit = vi.fn().mockRejectedValue(new ApiError("AUTH_PERMISSION_FAILURE", 429, "slow"));
+            const req = makeReq({ body, session: { mfaPendingUid: "user-uid-1", ...extra } });
+
+            await expect(strategy.authenticate(req, makeRes(), false)).rejects.toMatchObject({ status: 429 });
+
+            expect((req.session as any).mfaPendingUid).toBeUndefined();
+            expect(options.getUser).not.toHaveBeenCalled();
+        });
+
+        it("Falls back to checkRateLimit with the pending uid when no pending limit is supplied.", async () => {
+            options.checkPendingRateLimit = undefined;
+            const req = makeReq({
+                body: { id: "user-uid-1", token: "123456" },
+                session: { mfaPendingUid: "user-uid-1", mfaMethodId: "s", mfaMethodType: MFAMethodType.TOTP },
+            });
+
+            await strategy.authenticate(req, makeRes(), false).catch(() => undefined);
+
+            expect(options.checkRateLimit).toHaveBeenCalledWith("user-uid-1", req);
+        });
+
+        it("Does not need any limit hook at all.", async () => {
+            options.checkPendingRateLimit = undefined;
+            options.checkRateLimit = undefined;
+            const req = makeReq({
+                body: { id: "user-uid-1", token: "123456" },
+                session: { mfaPendingUid: "user-uid-1", mfaMethodId: "s", mfaMethodType: MFAMethodType.TOTP },
+            });
+
+            await expect(strategy.authenticate(req, makeRes(), false)).resolves.toBeUndefined();
+        });
+    });
+
+    it.each([
+        ["a TOTP code", MFAMethodType.TOTP, "123456"],
+        ["a recovery code", MFAMethodType.RECOVERY_CODE, "AAAAA-AAAAA"],
+    ])("Fails %s when the pending identity matches but no method was selected.", async (_name, type, token) => {
+        const req = makeReq({
+            body: { id: "user-uid-1", token },
+            session: { mfaPendingUid: "user-uid-1", mfaMethodType: type },
+        });
+
+        await expect(strategy.authenticate(req, makeRes(), false)).resolves.toBeUndefined();
+
+        expect(options.getMethod).not.toHaveBeenCalled();
+        expect((req.session as any).mfaPendingUid).toBeUndefined();
+    });
+
+    it("Starting a new password attempt clears the method and challenge an earlier attempt selected.", async () => {
+        const req = makeReq({
+            body: { id: "user-uid-1", password: "password" },
+            session: {
+                mfaPendingUid: "other-uid",
+                mfaMethodId: "stale-method",
+                mfaMethodType: MFAMethodType.TOTP,
+                challenge: "stale-challenge",
+            },
+        });
+        (options.verify as any).mockResolvedValue(jwtUser);
+        (options.getMethods as any).mockResolvedValue([{ id: "m", type: MFAMethodType.OTP, data: {} }]);
+
+        await strategy.authenticate(req, makeRes(), false);
+
+        expect((req.session as any).mfaPendingUid).toBe("user-uid-1");
+        expect((req.session as any).mfaMethodId).toBeUndefined();
+        expect((req.session as any).mfaMethodType).toBeUndefined();
+        expect((req.session as any).challenge).toBeUndefined();
+    });
+
+    it("Starting a new password attempt that then fails leaves no stale method either.", async () => {
+        const req = makeReq({
+            body: { id: "user-uid-1", password: "wrong" },
+            session: { mfaPendingUid: "user-uid-1", mfaMethodId: "stale", mfaMethodType: MFAMethodType.RECOVERY_CODE },
+        });
+        (options.verify as any).mockResolvedValue(undefined);
+
+        await expect(strategy.authenticate(req, makeRes())).rejects.toThrow(/Invalid user id or password/);
+
+        expect((req.session as any).mfaMethodId).toBeUndefined();
+        expect((req.session as any).mfaMethodType).toBeUndefined();
+    });
+});
+

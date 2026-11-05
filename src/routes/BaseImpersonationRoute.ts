@@ -17,6 +17,7 @@ import {
 import { AuthResult, User } from "../models/types.js";
 import { AuditLogUtils } from "../auth/AuditLogUtils.js";
 import { AuthEventType } from "../auth/events.js";
+import { IMPERSONATOR_COOKIE_NAME } from "../auth/shared.js";
 import { TokenUtils } from "../auth/TokenUtils.js";
 const { Description, Returns, Summary } = DocDecorators;
 const { Config, Init, Inject, Logger } = ObjectDecorators;
@@ -26,8 +27,6 @@ const AuthUser = RouteDecorators.User;
 /** Matches `JWTStrategyOptions.cookieName`'s hardcoded default — see `JWTStrategy.ts`. */
 const SESSION_COOKIE_NAME = "jwt";
 
-/** Holds the impersonator's own session token while they're viewing as someone else. */
-const IMPERSONATOR_COOKIE_NAME = "jwt_impersonator";
 
 export interface ImpersonateInput {
     userUid: string;

@@ -18,6 +18,7 @@ import {
 import { Alias, AliasType, AuthResult, Secret, SecretType, User } from "../models/types.js";
 import { MFAMethod, MFAMethodType } from "../auth/MFAStrategy.js";
 import {
+    OTPConfig,
     OTPContact,
     OTPContactType,
     PasskeyConfig,
@@ -29,10 +30,13 @@ import {
 import { AuditLogUtils } from "../auth/AuditLogUtils.js";
 import { AuthEventType } from "../auth/events.js";
 import {
+    enforceOTPIssueLimit,
     generateOTP,
+    isOTPChallengePending,
     generatePasskeyChallenge,
     importArgon2,
     isOTPResponse,
+    resolveOTPConfig,
     isPasskeyResponse,
     isWhatsAppConfigured,
     normalizePasswordSubmission,
@@ -45,6 +49,7 @@ import {
     verifyTOTP,
     WeakClientHashError,
 } from "../auth/shared.js";
+import { OTPCounters } from "../auth/OTPCounters.js";
 import { TokenUtils } from "../auth/TokenUtils.js";
 import { UserUtils } from "./UserUtils.js";
 
@@ -112,11 +117,19 @@ export abstract class BaseAuthElevationRoute<U extends User, S extends Secret, A
     @Inject(MessagingUtils)
     protected messagingUtils?: MessagingUtils;
 
+    /** The configuration of the one-time codes sent by e-mail, SMS or WhatsApp (`auth:otp`). */
+    @Config("auth:otp", {})
+    protected otpConfig: OTPConfig = {};
+
     @Config("auth:password", new PasswordConfig())
     protected passwordConfig: PasswordConfig = new PasswordConfig();
 
     @Inject(RateLimiter)
     protected rateLimiter?: RateLimiter;
+
+    /** The counters behind the one-time code limits, guess counter and one-time claim. */
+    @Inject(OTPCounters)
+    protected otpCounters?: OTPCounters;
 
     protected secretRepo?: RepoUtils<S>;
 
@@ -145,6 +158,10 @@ export abstract class BaseAuthElevationRoute<U extends User, S extends Secret, A
      */
     @Init
     protected async initialize() {
+        // Fail fast on an unsafe `auth:otp` configuration instead of on the first request.
+        resolveOTPConfig(this.otpConfig);
+        await this.otpCounters?.checkDeployment(this._objectFactory);
+
         if (!this._objectFactory) {
             throw new Error("objectFactory is not set.");
         }
@@ -236,7 +253,14 @@ export abstract class BaseAuthElevationRoute<U extends User, S extends Secret, A
             // Keyed on the already-authenticated caller's own uid, not anything client-supplied — unlike
             // login-time rate limiting, this key is fully trustworthy since the caller is already
             // authenticated, so there's no risk of an attacker bucketing an innocent uid.
-            await this.rateLimiter.checkAndIncrement(`elevate:${user.uid}`, undefined, req);
+            try {
+                await this.rateLimiter.checkAndIncrement(`elevate:${user.uid}`, undefined, req);
+            } catch (err) {
+                // A throttled attempt leaves no half-finished challenge identity behind to be reused later.
+                delete req.session.elevateUid;
+                delete req.session.mfaMethodId;
+                throw err;
+            }
         }
 
         // Never trust a client-supplied `id` here — every method below is scoped to the identity already
@@ -322,7 +346,8 @@ export abstract class BaseAuthElevationRoute<U extends User, S extends Secret, A
                 // in this session — otherwise the OTP submission below would be misrouted to TOTP
                 // verification, which always fails.
                 delete req.session!.mfaMethodId;
-                const totp: string = await generateOTP(req, { id: user.uid });
+                await enforceOTPIssueLimit(req, user.uid, this.otpConfig, "elevate", { counters: this.otpCounters });
+                const totp: string = await generateOTP(req, { id: user.uid }, this.otpConfig, "elevate", user.uid);
                 await this.notifyContact(method.data, totp);
                 req.session!.elevateUid = user.uid;
                 return {};
@@ -342,20 +367,40 @@ export abstract class BaseAuthElevationRoute<U extends User, S extends Secret, A
     }
 
     protected async verifyOTPChallenge(payload: any, req: HttpRequest): Promise<JWTUser | undefined> {
-        const valid: boolean = await verifyOTP(req, payload);
-
-        // Single-use regardless of outcome — cleared as soon as it's read. This is a route-local field
+        // Single-use — cleared once the challenge is resolved (verified, expired or out of attempts); a wrong code
+        // on a challenge that is still live keeps it, so a typo does not force a resend. This is a route-local field
         // (`elevateUid`), deliberately distinct from the shared `session.userUid` that `TokenUtils`/
         // `BaseAuthRefreshRoute` use to track the caller's actual logged-in identity — clearing *that*
         // field on a failed elevation attempt would break the caller's ability to refresh their still
-        // otherwise-valid session.
+        // otherwise-valid session. `keep` is only ever set for a wrong code on a challenge that is still live, so
+        // everything else, a throwing verification (no challenge, wrong id or purpose, rate limited and so on)
+        // included, clears it and cannot leave it behind.
         const userUid: string | undefined = req.session?.elevateUid;
-        delete req.session?.elevateUid;
+        let valid = false;
+        let keep = false;
+        try {
+            if (!userUid || payload.id !== userUid) {
+                return undefined;
+            }
 
-        if (!valid || !userUid) {
+            valid = await verifyOTP(req, payload, this.otpConfig, "elevate", { counters: this.otpCounters });
+            keep = !valid && isOTPChallengePending(req);
+        } catch (err) {
+            // A rate limit is reported as such; anything else (no challenge, a challenge for another id or purpose)
+            // is simply a failed verification, i.e. the same 401 as a wrong code.
+            if (err instanceof ApiError && err.status === 429) {
+                throw err;
+            }
+        } finally {
+            if (!keep) {
+                delete req.session?.elevateUid;
+            }
+        }
+
+        if (!valid) {
             return undefined;
         }
-        return await this.getUser(userUid);
+        return await this.getUser(userUid!);
     }
 
     protected async verifyTOTPChallenge(payload: any, req: HttpRequest): Promise<JWTUser | undefined> {

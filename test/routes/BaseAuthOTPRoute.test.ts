@@ -46,6 +46,14 @@ function makeMockObjectFactory(aliasRepo: any, secretRepo: any, userRepo: any, u
 }
 
 describe("BaseAuthOTPRoute Tests", () => {
+    it("Fails fast at startup on an unsafe auth:otp configuration.", async () => {
+        const route = new TestAuthOTPRoute();
+        for (const bad of [{ ttl: 0 }, { maxAttempts: 11 }, { alphabet: "ab-cd" }, { length: 4, alphabet: "ab" }]) {
+            (route as any).otpConfig = bad;
+            await expect((route as any).initialize()).rejects.toThrow(/auth:otp/);
+        }
+    });
+
     it("Throws during initialize() if authMiddleware was not injected.", async () => {
         const route = new TestAuthOTPRoute();
         (route as any)._objectFactory = makeMockObjectFactory({}, {}, {}, {});

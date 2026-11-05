@@ -13,6 +13,7 @@ vi.mock("@simplewebauthn/server", () => ({
 }));
 
 import { Binary, deserialize, serialize } from "bson";
+import { ApiError } from "@rapidrest/core";
 import type { HttpRequest } from "@rapidrest/service-core";
 import * as otplib from "otplib";
 import {
@@ -21,13 +22,27 @@ import {
     generateRegistrationOptions,
     verifyRegistrationResponse,
 } from "@simplewebauthn/server";
+import { FakeRedisClient } from "../helpers/FakeRedis.js";
+import { OTPCounters } from "../../src/auth/OTPCounters.js";
 import {
     CLIENT_ARGON2_PARAMS,
+    clientRateLimitKey,
+    counterKeyPart,
+    DEFAULT_OTP_ALPHABET,
+    DEFAULT_OTP_LENGTH,
+    DEFAULT_OTP_ISSUE_LIMIT,
+    DEFAULT_OTP_ISSUE_TOTAL_LIMIT,
+    DEFAULT_OTP_MAX_ATTEMPTS,
+    DEFAULT_OTP_USER_LIMIT,
+    DEFAULT_OTP_USER_TOTAL_LIMIT,
+    DEFAULT_OTP_VERIFY_LIMIT,
+    DEFAULT_OTP_VERIFY_TOTAL_LIMIT,
     DUMMY_ARGON2_HASH,
     DUMMY_TOTP_SECRET,
     decryptTOTPSecret,
     deriveClientSalt,
     encryptTOTPSecret,
+    enforceOTPIssueLimit,
     generateOTP,
     generatePasskeyChallenge,
     generatePasskeyRegistrationOptions,
@@ -38,6 +53,7 @@ import {
     getBearerToken,
     getRequestData,
     isClientHashedFormat,
+    isOTPChallengePending,
     isOTPResponse,
     isPasskeyRegistrationResponse,
     isPasskeyResponse,
@@ -46,19 +62,23 @@ import {
     normalizePasswordSubmission,
     obfuscateContact,
     parseWhatsAppMethodId,
+    resolveOTPConfig,
     toWhatsAppMethodId,
     toUint8Array,
     touchSecretLastUsedAt,
     verifyDummyPassword,
     verifyDummyTOTP,
     verifyOTP,
+    type OTPContext,
     verifyPasskeyChallenge,
     verifyPasskeyRegistrationResponse,
     verifyTOTP,
     WeakClientHashError,
 } from "../../src/auth/shared.js";
 import {
+    OTPConfig,
     OTPContactType,
+    OTPPurpose,
     PasskeyConfig,
     PasswordConfig,
     StoredPasskeyCredential,
@@ -487,12 +507,32 @@ describe("WhatsApp method ids", () => {
 });
 
 describe("OTP helpers", () => {
+    const START = new Date("2026-11-05T12:00:00.000Z").getTime();
+
+    /** The helpers under test, defaulting to the `login` purpose and no rate limiter. */
+    const gen = (req: HttpRequest, data?: any, config?: OTPConfig, purpose: OTPPurpose = "login") =>
+        generateOTP(req, data, config, purpose);
+    const ver = (req: HttpRequest, payload?: any, config?: OTPConfig, purpose: OTPPurpose = "login", ctx?: OTPContext) =>
+        verifyOTP(req, payload, config, purpose, ctx);
+
+    /** Returns a code of the same length that differs from `code` in its first character. */
+    const wrongCode = (code: string): string => (code[0] === "2" ? "3" : "2") + code.slice(1);
+
+    beforeEach(() => {
+        vi.useFakeTimers({ toFake: ["Date"] });
+        vi.setSystemTime(START);
+    });
+
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
     describe("generateOTP", () => {
         it("Throws if req.session is missing.", async () => {
             const req = makeReq({ session: undefined });
             // Regression: a deployment misconfiguration, not a client-caused auth failure - must surface
             // as a distinguishable 500, not get flattened into a generic 401.
-            await expect(generateOTP(req)).rejects.toMatchObject({
+            await expect(gen(req)).rejects.toMatchObject({
                 status: 500,
                 message: expect.stringMatching(/session support/),
             });
@@ -500,95 +540,949 @@ describe("OTP helpers", () => {
 
         it("Derives requestData from the request itself when not provided.", async () => {
             const req = makeReq({ body: { id: "contact-1" } });
-            await generateOTP(req);
-            expect((req.session as any).id).toBe("contact-1");
+            await gen(req);
+            expect((req.session as any).otp.id).toBe("contact-1");
         });
 
-        it("Stores the generated secret/token/id in the session.", async () => {
+        it("Issues a 6 character upper-case code from the unambiguous alphabet.", async () => {
+            const seen = new Set<string>();
+            for (let i = 0; i < 3000; i++) {
+                const code = await gen(makeReq(), { id: "contact-1" });
+                expect(code).toMatch(/^[2-9A-HJKMNP-Z]{6}$/);
+                for (const ch of code) {
+                    seen.add(ch);
+                }
+            }
+            // Never any of the look-alike characters, and every character of the alphabet does get used.
+            for (const ch of "01ILO") {
+                expect(seen.has(ch)).toBe(false);
+            }
+            expect(DEFAULT_OTP_ALPHABET).toHaveLength(31);
+            expect([...seen].sort().join("")).toBe([...DEFAULT_OTP_ALPHABET].sort().join(""));
+            expect(DEFAULT_OTP_LENGTH).toBe(6);
+        });
+
+        it("Honors a configured length and alphabet.", async () => {
+            const code = await gen(makeReq(), { id: "c" }, { length: 10, alphabet: "abcd" });
+            expect(code).toMatch(/^[ABCD]{10}$/);
+        });
+
+        it("Rejects an invalid configuration.", async () => {
+            await expect(gen(makeReq(), { id: "c" }, { alphabet: "a" })).rejects.toThrow(/alphabet/);
+            await expect(gen(makeReq(), { id: "c" }, { alphabet: "aAaA" })).rejects.toThrow(/alphabet/);
+            await expect(gen(makeReq(), { id: "c" }, { alphabet: "ab-c" })).rejects.toThrow(/alphabet/);
+            await expect(gen(makeReq(), { id: "c" }, { length: 3 })).rejects.toThrow(/length/);
+            await expect(gen(makeReq(), { id: "c" }, { length: 4.5 })).rejects.toThrow(/length/);
+            await expect(gen(makeReq(), { id: "c" }, { maxAttempts: 0 })).rejects.toThrow(/maxAttempts/);
+        });
+
+        it("Requires a valid purpose.", async () => {
+            await expect(generateOTP(makeReq(), { id: "c" }, undefined, undefined as any)).rejects.toThrow(/purpose/);
+            await expect(generateOTP(makeReq(), { id: "c" }, undefined, "admin" as any)).rejects.toThrow(/purpose/);
+        });
+
+        it("Records the purpose in the challenge.", async () => {
+            for (const purpose of ["login", "mfa", "elevate", "register", "contact"] as OTPPurpose[]) {
+                const req = makeReq();
+                await gen(req, { id: "c" }, undefined, purpose);
+                expect((req.session as any).otp.purpose).toBe(purpose);
+            }
+        });
+
+        it("Stores only a salted hash, the issue time and an attempt counter - never the code.", async () => {
             const req = makeReq();
-            const token = await generateOTP(req, { id: "contact-1" });
-            expect(token).toBeDefined();
-            expect((req.session as any).id).toBe("contact-1");
-            expect((req.session as any).secret).toBeDefined();
-            expect((req.session as any).token).toBe(token);
+            const code = await gen(req, { id: "contact-1" });
+            const session = req.session as any;
+
+            expect(Object.keys(session)).toEqual(["otp"]);
+            expect(Object.keys(session.otp).sort()).toEqual(["attempts", "hash", "id", "issuedAt", "purpose", "salt"]);
+            expect(session.otp).toMatchObject({ id: "contact-1", purpose: "login", attempts: 0, issuedAt: START });
+            expect(JSON.stringify(session)).not.toContain(code);
+            expect(session.token).toBeUndefined();
+            expect(session.secret).toBeUndefined();
+        });
+
+        it("Records the user the code was issued for, when one is given.", async () => {
+            const req = makeReq();
+            await generateOTP(req, { id: "contact-1" }, undefined, "login", "user-1");
+            expect((req.session as any).otp.userUid).toBe("user-1");
+            await generateOTP(req, { id: "contact-1" }, undefined, "login");
+            expect("userUid" in (req.session as any).otp).toBe(false);
+        });
+
+        it("Rejects an id that is missing, not a string, empty or over 256 characters.", async () => {
+            for (const id of [undefined, 5, {}, "", "x".repeat(257)]) {
+                await expect(gen(makeReq(), { id })).rejects.toThrow(/Invalid authentication request/);
+            }
+            await expect(gen(makeReq(), { id: "x".repeat(256) })).resolves.toEqual(expect.any(String));
+        });
+
+        it("Refuses to verify an id that is not a bounded string, whatever challenge is pending.", async () => {
+            const req = makeReq();
+            await gen(req, { id: "c" });
+            for (const id of ["x".repeat(257), { a: 1 }, 5]) {
+                await expect(ver(req, { id, token: "ABC234" })).rejects.toThrow(/Invalid authentication request/);
+            }
+            expect(isOTPChallengePending(req)).toBe(true);
+        });
+
+        it("Uses a different salt (and hash) for every challenge, and replaces a pending one.", async () => {
+            const req = makeReq();
+            await gen(req, { id: "contact-1" });
+            const first = { ...(req.session as any).otp };
+            await gen(req, { id: "contact-1" });
+            expect((req.session as any).otp.salt).not.toBe(first.salt);
+            expect((req.session as any).otp.hash).not.toBe(first.hash);
         });
     });
 
     describe("verifyOTP", () => {
         it("Throws if req.session is missing.", async () => {
             const req = makeReq({ session: undefined });
-            await expect(verifyOTP(req, { id: "c", token: "123456" })).rejects.toThrow(/session support/);
+            await expect(ver(req, { id: "c", token: "ABC234" })).rejects.toThrow(/session support/);
         });
 
         it("Derives payload from the request itself when not provided.", async () => {
-            const req = makeReq({
-                session: { id: "c", secret: otplib.generateSecret() },
-                body: { id: "c", token: "000000" },
-            });
-            const result = await verifyOTP(req);
-            expect(result).toBe(false);
+            const req = makeReq({ body: { id: "c" } });
+            const code = await gen(req);
+            req.body.token = code;
+            expect(await ver(req)).toBe(true);
         });
 
         it("Throws when the payload is not a valid OTP response shape.", async () => {
-            const req = makeReq({ session: {} });
-            await expect(verifyOTP(req, { id: "c" })).rejects.toThrow(/Invalid authentication request/);
+            const req = makeReq();
+            await gen(req, { id: "c" });
+            await expect(ver(req, { id: "c" })).rejects.toThrow(/Invalid authentication request/);
         });
 
-        it("Throws when the session id does not match the payload id.", async () => {
-            const req = makeReq({ session: { id: "other" } });
-            await expect(verifyOTP(req, { id: "c", token: "123456" })).rejects.toThrow(
+        it("Throws when no challenge is pending, or the stored challenge is malformed.", async () => {
+            await expect(ver(makeReq(), { id: "c", token: "ABC234" })).rejects.toThrow(
+                /Invalid authentication request/,
+            );
+            await expect(
+                ver(makeReq({ session: { otp: { id: "c", hash: 1, salt: "00" } } }), { id: "c", token: "ABC234" }),
+            ).rejects.toThrow(/Invalid authentication request/);
+            await expect(
+                ver(makeReq({ session: { otp: { id: "c", hash: "00", salt: 1 } } }), { id: "c", token: "ABC234" }),
+            ).rejects.toThrow(/Invalid authentication request/);
+        });
+
+        it("Throws and consumes the challenge when the id does not match.", async () => {
+            const req = makeReq();
+            const code = await gen(req, { id: "c" });
+            await expect(ver(req, { id: "other", token: code })).rejects.toThrow(
+                /Invalid authentication request/,
+            );
+            expect(isOTPChallengePending(req)).toBe(false);
+            // The right id and code no longer work either.
+            await expect(ver(req, { id: "c", token: code })).rejects.toThrow(/Invalid authentication request/);
+        });
+
+        it("Accepts the code regardless of case, surrounding whitespace, and internal spaces or hyphens.", async () => {
+            const variants = [
+                (c: string) => c,
+                (c: string) => c.toLowerCase(),
+                (c: string) => `  ${c.toLowerCase()}\n`,
+                (c: string) => `${c.slice(0, 3)}-${c.slice(3)}`,
+                (c: string) => `${c.slice(0, 3).toLowerCase()} ${c.slice(3)}`,
+            ];
+            for (const variant of variants) {
+                const req = makeReq();
+                const code = await gen(req, { id: "c" });
+                expect(await ver(req, { id: "c", token: variant(code) })).toBe(true);
+            }
+        });
+
+        it("Returns false for a wrong code, and for a token that is not a string.", async () => {
+            const req = makeReq();
+            const code = await gen(req, { id: "c" });
+            expect(await ver(req, { id: "c", token: wrongCode(code) })).toBe(false);
+            expect(await ver(req, { id: "c", token: 234567 })).toBe(false);
+            expect(await ver(req, { id: "c", token: "  - " })).toBe(false);
+            expect((req.session as any).otp.attempts).toBe(3);
+        });
+
+        it.each([
+            ["31 seconds", 31_000],
+            ["5 minutes", 5 * 60_000],
+            ["just under the TTL", 600_000 - 1],
+            ["exactly the TTL", 600_000],
+        ])("Still accepts the code after %s.", async (_name, elapsed) => {
+            const req = makeReq();
+            const code = await gen(req, { id: "c" });
+            vi.setSystemTime(START + elapsed);
+            expect(await ver(req, { id: "c", token: code })).toBe(true);
+        });
+
+        it("Rejects the code once the TTL has passed, and consumes it.", async () => {
+            const req = makeReq();
+            const code = await gen(req, { id: "c" });
+            vi.setSystemTime(START + 600_001);
+            expect(await ver(req, { id: "c", token: code })).toBe(false);
+            expect(isOTPChallengePending(req)).toBe(false);
+        });
+
+        it("Honors a configured TTL, given as seconds or as a duration string.", async () => {
+            for (const ttl of [60, "1m"]) {
+                const req = makeReq();
+                const code = await gen(req, { id: "c" }, { ttl });
+                vi.setSystemTime(START + 59_000);
+                expect(await ver(req, { id: "c", token: code }, { ttl })).toBe(true);
+
+                vi.setSystemTime(START);
+                const late = makeReq();
+                const lateCode = await gen(late, { id: "c" }, { ttl });
+                vi.setSystemTime(START + 61_000);
+                expect(await ver(late, { id: "c", token: lateCode }, { ttl })).toBe(false);
+                vi.setSystemTime(START);
+            }
+        });
+
+        it("Rejects a TTL that can't be parsed, is not positive or exceeds an hour.", async () => {
+            for (const ttl of ["soon", 0, "0s", -5, 3601, "2h"]) {
+                expect(() => resolveOTPConfig({ ttl })).toThrow(/ttl/);
+            }
+            expect(resolveOTPConfig({ ttl: 3600 }).ttl).toBe(3600);
+            expect(resolveOTPConfig({ ttl: "1h" }).ttl).toBe(3600);
+        });
+
+        it("Tolerates the default number of wrong codes, then still accepts the right one.", async () => {
+            const req = makeReq();
+            const code = await gen(req, { id: "c" });
+            for (let i = 0; i < DEFAULT_OTP_MAX_ATTEMPTS - 1; i++) {
+                expect(await ver(req, { id: "c", token: wrongCode(code) })).toBe(false);
+            }
+            expect(isOTPChallengePending(req)).toBe(true);
+            expect(await ver(req, { id: "c", token: code })).toBe(true);
+        });
+
+        it("Invalidates the challenge after the maximum wrong codes, so even the right code is rejected.", async () => {
+            const req = makeReq();
+            const code = await gen(req, { id: "c" });
+            for (let i = 0; i < DEFAULT_OTP_MAX_ATTEMPTS; i++) {
+                expect(await ver(req, { id: "c", token: wrongCode(code) })).toBe(false);
+            }
+            expect(isOTPChallengePending(req)).toBe(false);
+            await expect(ver(req, { id: "c", token: code })).rejects.toThrow(/Invalid authentication request/);
+        });
+
+        it("Honors a configured maximum number of attempts.", async () => {
+            const req = makeReq();
+            const config = { maxAttempts: 2 };
+            const code = await gen(req, { id: "c" }, config);
+            expect(await ver(req, { id: "c", token: wrongCode(code) }, config)).toBe(false);
+            expect(await ver(req, { id: "c", token: wrongCode(code) }, config)).toBe(false);
+            await expect(ver(req, { id: "c", token: code }, config)).rejects.toThrow(
                 /Invalid authentication request/,
             );
         });
 
-        it("Returns true for a valid token.", async () => {
-            const secret = otplib.generateSecret();
-            const token = await otplib.generate({ secret });
-            const req = makeReq({ session: { id: "c", secret } });
-            const result = await verifyOTP(req, { id: "c", token });
-            expect(result).toBe(true);
+        it("Rejects a challenge that is already out of attempts under a stricter configuration.", async () => {
+            const req = makeReq();
+            const code = await gen(req, { id: "c" });
+            (req.session as any).otp.attempts = 3;
+            expect(await ver(req, { id: "c", token: code }, { maxAttempts: 3 })).toBe(false);
+            expect(isOTPChallengePending(req)).toBe(false);
         });
 
-        it("Returns false for an invalid token.", async () => {
-            const req = makeReq({ session: { id: "c", secret: otplib.generateSecret() } });
-            const result = await verifyOTP(req, { id: "c", token: "000000" });
-            expect(result).toBe(false);
+        it("Is single-use: the code cannot be verified a second time after it succeeds.", async () => {
+            const req = makeReq();
+            const code = await gen(req, { id: "c" });
+            expect(await ver(req, { id: "c", token: code })).toBe(true);
+            expect(isOTPChallengePending(req)).toBe(false);
+            await expect(ver(req, { id: "c", token: code })).rejects.toThrow(/Invalid authentication request/);
         });
 
-        it("Clears the session id/secret/token after a successful verification.", async () => {
-            const secret = otplib.generateSecret();
-            const token = await otplib.generate({ secret });
-            const req = makeReq({ session: { id: "c", secret, token } });
-
-            await verifyOTP(req, { id: "c", token });
-
-            expect((req.session as any).id).toBeUndefined();
-            expect((req.session as any).secret).toBeUndefined();
+        it("Leaves no code, hash or challenge behind once consumed.", async () => {
+            const req = makeReq();
+            const code = await gen(req, { id: "c" });
+            await ver(req, { id: "c", token: code });
+            expect(JSON.stringify(req.session)).not.toContain(code);
+            expect((req.session as any).otp).toBeUndefined();
             expect((req.session as any).token).toBeUndefined();
-        });
-
-        it("Clears the session id/secret/token even when verification fails.", async () => {
-            const secret = otplib.generateSecret();
-            const req = makeReq({ session: { id: "c", secret, token: "some-token" } });
-
-            await verifyOTP(req, { id: "c", token: "000000" });
-
-            expect((req.session as any).id).toBeUndefined();
             expect((req.session as any).secret).toBeUndefined();
-            expect((req.session as any).token).toBeUndefined();
         });
 
-        it("Rejects replaying the same valid token a second time (single-use).", async () => {
-            const secret = otplib.generateSecret();
-            const token = await otplib.generate({ secret });
-            const req = makeReq({ session: { id: "c", secret } });
+        it("Rejects a stored challenge with a bad issue time or a hash of the wrong length.", async () => {
+            const req = makeReq();
+            const code = await gen(req, { id: "c" });
+            (req.session as any).otp.issuedAt = "yesterday";
+            expect(await ver(req, { id: "c", token: code })).toBe(false);
 
-            const first = await verifyOTP(req, { id: "c", token });
-            expect(first).toBe(true);
+            const other = makeReq();
+            const otherCode = await gen(other, { id: "c" });
+            (other.session as any).otp.hash = "abcd";
+            (other.session as any).otp.attempts = "x";
+            expect(await ver(other, { id: "c", token: otherCode })).toBe(false);
+            expect((other.session as any).otp.attempts).toBe(1);
+        });
+    });
 
-            // The session was cleared by the first call, so the second (replayed) attempt no longer
-            // has a matching session id and must be rejected rather than re-verified.
-            await expect(verifyOTP(req, { id: "c", token })).rejects.toThrow(/Invalid authentication request/);
+    describe("purpose binding", () => {
+        const purposes: OTPPurpose[] = ["login", "mfa", "elevate", "register", "contact"];
+
+        it("Accepts a code only for the purpose it was issued for.", async () => {
+            for (const issued of purposes) {
+                for (const presented of purposes) {
+                    const req = makeReq();
+                    const code = await gen(req, { id: "c" }, undefined, issued);
+                    if (issued === presented) {
+                        expect(await ver(req, { id: "c", token: code }, undefined, presented)).toBe(true);
+                    } else {
+                        await expect(ver(req, { id: "c", token: code }, undefined, presented)).rejects.toThrow(
+                            /Invalid authentication request/,
+                        );
+                        // The challenge was consumed by the mismatch: the right purpose no longer works either.
+                        expect(isOTPChallengePending(req)).toBe(false);
+                        await expect(ver(req, { id: "c", token: code }, undefined, issued)).rejects.toThrow(
+                            /Invalid authentication request/,
+                        );
+                    }
+                }
+            }
+        });
+
+        it("Rejects a stored challenge that carries no purpose, such as one written by an older version.", async () => {
+            const req = makeReq();
+            const code = await gen(req, { id: "c" });
+            delete (req.session as any).otp.purpose;
+            await expect(ver(req, { id: "c", token: code })).rejects.toThrow(/Invalid authentication request/);
+        });
+    });
+
+    describe("submission length cap", () => {
+        it("Counts a token longer than four times the code length as a wrong guess, even if it normalizes to the code.", async () => {
+            const req = makeReq();
+            const code = await gen(req, { id: "c" });
+            const padded = code + "-".repeat(4 * code.length - code.length + 1);
+            expect(padded.length).toBe(4 * code.length + 1);
+            expect(await ver(req, { id: "c", token: padded })).toBe(false);
+            expect((req.session as any).otp.attempts).toBe(1);
+            // The real code still works afterwards.
+            expect(await ver(req, { id: "c", token: code })).toBe(true);
+        });
+
+        it("Accepts a token of exactly four times the code length.", async () => {
+            const req = makeReq();
+            const code = await gen(req, { id: "c" });
+            const padded = code + " ".repeat(3 * code.length);
+            expect(padded.length).toBe(4 * code.length);
+            expect(await ver(req, { id: "c", token: padded })).toBe(true);
+        });
+
+        it("Scales the cap with a configured length.", async () => {
+            const config = { length: 8 };
+            const req = makeReq();
+            const code = await gen(req, { id: "c" }, config);
+            expect(await ver(req, { id: "c", token: code + " ".repeat(25) }, config)).toBe(false);
+            expect(await ver(req, { id: "c", token: code + " ".repeat(24) }, config)).toBe(true);
+        });
+    });
+
+    describe("configuration validation", () => {
+        it("Returns the defaults, memoized, when nothing is configured.", () => {
+            const resolved = resolveOTPConfig();
+            expect(resolved.length).toBe(DEFAULT_OTP_LENGTH);
+            expect(resolved.maxAttempts).toBe(DEFAULT_OTP_MAX_ATTEMPTS);
+            expect(resolved.ttl).toBe(600);
+            expect(resolved.alphabet).toHaveLength(31);
+            expect(resolved.issue).toEqual({ maxAttempts: 5, windowSeconds: 900 });
+            expect(resolved.issueTotal).toEqual({ maxAttempts: 20, windowSeconds: 900 });
+            expect(resolved.verify).toEqual({ maxAttempts: 20, windowSeconds: 3600 });
+            expect(DEFAULT_OTP_ISSUE_TOTAL_LIMIT).toEqual(resolved.issueTotal);
+            expect(resolved.user).toEqual({ maxAttempts: 50, windowSeconds: 3600 });
+            expect(DEFAULT_OTP_ISSUE_LIMIT).toEqual(resolved.issue);
+            expect(DEFAULT_OTP_VERIFY_LIMIT).toEqual(resolved.verify);
+            expect(DEFAULT_OTP_USER_LIMIT).toEqual(resolved.user);
+            expect(resolveOTPConfig()).toBe(resolved);
+
+            const config: OTPConfig = { length: 8 };
+            expect(resolveOTPConfig(config)).toBe(resolveOTPConfig(config));
+        });
+
+        it("Rejects an alphabet that is not printable ASCII.", () => {
+            for (const alphabet of ["ABC DEF", "ABCDÉF", "ABCDEF\n", "ABCD\u{1F600}EF", "ABCD\u0000EF", "ABCDEFé", ""]) {
+                expect(() => resolveOTPConfig({ alphabet })).toThrow(/alphabet/);
+            }
+            expect(() => resolveOTPConfig({ alphabet: 5 as any })).toThrow(/alphabet/);
+        });
+
+        it("Rejects an alphabet containing a hyphen, since hyphens are stripped from submitted codes.", () => {
+            expect(() => resolveOTPConfig({ alphabet: "ABCDEF-" })).toThrow(/alphabet/);
+        });
+
+        it("Accepts any other printable ASCII symbol, and upper-cases and de-duplicates the alphabet.", () => {
+            expect(resolveOTPConfig({ alphabet: "!~abAB#", length: 10 }).alphabet).toEqual(["!", "~", "A", "B", "#"]);
+        });
+
+        it("Rejects a length outside 4 to 64.", () => {
+            for (const length of [0, 3, 65, 6.5, "six" as any, "6.5" as any, "", {} as any, NaN]) {
+                expect(() => resolveOTPConfig({ length })).toThrow(/length/);
+            }
+        });
+
+        it("Rejects fewer than 20 bits of entropy.", () => {
+            // 4 * log2(31) = 19.8 bits
+            expect(() => resolveOTPConfig({ length: 4 })).toThrow(/entropy/);
+            // 19 * 1 bit is not enough either, nor is a 2-symbol alphabet at 19 characters.
+            expect(() => resolveOTPConfig({ length: 19, alphabet: "01" })).toThrow(/entropy/);
+            // 20 * 1 bit is exactly enough.
+            expect(resolveOTPConfig({ length: 20, alphabet: "01" }).length).toBe(20);
+            // 5 * log2(31) = 24.8 bits
+            expect(resolveOTPConfig({ length: 5 }).length).toBe(5);
+        });
+
+        it("Rejects a TTL of zero, a negative TTL and one over an hour.", () => {
+            expect(() => resolveOTPConfig({ ttl: 0 })).toThrow(/ttl/);
+            expect(() => resolveOTPConfig({ ttl: -1 })).toThrow(/ttl/);
+            expect(() => resolveOTPConfig({ ttl: 3601 })).toThrow(/ttl/);
+            expect(() => resolveOTPConfig({ ttl: "61m" })).toThrow(/ttl/);
+        });
+
+        it("Rejects maxAttempts outside 1 to 10.", () => {
+            for (const maxAttempts of [0, -1, 11, 2.5, NaN, "five" as any, "5.5" as any, "11" as any, [] as any]) {
+                expect(() => resolveOTPConfig({ maxAttempts })).toThrow(/maxAttempts/);
+            }
+            expect(resolveOTPConfig({ maxAttempts: 1 }).maxAttempts).toBe(1);
+            expect(resolveOTPConfig({ maxAttempts: 10 }).maxAttempts).toBe(10);
+        });
+
+        it("Rejects an invalid limit and honors a valid one.", () => {
+            for (const name of ["issue", "issueTotal", "verify", "user"]) {
+                for (const bad of [
+                    { maxAttempts: 0 },
+                    { maxAttempts: 1.5 },
+                    { maxAttempts: "many" },
+                    { windowSeconds: 0 },
+                    { windowSeconds: 0.5 },
+                    { windowSeconds: "soon" },
+                ]) {
+                    expect(() => resolveOTPConfig({ limits: { [name]: bad } })).toThrow(new RegExp(`limits:${name}`));
+                }
+            }
+            const resolved = resolveOTPConfig({ limits: { issue: { maxAttempts: 2 }, user: { windowSeconds: 60 } } });
+            expect(resolved.issue).toEqual({ maxAttempts: 2, windowSeconds: 900 });
+            expect(resolved.user).toEqual({ maxAttempts: 50, windowSeconds: 60 });
+            expect(resolved.verify).toEqual({ maxAttempts: 20, windowSeconds: 3600 });
+        });
+
+        it("Accepts numbers given as strings, as environment variables are, and still rejects garbage.", () => {
+            const resolved = resolveOTPConfig({
+                length: "8" as any,
+                maxAttempts: " 3 " as any,
+                ttl: "300",
+                limits: {
+                    issue: { maxAttempts: "2" as any, windowSeconds: "60" as any },
+                    user: { maxAttempts: "7" as any },
+                },
+            });
+            expect(resolved.length).toBe(8);
+            expect(resolved.maxAttempts).toBe(3);
+            expect(resolved.ttl).toBe(300);
+            expect(resolved.issue).toEqual({ maxAttempts: 2, windowSeconds: 60 });
+            expect(resolved.user).toEqual({ maxAttempts: 7, windowSeconds: 3600 });
+            expect(() => resolveOTPConfig({ length: "8abc" as any })).toThrow(/length/);
+            expect(() => resolveOTPConfig({ maxAttempts: "3x" as any })).toThrow(/maxAttempts/);
+        });
+
+        it("Is not re-validated on every call: the result for a config object is reused.", () => {
+            const config: OTPConfig = { length: 6 };
+            const first = resolveOTPConfig(config);
+            // Mutating the object afterwards does not matter, validation happened once.
+            config.length = 1;
+            expect(resolveOTPConfig(config)).toBe(first);
+        });
+    });
+
+    describe("counters integration", () => {
+        /** A Redis connection (the fake, with only Redis 7 commands) for a counters instance. */
+        const connect = (counters: OTPCounters, redis: FakeRedisClient): OTPCounters => {
+            (counters as any).connMgr = { connections: new Map([["cache", redis]]) };
+            return counters;
+        };
+
+        let counters: OTPCounters;
+        beforeEach(() => {
+            counters = new OTPCounters();
+        });
+        const ctx = (extra: Partial<OTPContext> = {}): OTPContext => ({ counters, ...extra });
+
+        it("Counts verification against the contact and the user the code was issued for, with the configured limits.", async () => {
+            const throttle = vi.spyOn(counters, "throttle");
+            const req = makeReq();
+            const code = await generateOTP(req, { id: "Contact" }, undefined, "login", "u1");
+            await ver(req, { id: "Contact", token: code }, undefined, "login", ctx());
+            const contact = counterKeyPart("contact");
+            const address = counterKeyPart("unknown");
+            const owner = counterKeyPart("u1");
+            expect(throttle).toHaveBeenCalledWith(`verify:login:${contact}:${address}`, DEFAULT_OTP_VERIFY_LIMIT);
+            expect(throttle).toHaveBeenCalledWith(`verify-total:login:${contact}`, DEFAULT_OTP_VERIFY_TOTAL_LIMIT);
+            expect(throttle).toHaveBeenCalledWith(`user:login:${owner}:${address}`, DEFAULT_OTP_USER_LIMIT);
+            expect(throttle).toHaveBeenCalledWith(`user-total:login:${owner}`, DEFAULT_OTP_USER_TOTAL_LIMIT);
+            expect(DEFAULT_OTP_VERIFY_LIMIT).toEqual({ maxAttempts: 20, windowSeconds: 3600 });
+            expect(DEFAULT_OTP_VERIFY_TOTAL_LIMIT).toEqual({ maxAttempts: 60, windowSeconds: 3600 });
+            expect(DEFAULT_OTP_USER_LIMIT).toEqual({ maxAttempts: 50, windowSeconds: 3600 });
+            expect(DEFAULT_OTP_USER_TOTAL_LIMIT).toEqual({ maxAttempts: 150, windowSeconds: 3600 });
+        });
+
+        it("Counts verification per address, so one address cannot drain the allowance of everyone else.", async () => {
+            const config = { limits: { verify: { maxAttempts: 3, windowSeconds: 60 } } };
+            const at = (address: string) => makeReq({ socket: { remoteAddress: address } });
+            // The attacker's address spends its own 3 attempts across fresh codes, then is refused.
+            for (let i = 0; i < 3; i++) {
+                const req = at("10.0.0.1");
+                const code = await gen(req, { id: "c" }, config);
+                expect(await ver(req, { id: "c", token: wrongCode(code) }, config, "login", ctx())).toBe(false);
+            }
+            const attacker = at("10.0.0.1");
+            const attackerCode = await gen(attacker, { id: "c" }, config);
+            await expect(
+                ver(attacker, { id: "c", token: attackerCode }, config, "login", ctx()),
+            ).rejects.toMatchObject({ status: 429 });
+
+            // The contact's owner, from another address, is not locked out.
+            const owner = at("10.0.0.2");
+            const ownerCode = await gen(owner, { id: "c" }, config);
+            expect(await ver(owner, { id: "c", token: ownerCode }, config, "login", ctx())).toBe(true);
+        });
+
+        it("Caps verification against one contact across all addresses with verifyTotal.", async () => {
+            const config = {
+                limits: { verify: { maxAttempts: 2, windowSeconds: 60 }, verifyTotal: { maxAttempts: 3, windowSeconds: 60 } },
+            };
+            for (const address of ["10.0.0.1", "10.0.0.1", "10.0.0.2"]) {
+                const req = makeReq({ socket: { remoteAddress: address } });
+                const code = await gen(req, { id: "c" }, config);
+                expect(await ver(req, { id: "c", token: wrongCode(code) }, config, "login", ctx())).toBe(false);
+            }
+            const req = makeReq({ socket: { remoteAddress: "10.0.0.3" } });
+            const code = await gen(req, { id: "c" }, config);
+            await expect(ver(req, { id: "c", token: code }, config, "login", ctx())).rejects.toMatchObject({
+                status: 429,
+            });
+        });
+
+        it("Counts the per-user budget per address too, and caps it across addresses with userTotal.", async () => {
+            const config = {
+                limits: { user: { maxAttempts: 1, windowSeconds: 60 }, userTotal: { maxAttempts: 2, windowSeconds: 60 } },
+            };
+            const attempt = async (address: string, id: string) => {
+                const req = makeReq({ socket: { remoteAddress: address } });
+                const code = await generateOTP(req, { id }, config, "login", "u1");
+                return ver(req, { id, token: wrongCode(code) }, config, "login", ctx());
+            };
+            expect(await attempt("10.0.0.1", "a@example.com")).toBe(false);
+            // The same address has used its own allowance, while another address still has its own ...
+            await expect(attempt("10.0.0.1", "b@example.com")).rejects.toMatchObject({ status: 429 });
+            expect(await attempt("10.0.0.2", "b@example.com")).toBe(false);
+            // ... until the user-wide total is spent as well.
+            await expect(attempt("10.0.0.3", "c@example.com")).rejects.toMatchObject({ status: 429 });
+        });
+
+        it("Skips the per-user counter when the challenge does not name a user.", async () => {
+            const throttle = vi.spyOn(counters, "throttle");
+            const req = makeReq();
+            const code = await gen(req, { id: "c" });
+            await ver(req, { id: "c", token: code }, undefined, "login", ctx());
+            expect(throttle.mock.calls.some((c) => c[0].startsWith("user:"))).toBe(false);
+        });
+
+        it("Does not spend the verification budget unless the session holds a code for that contact and purpose.", async () => {
+            const throttle = vi.spyOn(counters, "throttle");
+
+            // Nothing pending at all.
+            await expect(ver(makeReq(), { id: "c", token: "ABC234" }, undefined, "login", ctx())).rejects.toThrow(
+                /Invalid authentication request/,
+            );
+            // A code pending for another contact.
+            const other = makeReq();
+            await gen(other, { id: "someone-else" });
+            await expect(ver(other, { id: "c", token: "ABC234" }, undefined, "login", ctx())).rejects.toThrow(
+                /Invalid authentication request/,
+            );
+            // A code pending for another purpose.
+            const purpose = makeReq();
+            await gen(purpose, { id: "c" }, undefined, "register");
+            await expect(ver(purpose, { id: "c", token: "ABC234" }, undefined, "login", ctx())).rejects.toThrow(
+                /Invalid authentication request/,
+            );
+
+            expect(throttle).not.toHaveBeenCalled();
+        });
+
+        it("Refuses further verification against a contact once the per-contact limit is exceeded, across codes.", async () => {
+            const config = { limits: { verify: { maxAttempts: 3, windowSeconds: 60 } } };
+            // Each iteration is a fresh code (as a resend would be), so only the aggregate counter can stop it.
+            for (let i = 0; i < 3; i++) {
+                const req = makeReq();
+                const code = await gen(req, { id: "c" }, config);
+                expect(await ver(req, { id: "c", token: wrongCode(code) }, config, "login", ctx())).toBe(false);
+            }
+            const req = makeReq();
+            const code = await gen(req, { id: "c" }, config);
+            await expect(ver(req, { id: "c", token: code }, config, "login", ctx())).rejects.toMatchObject({
+                status: 429,
+            });
+        });
+
+        it("Keeps the budgets of different purposes apart, even for the same id.", async () => {
+            const config = { limits: { verify: { maxAttempts: 1, windowSeconds: 60 } } };
+            const login = makeReq();
+            const loginCode = await gen(login, { id: "same" }, config, "login");
+            expect(await ver(login, { id: "same", token: wrongCode(loginCode) }, config, "login", ctx())).toBe(false);
+            const again = makeReq();
+            await gen(again, { id: "same" }, config, "login");
+            await expect(ver(again, { id: "same", token: "ABC234" }, config, "login", ctx())).rejects.toMatchObject({
+                status: 429,
+            });
+
+            // The exhausted login budget does not touch the MFA budget for the same id.
+            const mfa = makeReq();
+            const mfaCode = await gen(mfa, { id: "same" }, config, "mfa");
+            expect(await ver(mfa, { id: "same", token: mfaCode }, config, "mfa", ctx())).toBe(true);
+        });
+
+        it("Refuses further verification for a user once the per-user limit is exceeded, across every contact.", async () => {
+            const config = { limits: { user: { maxAttempts: 3, windowSeconds: 60 } } };
+            // Three different aliases of the same account.
+            for (const id of ["a@example.com", "b@example.com", "+15551234567"]) {
+                const req = makeReq();
+                const code = await generateOTP(req, { id }, config, "login", "u1");
+                expect(await ver(req, { id, token: wrongCode(code) }, config, "login", ctx())).toBe(false);
+            }
+            const req = makeReq();
+            const code = await generateOTP(req, { id: "d@example.com" }, config, "login", "u1");
+            await expect(ver(req, { id: "d@example.com", token: code }, config, "login", ctx())).rejects.toMatchObject({
+                status: 429,
+            });
+            // Another user is unaffected.
+            const other = makeReq();
+            const otherCode = await generateOTP(other, { id: "e@example.com" }, config, "login", "u2");
+            expect(await ver(other, { id: "e@example.com", token: otherCode }, config, "login", ctx())).toBe(true);
+        });
+
+        it("Stops a guesser racing stale copies of one challenge at maxAttempts, wherever the session says the count is.", async () => {
+            // A Redis-backed session store hands every parallel request its own copy with attempts: 0.
+            const origin = makeReq();
+            const code = await gen(origin, { id: "c" });
+            const challenge = (origin.session as any).otp;
+
+            const results: boolean[] = [];
+            for (let i = 0; i < 8; i++) {
+                const copy = makeReq({ session: { otp: { ...challenge } } as any });
+                results.push(await ver(copy, { id: "c", token: wrongCode(code) }, undefined, "login", ctx()));
+            }
+            expect(results.every((r) => r === false)).toBe(true);
+
+            // The 6th and later guesses were refused by the atomic counter, so even the right code fails now, on a
+            // pristine copy that still says attempts: 0.
+            const late = makeReq({ session: { otp: { ...challenge } } as any });
+            expect(await ver(late, { id: "c", token: code }, undefined, "login", ctx())).toBe(false);
+            expect(isOTPChallengePending(late)).toBe(false);
+            expect(await counters.increment(`attempts:${challenge.salt}`, 600)).toBe(10);
+        });
+
+        it("Lets exactly maxAttempts parallel copies guess, and still accepts the right code among them.", async () => {
+            const origin = makeReq();
+            const code = await gen(origin, { id: "c" });
+            const challenge = (origin.session as any).otp;
+
+            for (let i = 0; i < 4; i++) {
+                const copy = makeReq({ session: { otp: { ...challenge } } as any });
+                expect(await ver(copy, { id: "c", token: wrongCode(code) }, undefined, "login", ctx())).toBe(false);
+            }
+            const last = makeReq({ session: { otp: { ...challenge } } as any });
+            expect(await ver(last, { id: "c", token: code }, undefined, "login", ctx())).toBe(true);
+        });
+
+        it("Redeems a code once even when a stale write-back resurrects the consumed challenge.", async () => {
+            const origin = makeReq();
+            const code = await gen(origin, { id: "c" });
+            const challenge = (origin.session as any).otp;
+
+            const first = makeReq({ session: { otp: { ...challenge } } as any });
+            expect(await ver(first, { id: "c", token: code }, undefined, "login", ctx())).toBe(true);
+
+            // The session store "restores" the pre-consumption challenge, as a late wrong-guess write would.
+            const replay = makeReq({ session: { otp: { ...challenge } } as any });
+            expect(await ver(replay, { id: "c", token: code }, undefined, "login", ctx())).toBe(false);
+            expect(isOTPChallengePending(replay)).toBe(false);
+        });
+
+        it("Lets only one of many parallel redemptions of the right code succeed.", async () => {
+            const origin = makeReq();
+            const code = await gen(origin, { id: "c" });
+            const challenge = (origin.session as any).otp;
+
+            const results = await Promise.all(
+                Array.from({ length: 5 }, () =>
+                    ver(makeReq({ session: { otp: { ...challenge } } as any }), { id: "c", token: code }, undefined, "login", ctx()),
+                ),
+            );
+            expect(results.filter(Boolean)).toHaveLength(1);
+        });
+
+        it("Keeps the claim and the guess counter even when rate limiting is disabled (rateLimit:enabled).", async () => {
+            (counters as any).rateLimitConfig = { enabled: false };
+            const increment = vi.spyOn(counters, "increment");
+
+            // The throttles are off: any number of verifications against one contact is allowed ...
+            const config = { limits: { verify: { maxAttempts: 1, windowSeconds: 60 } } };
+            for (let i = 0; i < 3; i++) {
+                const req = makeReq();
+                const code = await gen(req, { id: "c" }, config);
+                expect(await ver(req, { id: "c", token: wrongCode(code) }, config, "login", ctx())).toBe(false);
+            }
+            // ... but the guess counter was still applied to each code, and a success is still claimed once.
+            expect(increment.mock.calls.filter((c) => c[0].startsWith("attempts:"))).toHaveLength(3);
+            const origin = makeReq();
+            const code = await gen(origin, { id: "c" }, config);
+            const challenge = (origin.session as any).otp;
+            const first = makeReq({ session: { otp: { ...challenge } } as any });
+            expect(await ver(first, { id: "c", token: code }, config, "login", ctx())).toBe(true);
+            const replay = makeReq({ session: { otp: { ...challenge } } as any });
+            expect(await ver(replay, { id: "c", token: code }, config, "login", ctx())).toBe(false);
+        });
+
+        it("Propagates a counter failure, rather than failing open.", async () => {
+            const req = makeReq();
+            const code = await gen(req, { id: "c" });
+            const challenge = (req.session as any).otp;
+
+            vi.spyOn(counters, "increment").mockRejectedValueOnce(new Error("redis down"));
+            await expect(ver(req, { id: "c", token: code }, undefined, "login", ctx())).rejects.toThrow(/redis down/);
+
+            vi.spyOn(counters, "claim").mockRejectedValueOnce(new Error("redis down"));
+            const again = makeReq({ session: { otp: { ...challenge } } as any });
+            await expect(ver(again, { id: "c", token: code }, undefined, "login", ctx())).rejects.toThrow(/redis down/);
+        });
+
+        it("Keeps working from the session alone when there are no counters.", async () => {
+            const req = makeReq();
+            const code = await gen(req, { id: "c" });
+            expect(await ver(req, { id: "c", token: wrongCode(code) }, undefined, "login", {})).toBe(false);
+            expect(await ver(req, { id: "c", token: code }, undefined, "login", {})).toBe(true);
+        });
+
+        describe("two server instances sharing one Redis", () => {
+            let redis: FakeRedisClient;
+            let a: OTPCounters;
+            let b: OTPCounters;
+            beforeEach(() => {
+                redis = new FakeRedisClient(1);
+                a = connect(new OTPCounters(), redis);
+                b = connect(new OTPCounters(), redis);
+            });
+
+            it("Redeems a code once across both instances, however the requests are spread.", async () => {
+                const origin = makeReq();
+                const code = await gen(origin, { id: "c" });
+                const challenge = (origin.session as any).otp;
+
+                const results = await Promise.all(
+                    Array.from({ length: 8 }, (_, i) =>
+                        ver(makeReq({ session: { otp: { ...challenge } } as any }), { id: "c", token: code }, undefined, "login", {
+                            counters: i % 2 ? a : b,
+                        }),
+                    ),
+                );
+                expect(results.filter(Boolean)).toHaveLength(1);
+            });
+
+            it("Counts guesses against one code across both instances.", async () => {
+                const origin = makeReq();
+                const code = await gen(origin, { id: "c" });
+                const challenge = (origin.session as any).otp;
+
+                const results = await Promise.all(
+                    Array.from({ length: 12 }, (_, i) =>
+                        ver(makeReq({ session: { otp: { ...challenge } } as any }), { id: "c", token: wrongCode(code) }, undefined, "login", {
+                            counters: i % 2 ? a : b,
+                        }),
+                    ),
+                );
+                expect(results.every((r) => r === false)).toBe(true);
+                // 12 guesses were made against a code that tolerates 5, and the counter saw every one of them.
+                expect(redis.values.get(`auth:otp:attempts:${challenge.salt}`)).toBe("12");
+                const late = makeReq({ session: { otp: { ...challenge } } as any });
+                expect(await ver(late, { id: "c", token: code }, undefined, "login", { counters: a })).toBe(false);
+            });
+
+            it("Shares the dedicated limits between the instances.", async () => {
+                const config = { limits: { verify: { maxAttempts: 4, windowSeconds: 60 } } };
+                let refused = 0;
+                for (let i = 0; i < 6; i++) {
+                    const req = makeReq();
+                    const code = await gen(req, { id: "c" }, config);
+                    try {
+                        await ver(req, { id: "c", token: wrongCode(code) }, config, "login", { counters: i % 2 ? a : b });
+                    } catch (err: any) {
+                        expect(err.status).toBe(429);
+                        refused++;
+                    }
+                }
+                expect(refused).toBe(2);
+            });
+
+            it("Uses only commands available since Redis 7, never INCREX.", async () => {
+                const req = makeReq();
+                const code = await gen(req, { id: "c" });
+                await ver(req, { id: "c", token: code }, undefined, "login", { counters: a });
+                expect(new Set(redis.commands)).toEqual(new Set(["EXEC", "SET"]));
+            });
+        });
+    });
+
+    describe("enforceOTPIssueLimit", () => {
+        let counters: OTPCounters;
+        beforeEach(() => {
+            counters = new OTPCounters();
+        });
+        const from = (address: string) => makeReq({ socket: { remoteAddress: address } });
+        const enforce = (req: HttpRequest, id: string, config?: OTPConfig, purpose: OTPPurpose = "login") =>
+            enforceOTPIssueLimit(req, id, config, purpose, { counters });
+
+        it("Is a no-op without counters.", async () => {
+            await expect(enforceOTPIssueLimit(makeReq(), "c", undefined, "login")).resolves.toBeUndefined();
+            await expect(enforceOTPIssueLimit(makeReq(), "c", undefined, "login", {})).resolves.toBeUndefined();
+        });
+
+        it("Allows 5 codes per contact and address and refuses the 6th by default, but not for another address.", async () => {
+            for (let i = 0; i < 5; i++) {
+                await enforce(from("10.0.0.1"), "c@example.com");
+            }
+            await expect(enforce(from("10.0.0.1"), "c@example.com")).rejects.toMatchObject({ status: 429 });
+            // A different address, or a different contact, has its own budget.
+            await expect(enforce(from("10.0.0.2"), "c@example.com")).resolves.toBeUndefined();
+            await expect(enforce(from("10.0.0.1"), "d@example.com")).resolves.toBeUndefined();
+        });
+
+        it("Caps the codes sent to one contact from all addresses together, at a higher number.", async () => {
+            // 20 codes from 4 addresses (5 each) are fine; the 21st from a fresh address is not.
+            for (let i = 0; i < 20; i++) {
+                await enforce(from(`10.0.0.${i % 4}`), "c@example.com");
+            }
+            await expect(enforce(from("10.0.0.99"), "c@example.com")).rejects.toMatchObject({ status: 429 });
+        });
+
+        it("Does not charge the contact-wide allowance for a request its own address already exhausted.", async () => {
+            const throttle = vi.spyOn(counters, "throttle");
+            for (let i = 0; i < 5; i++) {
+                await enforce(from("10.0.0.1"), "c");
+            }
+            throttle.mockClear();
+            await expect(enforce(from("10.0.0.1"), "c")).rejects.toMatchObject({ status: 429 });
+            expect(throttle).toHaveBeenCalledTimes(1);
+        });
+
+        it("Keeps a separate allowance for every purpose, and ignores the case of the contact.", async () => {
+            for (let i = 0; i < 5; i++) {
+                await enforce(from("10.0.0.1"), "C@Example.com", undefined, "login");
+            }
+            await expect(enforce(from("10.0.0.1"), "c@example.com", undefined, "login")).rejects.toMatchObject({
+                status: 429,
+            });
+            await expect(enforce(from("10.0.0.1"), "c@example.com", undefined, "mfa")).resolves.toBeUndefined();
+            await expect(enforce(from("10.0.0.1"), "c@example.com", undefined, "elevate")).resolves.toBeUndefined();
+        });
+
+        it("Honors configured limits.", async () => {
+            const config = { limits: { issue: { maxAttempts: 2, windowSeconds: 30 }, issueTotal: { maxAttempts: 3 } } };
+            await enforce(from("10.0.0.1"), "c", config);
+            await enforce(from("10.0.0.1"), "c", config);
+            await expect(enforce(from("10.0.0.1"), "c", config)).rejects.toMatchObject({ status: 429 });
+            await enforce(from("10.0.0.2"), "c", config);
+            await expect(enforce(from("10.0.0.3"), "c", config)).rejects.toMatchObject({ status: 429 });
+        });
+
+        it("Rejects an id that is not a bounded, non-empty string, and an unknown purpose.", async () => {
+            for (const id of ["", undefined, 5, {}, "x".repeat(257)]) {
+                await expect(enforce(makeReq(), id as any)).rejects.toThrow(/Invalid authentication request/);
+            }
+            await expect(enforce(makeReq(), "x".repeat(256))).resolves.toBeUndefined();
+            await expect(enforce(makeReq(), "c", undefined, "nope" as any)).rejects.toThrow(/purpose/);
+        });
+    });
+
+    describe("clientRateLimitKey", () => {
+        it("Puts a client supplied identifier in a namespace of its own.", () => {
+            expect(clientRateLimitKey("alice")).toBe("id:alice");
+            expect(clientRateLimitKey("elevate:some-uid")).toBe("id:elevate:some-uid");
+            expect(clientRateLimitKey("otp:user:some-uid")).toBe("id:otp:user:some-uid");
+            // No client value can ever start with an internal prefix.
+            for (const value of ["ip:1.2.3.4", "oauth_token:x", "elevate:u", "", "id:"]) {
+                expect(clientRateLimitKey(value).startsWith("id:")).toBe(true);
+            }
+        });
+
+        it("Bounds long values by hashing them, and stringifies values that are not strings.", () => {
+            const long = clientRateLimitKey("x".repeat(5000));
+            expect(long).toMatch(/^idh:sha256:[0-9a-f]{64}$/);
+            expect(clientRateLimitKey("x".repeat(5000))).toBe(long);
+            expect(clientRateLimitKey("x".repeat(5001))).not.toBe(long);
+            expect(clientRateLimitKey("x".repeat(256))).toBe("id:" + "x".repeat(256));
+            expect(clientRateLimitKey({ a: 1 })).toBe("id:[object Object]");
+            expect(clientRateLimitKey(undefined)).toBe("id:undefined");
+        });
+    });
+
+    describe("counter key hygiene", () => {
+        it("Gives hashed identifiers a prefix that no literal identifier can spell.", () => {
+            // A client typing the exact text of a hashed key lands in the literal namespace, not on the hash.
+            const hashed = clientRateLimitKey("y".repeat(300));
+            const digest = hashed.slice("idh:sha256:".length);
+            expect(hashed.startsWith("id:")).toBe(false);
+            expect(clientRateLimitKey(`sha256:${digest}`)).toBe(`id:sha256:${digest}`);
+            expect(clientRateLimitKey(`sha256:${digest}`)).not.toBe(hashed);
+            expect(clientRateLimitKey(`idh:sha256:${digest}`)).toBe(`id:idh:sha256:${digest}`);
+        });
+
+        it("Hashes the subject and the address separately, so IPv6 addresses cannot collide with other pairs.", async () => {
+            const counters = new OTPCounters();
+            const keys: string[] = [];
+            vi.spyOn(counters, "throttle").mockImplementation(async (key: string) => {
+                keys.push(key);
+            });
+            const at = (address: string) => makeReq({ socket: { remoteAddress: address } });
+            // Joined with ":", both pairs would read "login:a:b:c:d".
+            await enforceOTPIssueLimit(at("b:c:d"), "a", undefined, "login", { counters });
+            await enforceOTPIssueLimit(at("c:d"), "a:b", undefined, "login", { counters });
+            await enforceOTPIssueLimit(at("2001:db8::1"), "a", undefined, "login", { counters });
+
+            const perAddress = keys.filter((key) => key.startsWith("issue:"));
+            expect(new Set(perAddress).size).toBe(3);
+            for (const key of perAddress) {
+                expect(key).toMatch(/^issue:login:[0-9a-f]{64}:[0-9a-f]{64}$/);
+            }
+            expect(keys.filter((key) => key.startsWith("issue-total:"))[0]).toMatch(
+                /^issue-total:login:[0-9a-f]{64}$/,
+            );
+        });
+
+        it("Hashes the verification keys the same way.", async () => {
+            const counters = new OTPCounters();
+            const keys: string[] = [];
+            vi.spyOn(counters, "throttle").mockImplementation(async (key: string) => {
+                keys.push(key);
+            });
+            const req = makeReq({ socket: { remoteAddress: "2001:db8::1" } });
+            const code = await generateOTP(req, { id: "a:b" }, undefined, "login", "u:1");
+            await ver(req, { id: "a:b", token: code }, undefined, "login", { counters });
+            expect(keys).toHaveLength(4);
+            expect(keys[0]).toMatch(/^verify:login:[0-9a-f]{64}:[0-9a-f]{64}$/);
+            expect(keys[1]).toMatch(/^verify-total:login:[0-9a-f]{64}$/);
+            expect(keys[2]).toMatch(/^user:login:[0-9a-f]{64}:[0-9a-f]{64}$/);
+            expect(keys[3]).toMatch(/^user-total:login:[0-9a-f]{64}$/);
+        });
+    });
+
+    describe("isOTPChallengePending", () => {
+        it("Is false without a session or a challenge, and true while one is pending.", async () => {
+            expect(isOTPChallengePending(makeReq({ session: undefined }))).toBe(false);
+            const req = makeReq();
+            expect(isOTPChallengePending(req)).toBe(false);
+            await gen(req, { id: "c" });
+            expect(isOTPChallengePending(req)).toBe(true);
         });
     });
 });
