@@ -356,12 +356,11 @@ export abstract class DefaultAccounts<
                     written = false;
                     this.logger.error(
                         `Failed to write the credentials for account '${account.name}' to '${filePath}' ` +
-                            `(${err?.code ?? "unknown error"}: ${err?.message ?? err}). The account was created, ` +
-                            `but its password was not saved. Set 'auth:password_file' to a writable path.`
+                            `(${err?.code ?? "unknown error"}: ${err?.message ?? err}).`,
                     );
                 }
                 this.logger.info(`Name: ${account.name}`);
-                this.logger.info(written ? `Password: See '${filePath}'` : `Password: Not saved, see the error above`);
+                this.logger.info(written ? `Password: See '${filePath}'` : `Password: '${account.password}'`);
                 this.logger.info(`Roles: ${account.roles}`);
                 this.logger.info("================================================================================");
             } else {

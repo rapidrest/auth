@@ -817,7 +817,9 @@ describe("DefaultAccounts Tests", () => {
                 const accounts: DefaultAccountConfig[] = [
                     { name: "admin", password: VALID_PASSWORD, roles: ["admin"] },
                 ];
+                const logger = { info: vi.fn(), error: vi.fn() };
                 const job = setupDefaultAccounts(accounts, {
+                    logger,
                     secretRepo: { find: vi.fn().mockResolvedValue([]), create: secretCreate },
                 });
 
@@ -826,6 +828,11 @@ describe("DefaultAccounts Tests", () => {
                 const filePath: string = path.resolve((job as any).passwordFile);
                 const fileContents: string = fs.readFileSync(filePath, { encoding: "utf-8" });
                 expect(fileContents).toContain(`Name=admin,Password=${VALID_PASSWORD}`);
+                // The password must not leak into the logs when the file write succeeds.
+                const infoLines = logger.info.mock.calls.map((call: any[]) => call[0]);
+                expect(infoLines.join(" ")).not.toContain(VALID_PASSWORD);
+                expect(infoLines).toContain(`Password: See '${filePath}'`);
+                expect(logger.error).not.toHaveBeenCalled();
 
                 fs.unlinkSync(filePath);
             });
@@ -875,7 +882,7 @@ describe("DefaultAccounts Tests", () => {
                 expect(message).toContain("ENOENT");
                 expect(message).not.toContain(VALID_PASSWORD);
                 const infoLines = logger.info.mock.calls.map((call: any[]) => call[0]);
-                expect(infoLines.join(" ")).not.toContain(VALID_PASSWORD);
+                expect(infoLines).toContain(`Password: '${VALID_PASSWORD}'`);
                 expect(infoLines).not.toContain(`Password: See '${passwordFile}'`);
                 expect(fs.existsSync(passwordFile)).toBe(false);
             });

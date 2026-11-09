@@ -7,8 +7,8 @@
 * `DefaultAccounts` no longer fails to start when `auth:password_file` can't be written, for example in a container
   whose working directory is read-only. The accounts and their secrets already exist at that point, so the write is
   now best-effort. A failure logs an error naming the resolved path and the error code, with a hint to set
-  `auth:password_file` to a writable path. The job then finishes normally. The password isn't logged in that case,
-  as before, so the account's password has to be reset.
+  `auth:password_file` to a writable path. The job then finishes normally. In that case the generated password is
+  logged in the account summary. Note that this puts a secret in the logs when the file can't be written.
 
 ## v3.0.0
 
