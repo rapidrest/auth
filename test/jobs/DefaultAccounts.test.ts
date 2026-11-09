@@ -849,6 +849,37 @@ describe("DefaultAccounts Tests", () => {
                 fs.unlinkSync(passwordFile);
             });
 
+            it("Succeeds, creates the account and logs an error naming the path when the password file is unwritable.", async () => {
+                // A path inside a directory that does not exist fails with ENOENT on every platform.
+                const passwordFile: string = path.resolve("no-such-dir-for-passwords", "passwords");
+                const secretCreate = vi.fn().mockResolvedValue(undefined);
+                const userCreate = vi.fn().mockResolvedValue({ uid: "user-1", roles: ["admin"] });
+                const accounts: DefaultAccountConfig[] = [
+                    { name: "admin", password: VALID_PASSWORD, roles: ["admin"] },
+                ];
+                const logger = { info: vi.fn(), error: vi.fn() };
+                const job = setupDefaultAccounts(accounts, {
+                    logger,
+                    passwordFile,
+                    secretRepo: { find: vi.fn().mockResolvedValue([]), create: secretCreate },
+                    userRepo: { findOne: vi.fn(), create: userCreate },
+                });
+
+                await expect(job.start()).resolves.not.toThrow();
+
+                expect(userCreate).toHaveBeenCalledTimes(1);
+                expect(secretCreate).toHaveBeenCalledTimes(1);
+                expect(logger.error).toHaveBeenCalledTimes(1);
+                const message: string = logger.error.mock.calls[0][0];
+                expect(message).toContain(passwordFile);
+                expect(message).toContain("ENOENT");
+                expect(message).not.toContain(VALID_PASSWORD);
+                const infoLines = logger.info.mock.calls.map((call: any[]) => call[0]);
+                expect(infoLines.join(" ")).not.toContain(VALID_PASSWORD);
+                expect(infoLines).not.toContain(`Password: See '${passwordFile}'`);
+                expect(fs.existsSync(passwordFile)).toBe(false);
+            });
+
             it("Logs the generated account information when no passwordFile is set once a password secret is created.", async () => {
                 const secretCreate = vi.fn().mockResolvedValue(undefined);
                 const accounts: DefaultAccountConfig[] = [

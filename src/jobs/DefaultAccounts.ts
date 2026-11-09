@@ -341,15 +341,27 @@ export abstract class DefaultAccounts<
             // if `passwordFile` is not present, this gets written exactly once to the log.
             if (this.passwordFile) {
                 const filePath: string = path.resolve(this.passwordFile);
-                await fs.appendFile(
-                    filePath,
-                    `Name=${account.name},Password=${account.password},Roles=${account.roles}\n`,
-                    {
-                        encoding: "utf-8",
-                    }
-                );
+                // Best-effort: the account and its secret already exist, so an unwritable location (e.g. a
+                // read-only working directory in a container) must not fail the job.
+                let written: boolean = true;
+                try {
+                    await fs.appendFile(
+                        filePath,
+                        `Name=${account.name},Password=${account.password},Roles=${account.roles}\n`,
+                        {
+                            encoding: "utf-8",
+                        }
+                    );
+                } catch (err: any) {
+                    written = false;
+                    this.logger.error(
+                        `Failed to write the credentials for account '${account.name}' to '${filePath}' ` +
+                            `(${err?.code ?? "unknown error"}: ${err?.message ?? err}). The account was created, ` +
+                            `but its password was not saved. Set 'auth:password_file' to a writable path.`
+                    );
+                }
                 this.logger.info(`Name: ${account.name}`);
-                this.logger.info(`Password: See '${filePath}'`);
+                this.logger.info(written ? `Password: See '${filePath}'` : `Password: Not saved, see the error above`);
                 this.logger.info(`Roles: ${account.roles}`);
                 this.logger.info("================================================================================");
             } else {
