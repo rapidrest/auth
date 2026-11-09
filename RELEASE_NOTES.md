@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v3.0.1
+
 ### Fixed
 
 * `DefaultAccounts` no longer fails to start when `auth:password_file` can't be written, for example in a container

@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.1] - 2026-11-09
+
+### Added
+- Added a test of the DefaultAccounts password file write failure
+- Added the DefaultAccounts fix to the release notes
+
+### Changed
+- DefaultAccounts now prints the password to log when it fails to write the password file
+
+### Fixed
+- Fixed the DefaultAccounts job failing at startup when it can't write the default account password file, by logging the path and error instead
+
 ## [3.0.0] - 2026-11-05
 
 ### Added
@@ -356,7 +368,8 @@ tagged.
 - `PasskeyStrategy` - WebAuthn based passkey authentication
 - `TOTPStrategy` - RFC 6238 Time-Based One Time Password authentication (e.g. Google Authenticator, etc.)
 
-[Unreleased]: https://github.com/rapidrest/auth/compare/v3.0.0...HEAD
+[Unreleased]: https://github.com/rapidrest/auth/compare/v3.0.1...HEAD
+[3.0.1]: https://github.com/rapidrest/auth/compare/v3.0.0...v3.0.1
 [3.0.0]: https://github.com/rapidrest/auth/compare/v2.0.0...v3.0.0
 [2.0.0]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.15...v2.0.0
 [2.0.0-beta.15]: https://github.com/rapidrest/auth/compare/v2.0.0-beta.14...v2.0.0-beta.15
